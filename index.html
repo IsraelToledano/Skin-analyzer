@@ -19,117 +19,215 @@
   ::-webkit-scrollbar{width:4px;}
   ::-webkit-scrollbar-thumb{background:#EDE8E3;border-radius:2px;}
   #root{min-height:100vh;}
+  #boot-status{position:fixed;inset:0;background:#FAF7F4;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:-apple-system,sans-serif;padding:24px;text-align:center;z-index:9999;}
+  #boot-status.hide{display:none;}
+  #boot-status .spinner{width:28px;height:28px;border:3px solid #EDE8E3;border-top-color:#E8837A;border-radius:50%;animation:spin 0.8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #boot-error{color:#D95F5F;font-size:13px;max-width:340px;line-height:1.5;font-family:monospace;white-space:pre-wrap;text-align:left;background:#fff;border:1px solid #D95F5F33;border-radius:10px;padding:14px;margin-top:10px;display:none;}
 </style>
 </head>
 <body>
+<div id="boot-status">
+  <div class="spinner"></div>
+  <div style="color:#9E8E87;font-size:13px;font-family:-apple-system,sans-serif;">Loading Skin Ritual…</div>
+  <div id="boot-error"></div>
+</div>
 <div id="root"></div>
 
+<!-- React + ReactDOM (UMD production builds) — no Babel needed, JSX is pre-compiled below -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-<script type="text/babel" data-presets="react">
-const { useState, useRef, useEffect, useCallback } = React;
+<script>
+  // Visible failure handling: if React/ReactDOM fail to load (CDN blocked, network issue),
+  // or if the app throws while mounting, show the actual error instead of a silent blank screen.
+  window.addEventListener('error', function(e){
+    var el = document.getElementById('boot-error');
+    if(el){
+      el.style.display = 'block';
+      el.textContent = 'Error: ' + (e.message || e.error || 'unknown') +
+        (e.filename ? ('\n' + e.filename + ':' + e.lineno) : '');
+    }
+  });
+  window.addEventListener('load', function(){
+    setTimeout(function(){
+      if(typeof React === 'undefined' || typeof ReactDOM === 'undefined'){
+        var el = document.getElementById('boot-error');
+        if(el){
+          el.style.display = 'block';
+          el.textContent = 'React failed to load from unpkg.com.\nCheck your internet connection and try again.\nIf this keeps happening, your network may be blocking unpkg.com.';
+        }
+      }
+    }, 4000);
+  });
+</script>
+
+<script>
+const {
+  useState,
+  useRef,
+  useEffect,
+  useCallback
+} = React;
 
 // ─── THEME (matches the Claude.ai / Skin Ritual artifact) ─────────────────────
 const T = {
-  bg:"#FAF7F4", card:"#FFFFFF", border:"#EDE8E3",
-  accent:"#E8837A", accentSoft:"#E8837A18", peach:"#F2A98A", peachSoft:"#F2A98A15",
-  text:"#2C2420", muted:"#9E8E87", faint:"#F5F0EC",
-  green:"#5BAA82", greenSoft:"#5BAA8215",
-  red:"#D95F5F", redSoft:"#D95F5F12",
-  blue:"#6B9FBF", blueSoft:"#6B9FBF15",
-  purple:"#9B8ABF", purpleSoft:"#9B8ABF15",
-  orange:"#E8A87A", orangeSoft:"#E8A87A15",
-  shadow:"0 2px 12px rgba(44,36,32,0.07)",
-  shadowMd:"0 4px 24px rgba(44,36,32,0.12)",
+  bg: "#FAF7F4",
+  card: "#FFFFFF",
+  border: "#EDE8E3",
+  accent: "#E8837A",
+  accentSoft: "#E8837A18",
+  peach: "#F2A98A",
+  peachSoft: "#F2A98A15",
+  text: "#2C2420",
+  muted: "#9E8E87",
+  faint: "#F5F0EC",
+  green: "#5BAA82",
+  greenSoft: "#5BAA8215",
+  red: "#D95F5F",
+  redSoft: "#D95F5F12",
+  blue: "#6B9FBF",
+  blueSoft: "#6B9FBF15",
+  purple: "#9B8ABF",
+  purpleSoft: "#9B8ABF15",
+  orange: "#E8A87A",
+  orangeSoft: "#E8A87A15",
+  shadow: "0 2px 12px rgba(44,36,32,0.07)",
+  shadowMd: "0 4px 24px rgba(44,36,32,0.12)"
 };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
-const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const SKIN_TYPES  = ["Dry","Oily","Combination","Normal","Sensitive","Acne-prone"];
-const CONCERNS    = ["Acne / Breakouts","Blackheads / Whiteheads","Oiliness","Dryness / Flakiness","Sensitivity / Redness","Hyperpigmentation","Dark spots / Melasma","Fine lines / Wrinkles","Enlarged pores","Dullness / Texture","Dark circles","Sagging / Firmness","Rosacea","Eczema / Psoriasis","Scarring"];
-const FREQS       = {daily:"Daily","twice-weekly":"2×/week",weekly:"Weekly","bi-weekly":"Every 2 wks",monthly:"Monthly","6-weekly":"Every 6 wks","8-weekly":"Every 8 wks"};
-const FREQ_DAYS   = {daily:1,"twice-weekly":3,weekly:7,"bi-weekly":14,monthly:30,"6-weekly":42,"8-weekly":56};
-
-const CONFLICT_PAIRS = [
-  ["glycolic acid","retinol"],["aha","retinol"],["bha","retinol"],
-  ["lactic acid","retinol"],["salicylic acid","retinol"],
-  ["vitamin c","retinol"],["ascorbic acid","retinol"],
-  ["benzoyl peroxide","retinol"],["benzoyl peroxide","vitamin c"],
-  ["glycolic acid","lactic acid"],["aha","bha"],["niacinamide","vitamin c"],
-];
-
-const SUGGESTIONS = [
-  "Cleanser","Foaming Cleanser","Gel Cleanser","Cream Cleanser","Oil Cleanser","Micellar Water","Balm Cleanser",
-  "Toner","Hydrating Toner","Essence",
-  "Vitamin C Serum","Vitamin C (Ascorbic Acid)","Niacinamide Serum","Hyaluronic Acid Serum",
-  "Retinol","Retinoid","Tretinoin","Adapalene","Bakuchiol",
-  "Salicylic Acid","BHA Exfoliant","Glycolic Acid","AHA Exfoliant","Lactic Acid","Mandelic Acid",
-  "Azelaic Acid","Benzoyl Peroxide","Kojic Acid","Alpha Arbutin",
-  "Moisturizer","Night Cream","Gel Moisturizer","Barrier Cream","Ceramide Moisturizer",
-  "Eye Cream","SPF 30","SPF 50","Mineral Sunscreen","Chemical Sunscreen","Tinted SPF",
-  "Face Oil","Rosehip Oil","Squalane","Jojoba Oil",
-  "Clay Mask","Sheet Mask","Sleeping Mask","Exfoliant (AHA/BHA)",
-  "LED Light Therapy","Microneedling","Gua Sha",
-  "Scalp Serum","Scalp Treatment","Lip Balm","Neck Cream",
-];
-
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
+const CONCERNS = ["Acne / Breakouts", "Blackheads / Whiteheads", "Oiliness", "Dryness / Flakiness", "Sensitivity / Redness", "Hyperpigmentation", "Dark spots / Melasma", "Fine lines / Wrinkles", "Enlarged pores", "Dullness / Texture", "Dark circles", "Sagging / Firmness", "Rosacea", "Eczema / Psoriasis", "Scarring"];
+const FREQS = {
+  daily: "Daily",
+  "twice-weekly": "2×/week",
+  weekly: "Weekly",
+  "bi-weekly": "Every 2 wks",
+  monthly: "Monthly",
+  "6-weekly": "Every 6 wks",
+  "8-weekly": "Every 8 wks"
+};
+const FREQ_DAYS = {
+  daily: 1,
+  "twice-weekly": 3,
+  weekly: 7,
+  "bi-weekly": 14,
+  monthly: 30,
+  "6-weekly": 42,
+  "8-weekly": 56
+};
+const CONFLICT_PAIRS = [["glycolic acid", "retinol"], ["aha", "retinol"], ["bha", "retinol"], ["lactic acid", "retinol"], ["salicylic acid", "retinol"], ["vitamin c", "retinol"], ["ascorbic acid", "retinol"], ["benzoyl peroxide", "retinol"], ["benzoyl peroxide", "vitamin c"], ["glycolic acid", "lactic acid"], ["aha", "bha"], ["niacinamide", "vitamin c"]];
+const SUGGESTIONS = ["Cleanser", "Foaming Cleanser", "Gel Cleanser", "Cream Cleanser", "Oil Cleanser", "Micellar Water", "Balm Cleanser", "Toner", "Hydrating Toner", "Essence", "Vitamin C Serum", "Vitamin C (Ascorbic Acid)", "Niacinamide Serum", "Hyaluronic Acid Serum", "Retinol", "Retinoid", "Tretinoin", "Adapalene", "Bakuchiol", "Salicylic Acid", "BHA Exfoliant", "Glycolic Acid", "AHA Exfoliant", "Lactic Acid", "Mandelic Acid", "Azelaic Acid", "Benzoyl Peroxide", "Kojic Acid", "Alpha Arbutin", "Moisturizer", "Night Cream", "Gel Moisturizer", "Barrier Cream", "Ceramide Moisturizer", "Eye Cream", "SPF 30", "SPF 50", "Mineral Sunscreen", "Chemical Sunscreen", "Tinted SPF", "Face Oil", "Rosehip Oil", "Squalane", "Jojoba Oil", "Clay Mask", "Sheet Mask", "Sleeping Mask", "Exfoliant (AHA/BHA)", "LED Light Therapy", "Microneedling", "Gua Sha", "Scalp Serum", "Scalp Treatment", "Lip Balm", "Neck Cream"];
 const PRODUCT_COLORS = {
-  cleanser:{bg:T.blueSoft,border:T.blue,text:T.blue},
-  exfoliant:{bg:T.purpleSoft,border:T.purple,text:T.purple},
-  retinol:{bg:T.orangeSoft,border:T.orange,text:T.orange},
-  serum:{bg:T.greenSoft,border:T.green,text:T.green},
-  moisturizer:{bg:"#E8D5B715",border:"#C4A882",text:"#8A6E4E"},
-  spf:{bg:"#FFE08A20",border:"#D4A017",text:"#8A6010"},
-  mask:{bg:T.blueSoft,border:T.blue,text:T.blue},
-  default:{bg:T.accentSoft,border:T.accent,text:T.accent},
+  cleanser: {
+    bg: T.blueSoft,
+    border: T.blue,
+    text: T.blue
+  },
+  exfoliant: {
+    bg: T.purpleSoft,
+    border: T.purple,
+    text: T.purple
+  },
+  retinol: {
+    bg: T.orangeSoft,
+    border: T.orange,
+    text: T.orange
+  },
+  serum: {
+    bg: T.greenSoft,
+    border: T.green,
+    text: T.green
+  },
+  moisturizer: {
+    bg: "#E8D5B715",
+    border: "#C4A882",
+    text: "#8A6E4E"
+  },
+  spf: {
+    bg: "#FFE08A20",
+    border: "#D4A017",
+    text: "#8A6010"
+  },
+  mask: {
+    bg: T.blueSoft,
+    border: T.blue,
+    text: T.blue
+  },
+  default: {
+    bg: T.accentSoft,
+    border: T.accent,
+    text: T.accent
+  }
 };
 const pcolor = p => {
-  const g = (p.genericName||"").toLowerCase();
-  if(g.includes("cleanser")||g.includes("wash")) return PRODUCT_COLORS.cleanser;
-  if(g.includes("exfoliant")||g.includes("aha")||g.includes("bha")||g.includes("acid")) return PRODUCT_COLORS.exfoliant;
-  if(g.includes("retinol")||g.includes("retinoid")||g.includes("tretinoin")) return PRODUCT_COLORS.retinol;
-  if(g.includes("serum")||g.includes("vitamin c")||g.includes("niacinamide")) return PRODUCT_COLORS.serum;
-  if(g.includes("moisturizer")||g.includes("cream")||g.includes("lotion")) return PRODUCT_COLORS.moisturizer;
-  if(g.includes("spf")||g.includes("sunscreen")) return PRODUCT_COLORS.spf;
-  if(g.includes("mask")) return PRODUCT_COLORS.mask;
+  const g = (p.genericName || "").toLowerCase();
+  if (g.includes("cleanser") || g.includes("wash")) return PRODUCT_COLORS.cleanser;
+  if (g.includes("exfoliant") || g.includes("aha") || g.includes("bha") || g.includes("acid")) return PRODUCT_COLORS.exfoliant;
+  if (g.includes("retinol") || g.includes("retinoid") || g.includes("tretinoin")) return PRODUCT_COLORS.retinol;
+  if (g.includes("serum") || g.includes("vitamin c") || g.includes("niacinamide")) return PRODUCT_COLORS.serum;
+  if (g.includes("moisturizer") || g.includes("cream") || g.includes("lotion")) return PRODUCT_COLORS.moisturizer;
+  if (g.includes("spf") || g.includes("sunscreen")) return PRODUCT_COLORS.spf;
+  if (g.includes("mask")) return PRODUCT_COLORS.mask;
   return PRODUCT_COLORS.default;
 };
-
-const productMatches = (p, kw) =>
-  [p.genericName,p.brandName,p.notes].some(f=>f&&f.toLowerCase().includes(kw.toLowerCase()));
-
-const findConflicts = (products) => {
+const productMatches = (p, kw) => [p.genericName, p.brandName, p.notes].some(f => f && f.toLowerCase().includes(kw.toLowerCase()));
+const findConflicts = products => {
   const out = [];
-  for(let i=0;i<products.length;i++)
-    for(let j=i+1;j<products.length;j++)
-      for(const [a,b] of CONFLICT_PAIRS)
-        if((productMatches(products[i],a)&&productMatches(products[j],b))||(productMatches(products[i],b)&&productMatches(products[j],a)))
-          out.push({p1:products[i],p2:products[j],pair:[a,b]});
+  for (let i = 0; i < products.length; i++) for (let j = i + 1; j < products.length; j++) for (const [a, b] of CONFLICT_PAIRS) if (productMatches(products[i], a) && productMatches(products[j], b) || productMatches(products[i], b) && productMatches(products[j], a)) out.push({
+    p1: products[i],
+    p2: products[j],
+    pair: [a, b]
+  });
   return out;
 };
 
 // ─── DATE HELPERS ──────────────────────────────────────────────────────────────
-const todayStr  = () => new Date().toISOString().split("T")[0];
-const parseDate = s  => { const d=new Date(s+"T12:00:00"); return isNaN(d)?null:d; };
-const dateStr   = d  => d.toISOString().split("T")[0];
-const addDays   = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
-const fmtLong   = d  => d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
-const fmtShort  = d  => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-
+const todayStr = () => new Date().toISOString().split("T")[0];
+const parseDate = s => {
+  const d = new Date(s + "T12:00:00");
+  return isNaN(d) ? null : d;
+};
+const dateStr = d => d.toISOString().split("T")[0];
+const addDays = (d, n) => {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+};
+const fmtLong = d => d.toLocaleDateString("en-US", {
+  weekday: "long",
+  month: "long",
+  day: "numeric"
+});
+const fmtShort = d => d.toLocaleDateString("en-US", {
+  month: "short",
+  day: "numeric"
+});
 const scheduledDates = (p, from, to) => {
-  if(!p.nextDate) return [];
-  const fs=dateStr(from), ts=dateStr(to);
-  if(p.isOneOff){const d=parseDate(p.nextDate);if(!d) return [];const ds=dateStr(d);return ds>=fs&&ds<=ts?[ds]:[];}
-  const start=parseDate(p.nextDate);if(!start) return [];
-  const iv=FREQ_DAYS[p.frequency]||1;
-  const dates=[];let cur=new Date(start);
-  while(dateStr(cur)<fs) cur=addDays(cur,iv);
-  while(dateStr(cur)>fs) cur=addDays(cur,-iv);
-  while(dateStr(cur)<=ts){if(dateStr(cur)>=fs) dates.push(dateStr(cur));cur=addDays(cur,iv);}
+  if (!p.nextDate) return [];
+  const fs = dateStr(from),
+    ts = dateStr(to);
+  if (p.isOneOff) {
+    const d = parseDate(p.nextDate);
+    if (!d) return [];
+    const ds = dateStr(d);
+    return ds >= fs && ds <= ts ? [ds] : [];
+  }
+  const start = parseDate(p.nextDate);
+  if (!start) return [];
+  const iv = FREQ_DAYS[p.frequency] || 1;
+  const dates = [];
+  let cur = new Date(start);
+  while (dateStr(cur) < fs) cur = addDays(cur, iv);
+  while (dateStr(cur) > fs) cur = addDays(cur, -iv);
+  while (dateStr(cur) <= ts) {
+    if (dateStr(cur) >= fs) dates.push(dateStr(cur));
+    cur = addDays(cur, iv);
+  }
   return dates;
 };
 
@@ -137,60 +235,83 @@ const scheduledDates = (p, from, to) => {
 // On the phone version, products start empty — use Sync to pull your products
 // in from the Claude.ai version (see README).
 const EMPTY_PROFILE = {
-  id:1, name:"My Profile", type:"Combination",
-  concerns:["Oiliness","Blackheads / Whiteheads","Enlarged pores","Scarring"], notes:"",
-  products:[], analysisText:"", analysisGaps:[], logs:[],
-  skinImgs:[],
+  id: 1,
+  name: "My Profile",
+  type: "Combination",
+  concerns: ["Oiliness", "Blackheads / Whiteheads", "Enlarged pores", "Scarring"],
+  notes: "",
+  products: [],
+  analysisText: "",
+  analysisGaps: [],
+  logs: [],
+  skinImgs: []
 };
 
 // ─── STORAGE (real localStorage — persists properly on this device) ───────────
-const hydrateImgs = (imgs=[]) => imgs.map(img => {
-  if(!img?.b64) return null;
+const hydrateImgs = (imgs = []) => imgs.map(img => {
+  if (!img?.b64) return null;
   try {
     const bytes = atob(img.b64);
-    const arr   = new Uint8Array(bytes.length);
-    for(let i=0;i<bytes.length;i++) arr[i]=bytes.charCodeAt(i);
-    const blob  = new Blob([arr],{type:img.mime||"image/jpeg"});
-    return {...img, preview:URL.createObjectURL(blob)};
-  } catch(e){ return null; }
-}).filter(Boolean);
-
-const parseProfileData = (raw, skinImgs=null) => {
-  try {
-    const data = typeof raw==="string" ? JSON.parse(raw) : raw;
-    const p    = data?.profile || data;
-    if(!p || typeof p!=="object") return null;
-    const imgs = skinImgs !== null ? skinImgs : (p.skinImgs||[]);
-    return {...EMPTY_PROFILE, ...p,
-      products: p.products||[],
-      skinImgs: hydrateImgs(imgs),
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], {
+      type: img.mime || "image/jpeg"
+    });
+    return {
+      ...img,
+      preview: URL.createObjectURL(blob)
     };
-  } catch(e){ return null; }
+  } catch (e) {
+    return null;
+  }
+}).filter(Boolean);
+const parseProfileData = (raw, skinImgs = null) => {
+  try {
+    const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const p = data?.profile || data;
+    if (!p || typeof p !== "object") return null;
+    const imgs = skinImgs !== null ? skinImgs : p.skinImgs || [];
+    return {
+      ...EMPTY_PROFILE,
+      ...p,
+      products: p.products || [],
+      skinImgs: hydrateImgs(imgs)
+    };
+  } catch (e) {
+    return null;
+  }
 };
-
 const load = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return null;
+    if (!raw) return null;
     const data = JSON.parse(raw);
-    if(data?.profile) return parseProfileData(data);
-  } catch(e){}
+    if (data?.profile) return parseProfileData(data);
+  } catch (e) {}
   return null;
 };
-const save = (profile) => {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({v:4, profile})); return true; }
-  catch(e){ return false; }
+const save = profile => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      v: 4,
+      profile
+    }));
+    return true;
+  } catch (e) {
+    return false;
+  }
 };
 
 // ─── IMAGE LOADING ─────────────────────────────────────────────────────────────
 const loadImage = file => new Promise((resolve, reject) => {
-  const name = (file.name||"").toLowerCase();
-  if(name.endsWith(".heic") || name.endsWith(".heif")) {
-    reject(new Error("HEIC_DECODE_FAILED")); return;
+  const name = (file.name || "").toLowerCase();
+  if (name.endsWith(".heic") || name.endsWith(".heif")) {
+    reject(new Error("HEIC_DECODE_FAILED"));
+    return;
   }
   const MAX_BYTES = 15 * 1024 * 1024;
-  if(file.size > MAX_BYTES) {
-    reject(new Error(`Photo too large (${(file.size/1024/1024).toFixed(1)} MB). Please use a compressed or screenshot version.`));
+  if (file.size > MAX_BYTES) {
+    reject(new Error(`Photo too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Please use a compressed or screenshot version.`));
     return;
   }
   const rawMime = file.type && file.type !== "application/octet-stream" ? file.type : "image/jpeg";
@@ -199,18 +320,35 @@ const loadImage = file => new Promise((resolve, reject) => {
   r.onload = ev => {
     try {
       const result = ev.target.result;
-      if(!result || typeof result !== "string") { reject(new Error("Empty result from reader")); return; }
+      if (!result || typeof result !== "string") {
+        reject(new Error("Empty result from reader"));
+        return;
+      }
       const commaIdx = result.indexOf(",");
-      if(commaIdx < 0) { reject(new Error("Unexpected file format")); return; }
+      if (commaIdx < 0) {
+        reject(new Error("Unexpected file format"));
+        return;
+      }
       const b64 = result.slice(commaIdx + 1);
-      if(!b64 || b64.length < 10) { reject(new Error("No image data")); return; }
+      if (!b64 || b64.length < 10) {
+        reject(new Error("No image data"));
+        return;
+      }
       const mimeMatch = result.slice(0, commaIdx).match(/^data:([^;]+)/);
-      const mime = (mimeMatch && mimeMatch[1] && mimeMatch[1] !== "application/octet-stream")
-        ? mimeMatch[1] : rawMime;
+      const mime = mimeMatch && mimeMatch[1] && mimeMatch[1] !== "application/octet-stream" ? mimeMatch[1] : rawMime;
       let preview = "";
-      try { preview = URL.createObjectURL(file); } catch(e) { preview = result; }
-      resolve({ b64, mime, preview, size: file.size });
-    } catch(err) {
+      try {
+        preview = URL.createObjectURL(file);
+      } catch (e) {
+        preview = result;
+      }
+      resolve({
+        b64,
+        mime,
+        preview,
+        size: file.size
+      });
+    } catch (err) {
       reject(new Error("Photo processing failed: " + err.message));
     }
   };
@@ -218,641 +356,1756 @@ const loadImage = file => new Promise((resolve, reject) => {
 });
 
 // ─── UI PRIMITIVES ─────────────────────────────────────────────────────────────
-const Card = ({children,style}) => <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:20,boxShadow:T.shadow,...style}}>{children}</div>;
-const Lbl  = ({children,style}) => <div style={{fontSize:11,fontWeight:700,color:T.muted,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:6,...style}}>{children}</div>;
-const Btn  = ({onClick,children,disabled,variant="primary",style}) => {
-  const base={padding:"10px 18px",borderRadius:100,border:"none",fontWeight:600,fontSize:13,cursor:disabled?"not-allowed":"pointer",fontFamily:"'Inter',sans-serif",transition:"all 0.15s",display:"inline-flex",alignItems:"center",gap:6,justifyContent:"center"};
-  const v={
-    primary:{background:disabled?"#ccc":T.accent,color:"#fff",boxShadow:disabled?"none":"0 2px 8px rgba(232,131,122,0.3)"},
-    ghost:{background:"transparent",color:T.text,border:`1.5px solid ${T.border}`},
-    soft:{background:T.accentSoft,color:T.accent,border:`1.5px solid ${T.accent}44`},
+const Card = ({
+  children,
+  style
+}) => /*#__PURE__*/React.createElement("div", {
+  style: {
+    background: T.card,
+    border: `1px solid ${T.border}`,
+    borderRadius: 16,
+    padding: 20,
+    boxShadow: T.shadow,
+    ...style
+  }
+}, children);
+const Lbl = ({
+  children,
+  style
+}) => /*#__PURE__*/React.createElement("div", {
+  style: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: T.muted,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    marginBottom: 6,
+    ...style
+  }
+}, children);
+const Btn = ({
+  onClick,
+  children,
+  disabled,
+  variant = "primary",
+  style
+}) => {
+  const base = {
+    padding: "10px 18px",
+    borderRadius: 100,
+    border: "none",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontFamily: "'Inter',sans-serif",
+    transition: "all 0.15s",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    justifyContent: "center"
   };
-  return <button onClick={onClick} disabled={disabled} style={{...base,...(v[variant]||v.primary),...style}}>{children}</button>;
+  const v = {
+    primary: {
+      background: disabled ? "#ccc" : T.accent,
+      color: "#fff",
+      boxShadow: disabled ? "none" : "0 2px 8px rgba(232,131,122,0.3)"
+    },
+    ghost: {
+      background: "transparent",
+      color: T.text,
+      border: `1.5px solid ${T.border}`
+    },
+    soft: {
+      background: T.accentSoft,
+      color: T.accent,
+      border: `1.5px solid ${T.accent}44`
+    }
+  };
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    disabled: disabled,
+    style: {
+      ...base,
+      ...(v[variant] || v.primary),
+      ...style
+    }
+  }, children);
 };
-const TxtIn = ({value,onChange,placeholder,style}) =>
-  <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-    style={{width:"100%",background:T.faint,border:`1.5px solid ${T.border}`,borderRadius:10,padding:"10px 14px",color:T.text,fontSize:13,fontFamily:"'Inter',sans-serif",boxSizing:"border-box",...style}}/>;
-const selSty = {width:"100%",background:T.faint,border:`1.5px solid ${T.border}`,borderRadius:10,padding:"10px 14px",color:T.text,fontSize:13,fontFamily:"'Inter',sans-serif"};
+const TxtIn = ({
+  value,
+  onChange,
+  placeholder,
+  style
+}) => /*#__PURE__*/React.createElement("input", {
+  value: value,
+  onChange: e => onChange(e.target.value),
+  placeholder: placeholder,
+  style: {
+    width: "100%",
+    background: T.faint,
+    border: `1.5px solid ${T.border}`,
+    borderRadius: 10,
+    padding: "10px 14px",
+    color: T.text,
+    fontSize: 13,
+    fontFamily: "'Inter',sans-serif",
+    boxSizing: "border-box",
+    ...style
+  }
+});
+const selSty = {
+  width: "100%",
+  background: T.faint,
+  border: `1.5px solid ${T.border}`,
+  borderRadius: 10,
+  padding: "10px 14px",
+  color: T.text,
+  fontSize: 13,
+  fontFamily: "'Inter',sans-serif"
+};
 
 // ─── CONCERNS SELECTOR ─────────────────────────────────────────────────────────
-const ConcernsSelector = ({selected,onChange}) => {
-  const [open,setOpen] = useState(false);
-  const toggle = c => onChange(selected.includes(c)?selected.filter(x=>x!==c):[...selected,c]);
-  return (
-    <>
-      <div onClick={()=>setOpen(true)} style={{background:T.faint,border:`1.5px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",minHeight:46,display:"flex",alignItems:"center",flexWrap:"wrap",gap:6}}>
-        {selected.length===0?<span style={{color:T.muted,fontSize:13}}>Tap to select…</span>:selected.map(c=><span key={c} style={{background:T.accent,color:"#fff",borderRadius:20,padding:"3px 12px",fontSize:12,fontWeight:600}}>{c}</span>)}
-        <span style={{marginLeft:"auto",color:T.muted,fontSize:11}}>▾</span>
-      </div>
-      {open&&(
-        <div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,background:"rgba(44,36,32,0.5)",zIndex:999,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:560,maxHeight:"75vh",display:"flex",flexDirection:"column",boxShadow:T.shadowMd}}>
-            <div style={{padding:"14px 20px 12px",borderBottom:`1px solid ${T.border}`,flexShrink:0}}>
-              <div style={{width:40,height:4,background:T.border,borderRadius:2,margin:"0 auto 14px"}}/>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span style={{fontWeight:700,color:T.text,fontSize:17,fontFamily:"'Cormorant Garamond',serif"}}>Skin Concerns</span>
-                <Btn onClick={()=>setOpen(false)} style={{padding:"8px 20px"}}>Done</Btn>
-              </div>
-            </div>
-            <div style={{overflowY:"auto",padding:"16px 20px 32px",display:"flex",flexWrap:"wrap",gap:10}}>
-              {CONCERNS.map(c=>{const on=selected.includes(c);return(
-                <div key={c} onClick={()=>toggle(c)} style={{padding:"10px 18px",borderRadius:100,background:on?T.accent:T.faint,border:`1.5px solid ${on?T.accent:T.border}`,color:on?"#fff":T.text,fontSize:13,fontWeight:on?600:400,cursor:"pointer",userSelect:"none"}}>
-                  {on?"✓ ":""}{c}
-                </div>
-              );})}
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
+const ConcernsSelector = ({
+  selected,
+  onChange
+}) => {
+  const [open, setOpen] = useState(false);
+  const toggle = c => onChange(selected.includes(c) ? selected.filter(x => x !== c) : [...selected, c]);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    onClick: () => setOpen(true),
+    style: {
+      background: T.faint,
+      border: `1.5px solid ${T.border}`,
+      borderRadius: 12,
+      padding: "10px 14px",
+      cursor: "pointer",
+      minHeight: 46,
+      display: "flex",
+      alignItems: "center",
+      flexWrap: "wrap",
+      gap: 6
+    }
+  }, selected.length === 0 ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: T.muted,
+      fontSize: 13
+    }
+  }, "Tap to select…") : selected.map(c => /*#__PURE__*/React.createElement("span", {
+    key: c,
+    style: {
+      background: T.accent,
+      color: "#fff",
+      borderRadius: 20,
+      padding: "3px 12px",
+      fontSize: 12,
+      fontWeight: 600
+    }
+  }, c)), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: "auto",
+      color: T.muted,
+      fontSize: 11
+    }
+  }, "▾")), open && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setOpen(false),
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(44,36,32,0.5)",
+      zIndex: 999,
+      display: "flex",
+      alignItems: "flex-end",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: "#fff",
+      borderRadius: "24px 24px 0 0",
+      width: "100%",
+      maxWidth: 560,
+      maxHeight: "75vh",
+      display: "flex",
+      flexDirection: "column",
+      boxShadow: T.shadowMd
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "14px 20px 12px",
+      borderBottom: `1px solid ${T.border}`,
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 40,
+      height: 4,
+      background: T.border,
+      borderRadius: 2,
+      margin: "0 auto 14px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: T.text,
+      fontSize: 17,
+      fontFamily: "'Cormorant Garamond',serif"
+    }
+  }, "Skin Concerns"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => setOpen(false),
+    style: {
+      padding: "8px 20px"
+    }
+  }, "Done"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowY: "auto",
+      padding: "16px 20px 32px",
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 10
+    }
+  }, CONCERNS.map(c => {
+    const on = selected.includes(c);
+    return /*#__PURE__*/React.createElement("div", {
+      key: c,
+      onClick: () => toggle(c),
+      style: {
+        padding: "10px 18px",
+        borderRadius: 100,
+        background: on ? T.accent : T.faint,
+        border: `1.5px solid ${on ? T.accent : T.border}`,
+        color: on ? "#fff" : T.text,
+        fontSize: 13,
+        fontWeight: on ? 600 : 400,
+        cursor: "pointer",
+        userSelect: "none"
+      }
+    }, on ? "✓ " : "", c);
+  })))));
 };
 
 // ─── DAY SHEET ─────────────────────────────────────────────────────────────────
-const DaySheet = ({date,profile,onUpdate,onClose,onNavigate}) => {
+const DaySheet = ({
+  date,
+  profile,
+  onUpdate,
+  onClose,
+  onNavigate
+}) => {
   const ds = dateStr(date);
-  const isToday = date.toDateString()===new Date().toDateString();
-  const prods = profile.products.filter(p=>p.scheduled&&scheduledDates(p,date,date).includes(ds)).sort((a,b)=>a.stepOrder-b.stepOrder);
-  const amProds = prods.filter(p=>p.session==="am"||p.session==="both");
-  const pmProds = prods.filter(p=>p.session==="pm"||p.session==="both");
-  const logs = profile.logs.filter(l=>l.date===ds);
-
-  const toggle = (productId,session) => {
-    const ex = logs.find(l=>l.productId===productId&&l.session===session);
+  const isToday = date.toDateString() === new Date().toDateString();
+  const prods = profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(ds)).sort((a, b) => a.stepOrder - b.stepOrder);
+  const amProds = prods.filter(p => p.session === "am" || p.session === "both");
+  const pmProds = prods.filter(p => p.session === "pm" || p.session === "both");
+  const logs = profile.logs.filter(l => l.date === ds);
+  const toggle = (productId, session) => {
+    const ex = logs.find(l => l.productId === productId && l.session === session);
     const done = !ex?.done;
-    const newLogs = ex
-      ? profile.logs.map(l=>(l.date===ds&&l.productId===productId&&l.session===session)?{...l,done}:l)
-      : [...profile.logs,{id:Date.now(),date:ds,productId,session,done:true}];
-    onUpdate({logs:newLogs});
-  };
-
-  const markAll = (prodList,session) => {
-    let newLogs = [...profile.logs];
-    prodList.forEach(p=>{
-      const ex = newLogs.find(l=>l.date===ds&&l.productId===p.id&&l.session===session);
-      if(ex) newLogs = newLogs.map(l=>(l.date===ds&&l.productId===p.id&&l.session===session)?{...l,done:true}:l);
-      else newLogs = [...newLogs,{id:Date.now()+Math.random(),date:ds,productId:p.id,session,done:true}];
+    const newLogs = ex ? profile.logs.map(l => l.date === ds && l.productId === productId && l.session === session ? {
+      ...l,
+      done
+    } : l) : [...profile.logs, {
+      id: Date.now(),
+      date: ds,
+      productId,
+      session,
+      done: true
+    }];
+    onUpdate({
+      logs: newLogs
     });
-    onUpdate({logs:newLogs});
   };
-
-  const Block = ({prods,session,accent,label,icon}) => {
-    const allDone = prods.length>0 && prods.every(p=>logs.find(l=>l.productId===p.id&&l.session===session)?.done);
-    return (
-      <div style={{background:T.faint,borderRadius:14,border:`1px solid ${T.border}`,overflow:"hidden",marginBottom:12}}>
-        <div style={{background:`linear-gradient(135deg,${accent}18,${accent}08)`,padding:"10px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <span style={{fontWeight:700,color:accent,fontSize:14,fontFamily:"'Cormorant Garamond',serif"}}>{icon} {label}</span>
-          <button onClick={()=>markAll(prods,session)} style={{padding:"5px 14px",borderRadius:100,border:`1.5px solid ${allDone?T.green:T.border}`,background:allDone?T.greenSoft:"transparent",color:allDone?T.green:T.text,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-            {allDone?"✓ All Done":"Mark All Done"}
-          </button>
-        </div>
-        <div style={{padding:"8px 16px"}}>
-          {prods.length===0&&<div style={{color:T.muted,fontSize:13,fontStyle:"italic",padding:"8px 0"}}>Nothing scheduled.</div>}
-          {prods.map((p,i)=>{
-            const done = logs.find(l=>l.productId===p.id&&l.session===session)?.done||false;
-            const col = pcolor(p);
-            return (
-              <div key={p.id} onClick={()=>toggle(p.id,session)} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 0",borderBottom:i<prods.length-1?`1px solid ${T.border}`:"none",cursor:"pointer"}}>
-                <div style={{width:22,height:22,borderRadius:"50%",border:`2px solid ${done?T.green:col.border}`,background:done?T.green:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.15s"}}>
-                  {done&&<span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>}
-                </div>
-                <div style={{flex:1}}>
-                  <span style={{color:done?T.muted:T.text,fontSize:13,fontWeight:600,textDecoration:done?"line-through":"none"}}>
-                    <span style={{color:done?T.muted:accent,fontSize:12,marginRight:6}}>{i+1}.</span>
-                    {p.genericName}
-                    {p.brandName&&<span style={{color:T.muted,fontWeight:400,fontSize:12}}> · {p.brandName}</span>}
-                  </span>
-                  {p.frequency!=="daily"&&<span style={{marginLeft:8,fontSize:10,background:col.bg,color:col.text,borderRadius:20,padding:"1px 7px"}}>{FREQS[p.frequency]}</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
+  const markAll = (prodList, session) => {
+    let newLogs = [...profile.logs];
+    prodList.forEach(p => {
+      const ex = newLogs.find(l => l.date === ds && l.productId === p.id && l.session === session);
+      if (ex) newLogs = newLogs.map(l => l.date === ds && l.productId === p.id && l.session === session ? {
+        ...l,
+        done: true
+      } : l);else newLogs = [...newLogs, {
+        id: Date.now() + Math.random(),
+        date: ds,
+        productId: p.id,
+        session,
+        done: true
+      }];
+    });
+    onUpdate({
+      logs: newLogs
+    });
   };
-
-  return (
-    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(44,36,32,0.5)",zIndex:998,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:"24px 24px 0 0",width:"100%",maxWidth:580,maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:T.shadowMd}}>
-        <div style={{padding:"12px 20px",borderBottom:`1px solid ${T.border}`,flexShrink:0}}>
-          <div style={{width:40,height:4,background:T.border,borderRadius:2,margin:"0 auto 10px"}}/>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <button onClick={()=>onNavigate(-1)} style={{background:T.faint,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:14,color:T.muted}}>‹</button>
-              <div>
-                <div style={{fontWeight:700,color:T.text,fontSize:17,fontFamily:"'Cormorant Garamond',serif"}}>{fmtLong(date)}</div>
-                {isToday&&<div style={{color:T.accent,fontSize:11,fontWeight:700}}>TODAY</div>}
-              </div>
-              <button onClick={()=>onNavigate(1)} style={{background:T.faint,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:14,color:T.muted}}>›</button>
-            </div>
-            <button onClick={onClose} style={{background:T.faint,border:"none",borderRadius:"50%",width:32,height:32,cursor:"pointer",fontSize:16,color:T.muted}}>×</button>
-          </div>
-        </div>
-        <div style={{overflowY:"auto",padding:"16px 20px 32px",flex:1}}>
-          <Block prods={amProds} session="am" accent={T.accent} label="Morning Routine" icon="🌅"/>
-          <Block prods={pmProds} session="pm" accent={T.blue}   label="Evening Routine"  icon="🌙"/>
-        </div>
-      </div>
-    </div>
-  );
+  const Block = ({
+    prods,
+    session,
+    accent,
+    label,
+    icon
+  }) => {
+    const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: T.faint,
+        borderRadius: 14,
+        border: `1px solid ${T.border}`,
+        overflow: "hidden",
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: `linear-gradient(135deg,${accent}18,${accent}08)`,
+        padding: "10px 16px",
+        borderBottom: `1px solid ${T.border}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 700,
+        color: accent,
+        fontSize: 14,
+        fontFamily: "'Cormorant Garamond',serif"
+      }
+    }, icon, " ", label), /*#__PURE__*/React.createElement("button", {
+      onClick: () => markAll(prods, session),
+      style: {
+        padding: "5px 14px",
+        borderRadius: 100,
+        border: `1.5px solid ${allDone ? T.green : T.border}`,
+        background: allDone ? T.greenSoft : "transparent",
+        color: allDone ? T.green : T.text,
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, allDone ? "✓ All Done" : "Mark All Done")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: "8px 16px"
+      }
+    }, prods.length === 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: T.muted,
+        fontSize: 13,
+        fontStyle: "italic",
+        padding: "8px 0"
+      }
+    }, "Nothing scheduled."), prods.map((p, i) => {
+      const done = logs.find(l => l.productId === p.id && l.session === session)?.done || false;
+      const col = pcolor(p);
+      return /*#__PURE__*/React.createElement("div", {
+        key: p.id,
+        onClick: () => toggle(p.id, session),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "9px 0",
+          borderBottom: i < prods.length - 1 ? `1px solid ${T.border}` : "none",
+          cursor: "pointer"
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          border: `2px solid ${done ? T.green : col.border}`,
+          background: done ? T.green : "transparent",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "all 0.15s"
+        }
+      }, done && /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: "#fff",
+          fontSize: 10,
+          fontWeight: 700
+        }
+      }, "✓")), /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: 1
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: done ? T.muted : T.text,
+          fontSize: 13,
+          fontWeight: 600,
+          textDecoration: done ? "line-through" : "none"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: done ? T.muted : accent,
+          fontSize: 12,
+          marginRight: 6
+        }
+      }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: T.muted,
+          fontWeight: 400,
+          fontSize: 12
+        }
+      }, " · ", p.brandName)), p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
+        style: {
+          marginLeft: 8,
+          fontSize: 10,
+          background: col.bg,
+          color: col.text,
+          borderRadius: 20,
+          padding: "1px 7px"
+        }
+      }, FREQS[p.frequency])));
+    })));
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(44,36,32,0.5)",
+      zIndex: 998,
+      display: "flex",
+      alignItems: "flex-end",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: "#fff",
+      borderRadius: "24px 24px 0 0",
+      width: "100%",
+      maxWidth: 580,
+      maxHeight: "90vh",
+      display: "flex",
+      flexDirection: "column",
+      boxShadow: T.shadowMd
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "12px 20px",
+      borderBottom: `1px solid ${T.border}`,
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 40,
+      height: 4,
+      background: T.border,
+      borderRadius: 2,
+      margin: "0 auto 10px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => onNavigate(-1),
+    style: {
+      background: T.faint,
+      border: `1px solid ${T.border}`,
+      borderRadius: 8,
+      padding: "6px 12px",
+      cursor: "pointer",
+      fontSize: 14,
+      color: T.muted
+    }
+  }, "‹"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: T.text,
+      fontSize: 17,
+      fontFamily: "'Cormorant Garamond',serif"
+    }
+  }, fmtLong(date)), isToday && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.accent,
+      fontSize: 11,
+      fontWeight: 700
+    }
+  }, "TODAY")), /*#__PURE__*/React.createElement("button", {
+    onClick: () => onNavigate(1),
+    style: {
+      background: T.faint,
+      border: `1px solid ${T.border}`,
+      borderRadius: 8,
+      padding: "6px 12px",
+      cursor: "pointer",
+      fontSize: 14,
+      color: T.muted
+    }
+  }, "›")), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: T.faint,
+      border: "none",
+      borderRadius: "50%",
+      width: 32,
+      height: 32,
+      cursor: "pointer",
+      fontSize: 16,
+      color: T.muted
+    }
+  }, "×"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowY: "auto",
+      padding: "16px 20px 32px",
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement(Block, {
+    prods: amProds,
+    session: "am",
+    accent: T.accent,
+    label: "Morning Routine",
+    icon: "🌅"
+  }), /*#__PURE__*/React.createElement(Block, {
+    prods: pmProds,
+    session: "pm",
+    accent: T.blue,
+    label: "Evening Routine",
+    icon: "🌙"
+  }))));
 };
 
 // ─── CALENDAR ──────────────────────────────────────────────────────────────────
-const CalendarTab = ({profile,onUpdate}) => {
+const CalendarTab = ({
+  profile,
+  onUpdate
+}) => {
   const today = new Date();
-  const [view,setView]       = useState("month");
-  const [cursor,setCursor]   = useState(new Date(today.getFullYear(),today.getMonth(),1));
-  const [selected,setSelected] = useState(null);
-
-  const prev = () => setCursor(d=>view==="month"?new Date(d.getFullYear(),d.getMonth()-1,1):addDays(d,-7));
-  const next = () => setCursor(d=>view==="month"?new Date(d.getFullYear(),d.getMonth()+1,1):addDays(d,7));
-
-  const rangeStart = view==="month"?new Date(cursor.getFullYear(),cursor.getMonth(),1)
-    :(()=>{const d=new Date(cursor);d.setDate(d.getDate()-d.getDay());return d;})();
-  const rangeEnd = view==="month"?new Date(cursor.getFullYear(),cursor.getMonth()+1,0):addDays(rangeStart,6);
-
+  const [view, setView] = useState("month");
+  const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selected, setSelected] = useState(null);
+  const prev = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() - 1, 1) : addDays(d, -7));
+  const next = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() + 1, 1) : addDays(d, 7));
+  const rangeStart = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth(), 1) : (() => {
+    const d = new Date(cursor);
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+  })();
+  const rangeEnd = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0) : addDays(rangeStart, 6);
   const days = [];
-  if(view==="month"){for(let i=0;i<rangeStart.getDay();i++) days.push(null);}
-  for(let d=new Date(rangeStart);d<=rangeEnd;d=addDays(d,1)) days.push(new Date(d));
-
-  const scheduledProds = useCallback(date=>{
-    return profile.products.filter(p=>p.scheduled&&scheduledDates(p,date,date).includes(dateStr(date)));
-  },[profile.products]);
-
-  const nonDailyProds = useCallback(date=>{
-    return scheduledProds(date).filter(p=>p.frequency!=="daily");
-  },[scheduledProds]);
-
-  const title = view==="month"?`${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`:`${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
-
-  return (
-    <div>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-        <div style={{display:"flex",background:T.faint,borderRadius:100,padding:3,border:`1px solid ${T.border}`}}>
-          {["month","week"].map(v=><button key={v} onClick={()=>setView(v)} style={{padding:"7px 14px",borderRadius:100,background:view===v?T.accent:"transparent",color:view===v?"#fff":T.muted,border:"none",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif",textTransform:"capitalize"}}>{v}</button>)}
-        </div>
-        <button onClick={prev} style={{background:T.faint,border:`1px solid ${T.border}`,borderRadius:10,padding:"8px 14px",color:T.text,cursor:"pointer",fontSize:14}}>‹</button>
-        <div style={{flex:1,textAlign:"center",fontWeight:700,color:T.text,fontFamily:"'Cormorant Garamond',serif",fontSize:17}}>{title}</div>
-        <button onClick={next} style={{background:T.faint,border:`1px solid ${T.border}`,borderRadius:10,padding:"8px 14px",color:T.text,cursor:"pointer",fontSize:14}}>›</button>
-        <Btn onClick={()=>setCursor(new Date(today.getFullYear(),today.getMonth(),1))} variant="ghost" style={{padding:"8px 14px",fontSize:12}}>Today</Btn>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:3}}>
-        {DAYS.map(d=><div key={d} style={{textAlign:"center",fontSize:11,fontWeight:600,color:T.muted,padding:"4px 0"}}>{d}</div>)}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
-        {days.map((date,i)=>{
-          if(!date) return <div key={`e${i}`}/>;
-          const ds = dateStr(date);
-          const isToday = date.toDateString()===today.toDateString();
-          const isOther = view==="month"&&date.getMonth()!==cursor.getMonth();
-          const chips = nonDailyProds(date);
-          const allProds = scheduledProds(date);
-          const dayLogs = profile.logs.filter(l=>l.date===ds);
-          const amDone = allProds.filter(p=>p.session==="am"||p.session==="both").every(p=>dayLogs.find(l=>l.productId===p.id&&l.session==="am")?.done);
-          const pmDone = allProds.filter(p=>p.session==="pm"||p.session==="both").every(p=>dayLogs.find(l=>l.productId===p.id&&l.session==="pm")?.done);
-          const hasAm = allProds.some(p=>p.session==="am"||p.session==="both");
-          const hasPm = allProds.some(p=>p.session==="pm"||p.session==="both");
-          return (
-            <div key={ds} onClick={()=>setSelected(date)}
-              style={{background:isToday?T.accentSoft:T.card,border:`1.5px solid ${isToday?T.accent:T.border}`,borderRadius:12,padding:view==="month"?"7px 7px 8px":"8px",cursor:"pointer",minHeight:view==="month"?76:90,opacity:isOther?0.3:1,boxShadow:isToday?`0 0 0 2px ${T.accent}33`:"none",display:"flex",flexDirection:"column",gap:2}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
-                <span style={{fontSize:12,fontWeight:isToday?800:500,width:22,height:22,borderRadius:"50%",background:isToday?T.accent:"transparent",color:isToday?"#fff":T.text,display:"flex",alignItems:"center",justifyContent:"center"}}>{date.getDate()}</span>
-                <div style={{display:"flex",gap:2}}>
-                  {hasAm&&<div style={{width:5,height:5,borderRadius:"50%",background:amDone?T.green:T.border}}/>}
-                  {hasPm&&<div style={{width:5,height:5,borderRadius:"50%",background:pmDone?T.green:T.border}}/>}
-                </div>
-              </div>
-              {chips.slice(0,2).map(p=>{
-                const col=pcolor(p);
-                const done=dayLogs.find(l=>l.productId===p.id)?.done;
-                return <div key={p.id} style={{background:done?T.greenSoft:col.bg,border:`1px solid ${done?T.green:col.border}55`,borderRadius:6,padding:"2px 5px",fontSize:9,fontWeight:700,color:done?T.green:col.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.genericName.split(" ").slice(0,2).join(" ")}</div>;
-              })}
-              {chips.length>2&&<div style={{fontSize:9,color:T.muted}}>+{chips.length-2}</div>}
-            </div>
-          );
-        })}
-      </div>
-      {selected&&(
-        <DaySheet date={selected} profile={profile} onUpdate={onUpdate}
-          onNavigate={dir=>setSelected(d=>addDays(d,dir))}
-          onClose={()=>setSelected(null)}/>
-      )}
-    </div>
-  );
+  if (view === "month") {
+    for (let i = 0; i < rangeStart.getDay(); i++) days.push(null);
+  }
+  for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
+  const scheduledProds = useCallback(date => {
+    return profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(dateStr(date)));
+  }, [profile.products]);
+  const nonDailyProds = useCallback(date => {
+    return scheduledProds(date).filter(p => p.frequency !== "daily");
+  }, [scheduledProds]);
+  const title = view === "month" ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}` : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      marginBottom: 16,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      background: T.faint,
+      borderRadius: 100,
+      padding: 3,
+      border: `1px solid ${T.border}`
+    }
+  }, ["month", "week"].map(v => /*#__PURE__*/React.createElement("button", {
+    key: v,
+    onClick: () => setView(v),
+    style: {
+      padding: "7px 14px",
+      borderRadius: 100,
+      background: view === v ? T.accent : "transparent",
+      color: view === v ? "#fff" : T.muted,
+      border: "none",
+      fontWeight: 600,
+      fontSize: 12,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif",
+      textTransform: "capitalize"
+    }
+  }, v))), /*#__PURE__*/React.createElement("button", {
+    onClick: prev,
+    style: {
+      background: T.faint,
+      border: `1px solid ${T.border}`,
+      borderRadius: 10,
+      padding: "8px 14px",
+      color: T.text,
+      cursor: "pointer",
+      fontSize: 14
+    }
+  }, "‹"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      textAlign: "center",
+      fontWeight: 700,
+      color: T.text,
+      fontFamily: "'Cormorant Garamond',serif",
+      fontSize: 17
+    }
+  }, title), /*#__PURE__*/React.createElement("button", {
+    onClick: next,
+    style: {
+      background: T.faint,
+      border: `1px solid ${T.border}`,
+      borderRadius: 10,
+      padding: "8px 14px",
+      color: T.text,
+      cursor: "pointer",
+      fontSize: 14
+    }
+  }, "›"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => setCursor(new Date(today.getFullYear(), today.getMonth(), 1)),
+    variant: "ghost",
+    style: {
+      padding: "8px 14px",
+      fontSize: 12
+    }
+  }, "Today")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(7,1fr)",
+      gap: 3,
+      marginBottom: 3
+    }
+  }, DAYS.map(d => /*#__PURE__*/React.createElement("div", {
+    key: d,
+    style: {
+      textAlign: "center",
+      fontSize: 11,
+      fontWeight: 600,
+      color: T.muted,
+      padding: "4px 0"
+    }
+  }, d))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(7,1fr)",
+      gap: 3
+    }
+  }, days.map((date, i) => {
+    if (!date) return /*#__PURE__*/React.createElement("div", {
+      key: `e${i}`
+    });
+    const ds = dateStr(date);
+    const isToday = date.toDateString() === today.toDateString();
+    const isOther = view === "month" && date.getMonth() !== cursor.getMonth();
+    const chips = nonDailyProds(date);
+    const allProds = scheduledProds(date);
+    const dayLogs = profile.logs.filter(l => l.date === ds);
+    const amDone = allProds.filter(p => p.session === "am" || p.session === "both").every(p => dayLogs.find(l => l.productId === p.id && l.session === "am")?.done);
+    const pmDone = allProds.filter(p => p.session === "pm" || p.session === "both").every(p => dayLogs.find(l => l.productId === p.id && l.session === "pm")?.done);
+    const hasAm = allProds.some(p => p.session === "am" || p.session === "both");
+    const hasPm = allProds.some(p => p.session === "pm" || p.session === "both");
+    return /*#__PURE__*/React.createElement("div", {
+      key: ds,
+      onClick: () => setSelected(date),
+      style: {
+        background: isToday ? T.accentSoft : T.card,
+        border: `1.5px solid ${isToday ? T.accent : T.border}`,
+        borderRadius: 12,
+        padding: view === "month" ? "7px 7px 8px" : "8px",
+        cursor: "pointer",
+        minHeight: view === "month" ? 76 : 90,
+        opacity: isOther ? 0.3 : 1,
+        boxShadow: isToday ? `0 0 0 2px ${T.accent}33` : "none",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 2
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        fontWeight: isToday ? 800 : 500,
+        width: 22,
+        height: 22,
+        borderRadius: "50%",
+        background: isToday ? T.accent : "transparent",
+        color: isToday ? "#fff" : T.text,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+      }
+    }, date.getDate()), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 2
+      }
+    }, hasAm && /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 5,
+        height: 5,
+        borderRadius: "50%",
+        background: amDone ? T.green : T.border
+      }
+    }), hasPm && /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 5,
+        height: 5,
+        borderRadius: "50%",
+        background: pmDone ? T.green : T.border
+      }
+    }))), chips.slice(0, 2).map(p => {
+      const col = pcolor(p);
+      const done = dayLogs.find(l => l.productId === p.id)?.done;
+      return /*#__PURE__*/React.createElement("div", {
+        key: p.id,
+        style: {
+          background: done ? T.greenSoft : col.bg,
+          border: `1px solid ${done ? T.green : col.border}55`,
+          borderRadius: 6,
+          padding: "2px 5px",
+          fontSize: 9,
+          fontWeight: 700,
+          color: done ? T.green : col.text,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap"
+        }
+      }, p.genericName.split(" ").slice(0, 2).join(" "));
+    }), chips.length > 2 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 9,
+        color: T.muted
+      }
+    }, "+", chips.length - 2));
+  })), selected && /*#__PURE__*/React.createElement(DaySheet, {
+    date: selected,
+    profile: profile,
+    onUpdate: onUpdate,
+    onNavigate: dir => setSelected(d => addDays(d, dir)),
+    onClose: () => setSelected(null)
+  }));
 };
 
 // ─── PRODUCTS TAB (no AI — manual scheduling instead of "Build Routine") ──────
-const ProductsTab = ({profile,onUpdate}) => {
-  const [showAdd,setShowAdd]   = useState(false);
-  const [name,setName]         = useState("");
-  const [brand,setBrand]       = useState("");
-  const [notes,setNotes]       = useState("");
-  const [sugs,setSugs]         = useState([]);
-  const [showSugs,setShowSugs] = useState(false);
-  const [saved,setSaved]       = useState(false);
-  const [editId,setEditId]     = useState(null); // product currently being scheduled
+const ProductsTab = ({
+  profile,
+  onUpdate
+}) => {
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState("");
+  const [notes, setNotes] = useState("");
+  const [sugs, setSugs] = useState([]);
+  const [showSugs, setShowSugs] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [editId, setEditId] = useState(null); // product currently being scheduled
 
   const onNameChange = v => {
     setName(v);
-    if(v.length>=2){
-      const q=v.toLowerCase();
-      const m=SUGGESTIONS.filter(s=>s.toLowerCase().includes(q)).slice(0,7);
-      setSugs(m); setShowSugs(m.length>0);
-    } else { setShowSugs(false); }
+    if (v.length >= 2) {
+      const q = v.toLowerCase();
+      const m = SUGGESTIONS.filter(s => s.toLowerCase().includes(q)).slice(0, 7);
+      setSugs(m);
+      setShowSugs(m.length > 0);
+    } else {
+      setShowSugs(false);
+    }
   };
-
   const addProduct = () => {
-    if(!name.trim()) return;
-    const prod = {id:Date.now(),genericName:name.trim(),brandName:brand.trim(),notes:notes.trim(),session:"",frequency:"",stepOrder:0,nextDate:"",isOneOff:false,scheduled:false};
-    onUpdate({products:[...profile.products, prod]});
-    setName(""); setBrand(""); setNotes(""); setShowAdd(false); setShowSugs(false);
-    setSaved(true); setTimeout(()=>setSaved(false),2000);
+    if (!name.trim()) return;
+    const prod = {
+      id: Date.now(),
+      genericName: name.trim(),
+      brandName: brand.trim(),
+      notes: notes.trim(),
+      session: "",
+      frequency: "",
+      stepOrder: 0,
+      nextDate: "",
+      isOneOff: false,
+      scheduled: false
+    };
+    onUpdate({
+      products: [...profile.products, prod]
+    });
+    setName("");
+    setBrand("");
+    setNotes("");
+    setShowAdd(false);
+    setShowSugs(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
-
   const removeProduct = id => {
-    onUpdate({products:profile.products.filter(p=>p.id!==id)});
-    if(editId===id) setEditId(null);
+    onUpdate({
+      products: profile.products.filter(p => p.id !== id)
+    });
+    if (editId === id) setEditId(null);
   };
-
   const updateSchedule = (id, patch) => {
-    onUpdate({products:profile.products.map(p=>p.id===id?{...p,...patch}:p)});
+    onUpdate({
+      products: profile.products.map(p => p.id === id ? {
+        ...p,
+        ...patch
+      } : p)
+    });
   };
-
-  const conflicts = findConflicts(profile.products.filter(p=>p.scheduled));
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-
-      {/* ── Add product ──────────────────────────────────────────────── */}
-      <Card>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:showAdd?14:0}}>
-          <div>
-            <div style={{fontWeight:700,color:T.text,fontSize:14}}>🧴 Products</div>
-            <div style={{fontSize:12,color:T.muted}}>Add a product, then set when it's used.</div>
-          </div>
-          {!showAdd&&<Btn onClick={()=>setShowAdd(true)} style={{flexShrink:0}}>+ Add</Btn>}
-          {saved&&<span style={{fontSize:12,color:T.green,fontWeight:600}}>✓ Saved</span>}
-        </div>
-        {showAdd&&(
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <div style={{position:"relative"}}>
-              <TxtIn value={name} onChange={onNameChange} placeholder="Product type (e.g. Vitamin C Serum)"/>
-              {showSugs&&(
-                <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,right:0,background:"#fff",border:`1px solid ${T.border}`,borderRadius:10,boxShadow:T.shadowMd,zIndex:20,maxHeight:200,overflowY:"auto"}}>
-                  {sugs.map(s=>(
-                    <div key={s} onClick={()=>{onNameChange(s);setShowSugs(false);}} style={{padding:"9px 14px",fontSize:13,color:T.text,cursor:"pointer",borderBottom:`1px solid ${T.border}`}}>{s}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <TxtIn value={brand} onChange={setBrand} placeholder="Brand / product name (optional)"/>
-            <TxtIn value={notes} onChange={setNotes} placeholder="Notes (optional)"/>
-            <div style={{display:"flex",gap:8}}>
-              <Btn onClick={addProduct} disabled={!name.trim()} style={{flex:1,justifyContent:"center"}}>Add Product</Btn>
-              <Btn onClick={()=>{setShowAdd(false);setName("");setBrand("");setNotes("");setShowSugs(false);}} variant="ghost">Cancel</Btn>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Conflicts warning */}
-      {conflicts.length>0&&(
-        <div style={{background:T.redSoft,border:`1px solid ${T.red}33`,borderRadius:12,padding:"12px 14px"}}>
-          <div style={{color:T.red,fontWeight:700,fontSize:13,marginBottom:6}}>⚠️ {conflicts.length} ingredient conflict{conflicts.length>1?"s":""}</div>
-          {conflicts.map((c,i)=><div key={i} style={{color:T.muted,fontSize:12}}>• {c.p1.genericName} + {c.p2.genericName} — schedule at different sessions or days</div>)}
-        </div>
-      )}
-
-      {/* Product list */}
-      {profile.products.length>0&&(
-        <Card>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-            <Lbl style={{marginBottom:0}}>{profile.products.length} product{profile.products.length!==1?"s":""}</Lbl>
-            <div style={{fontSize:12,color:T.muted}}>{profile.products.filter(p=>p.scheduled).length} scheduled</div>
-          </div>
-          {profile.products.map((p,i)=>{
-            const col = pcolor(p);
-            const isEditing = editId===p.id;
-            return (
-              <div key={p.id} style={{padding:"11px 0",borderBottom:i<profile.products.length-1?`1px solid ${T.border}`:"none"}}>
-                <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-                  <div style={{width:10,height:10,borderRadius:"50%",background:col.border,flexShrink:0,marginTop:3}}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:600,color:T.text,fontSize:13}}>
-                      {p.genericName}
-                      {p.brandName&&<span style={{color:T.muted,fontWeight:400,fontSize:12}}> · {p.brandName}</span>}
-                    </div>
-                    {p.scheduled?(
-                      <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap"}}>
-                        <span style={{background:col.bg,color:col.text,borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:600}}>{p.session==="both"?"AM+PM":p.session?.toUpperCase()} · {FREQS[p.frequency]||p.frequency}</span>
-                      </div>
-                    ):(
-                      <div style={{fontSize:11,color:T.muted,fontStyle:"italic",marginTop:2}}>Not scheduled</div>
-                    )}
-                    {p.notes&&<div style={{fontSize:11,color:T.muted,marginTop:2}}>{p.notes.slice(0,50)}</div>}
-                  </div>
-                  <button onClick={()=>setEditId(isEditing?null:p.id)} style={{background:T.faint,border:`1px solid ${T.border}`,borderRadius:8,padding:"5px 10px",fontSize:11,color:T.text,cursor:"pointer",fontFamily:"'Inter',sans-serif",flexShrink:0}}>
-                    {p.scheduled?"Edit":"Schedule"}
-                  </button>
-                  <button onClick={()=>removeProduct(p.id)} style={{background:"none",border:"none",cursor:"pointer",color:T.muted,fontSize:20,lineHeight:1,padding:"0 2px",flexShrink:0}}>×</button>
-                </div>
-                {isEditing&&(
-                  <div style={{marginTop:10,marginLeft:22,background:T.faint,border:`1px solid ${T.border}`,borderRadius:10,padding:12,display:"flex",flexDirection:"column",gap:8}}>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div>
-                        <Lbl style={{fontSize:10}}>Session</Lbl>
-                        <select value={p.session||""} onChange={e=>updateSchedule(p.id,{session:e.target.value})} style={selSty}>
-                          <option value="">Select…</option>
-                          <option value="am">AM</option>
-                          <option value="pm">PM</option>
-                          <option value="both">AM + PM</option>
-                        </select>
-                      </div>
-                      <div>
-                        <Lbl style={{fontSize:10}}>Frequency</Lbl>
-                        <select value={p.frequency||""} onChange={e=>updateSchedule(p.id,{frequency:e.target.value})} style={selSty}>
-                          <option value="">Select…</option>
-                          {Object.entries(FREQS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <div>
-                        <Lbl style={{fontSize:10}}>Start date</Lbl>
-                        <input type="date" value={p.nextDate||todayStr()} onChange={e=>updateSchedule(p.id,{nextDate:e.target.value})} style={selSty}/>
-                      </div>
-                      <div>
-                        <Lbl style={{fontSize:10}}>Step order</Lbl>
-                        <input type="number" min="1" value={p.stepOrder||1} onChange={e=>updateSchedule(p.id,{stepOrder:parseInt(e.target.value)||1})} style={selSty}/>
-                      </div>
-                    </div>
-                    <Btn onClick={()=>{
-                      const ready = p.session && p.frequency;
-                      updateSchedule(p.id,{scheduled:!!ready, nextDate:p.nextDate||todayStr(), stepOrder:p.stepOrder||1});
-                      if(ready) setEditId(null);
-                    }} style={{justifyContent:"center"}} disabled={!p.session||!p.frequency}>
-                      {p.session&&p.frequency?"Save Schedule":"Pick session & frequency"}
-                    </Btn>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </Card>
-      )}
-
-      {/* Empty */}
-      {profile.products.length===0&&!showAdd&&(
-        <div style={{textAlign:"center",padding:48}}>
-          <div style={{fontSize:40,marginBottom:12}}>🧴</div>
-          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Add your products</div>
-          <div style={{fontSize:13,color:T.muted,marginBottom:20}}>Cleansers, serums, treatments, masks — anything you use. Or import them from the Claude.ai version via Sync.</div>
-          <Btn onClick={()=>setShowAdd(true)}>+ Add First Product</Btn>
-        </div>
-      )}
-    </div>
-  );
+  const conflicts = findConflicts(profile.products.filter(p => p.scheduled));
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 14
+    }
+  }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: showAdd ? 14 : 0
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: T.text,
+      fontSize: 14
+    }
+  }, "🧴 Products"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: T.muted
+    }
+  }, "Add a product, then set when it's used.")), !showAdd && /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => setShowAdd(true),
+    style: {
+      flexShrink: 0
+    }
+  }, "+ Add"), saved && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: T.green,
+      fontWeight: 600
+    }
+  }, "✓ Saved")), showAdd && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement(TxtIn, {
+    value: name,
+    onChange: onNameChange,
+    placeholder: "Product type (e.g. Vitamin C Serum)"
+  }), showSugs && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: "calc(100% + 4px)",
+      left: 0,
+      right: 0,
+      background: "#fff",
+      border: `1px solid ${T.border}`,
+      borderRadius: 10,
+      boxShadow: T.shadowMd,
+      zIndex: 20,
+      maxHeight: 200,
+      overflowY: "auto"
+    }
+  }, sugs.map(s => /*#__PURE__*/React.createElement("div", {
+    key: s,
+    onClick: () => {
+      onNameChange(s);
+      setShowSugs(false);
+    },
+    style: {
+      padding: "9px 14px",
+      fontSize: 13,
+      color: T.text,
+      cursor: "pointer",
+      borderBottom: `1px solid ${T.border}`
+    }
+  }, s)))), /*#__PURE__*/React.createElement(TxtIn, {
+    value: brand,
+    onChange: setBrand,
+    placeholder: "Brand / product name (optional)"
+  }), /*#__PURE__*/React.createElement(TxtIn, {
+    value: notes,
+    onChange: setNotes,
+    placeholder: "Notes (optional)"
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    onClick: addProduct,
+    disabled: !name.trim(),
+    style: {
+      flex: 1,
+      justifyContent: "center"
+    }
+  }, "Add Product"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => {
+      setShowAdd(false);
+      setName("");
+      setBrand("");
+      setNotes("");
+      setShowSugs(false);
+    },
+    variant: "ghost"
+  }, "Cancel")))), conflicts.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: T.redSoft,
+      border: `1px solid ${T.red}33`,
+      borderRadius: 12,
+      padding: "12px 14px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.red,
+      fontWeight: 700,
+      fontSize: 13,
+      marginBottom: 6
+    }
+  }, "⚠️ ", conflicts.length, " ingredient conflict", conflicts.length > 1 ? "s" : ""), conflicts.map((c, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, "• ", c.p1.genericName, " + ", c.p2.genericName, " — schedule at different sessions or days"))), profile.products.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement(Lbl, {
+    style: {
+      marginBottom: 0
+    }
+  }, profile.products.length, " product", profile.products.length !== 1 ? "s" : ""), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: T.muted
+    }
+  }, profile.products.filter(p => p.scheduled).length, " scheduled")), profile.products.map((p, i) => {
+    const col = pcolor(p);
+    const isEditing = editId === p.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      style: {
+        padding: "11px 0",
+        borderBottom: i < profile.products.length - 1 ? `1px solid ${T.border}` : "none"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 10,
+        height: 10,
+        borderRadius: "50%",
+        background: col.border,
+        flexShrink: 0,
+        marginTop: 3
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 600,
+        color: T.text,
+        fontSize: 13
+      }
+    }, p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.muted,
+        fontWeight: 400,
+        fontSize: 12
+      }
+    }, " · ", p.brandName)), p.scheduled ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 6,
+        marginTop: 3,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        background: col.bg,
+        color: col.text,
+        borderRadius: 20,
+        padding: "1px 8px",
+        fontSize: 11,
+        fontWeight: 600
+      }
+    }, p.session === "both" ? "AM+PM" : p.session?.toUpperCase(), " · ", FREQS[p.frequency] || p.frequency)) : /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: T.muted,
+        fontStyle: "italic",
+        marginTop: 2
+      }
+    }, "Not scheduled"), p.notes && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: T.muted,
+        marginTop: 2
+      }
+    }, p.notes.slice(0, 50))), /*#__PURE__*/React.createElement("button", {
+      onClick: () => setEditId(isEditing ? null : p.id),
+      style: {
+        background: T.faint,
+        border: `1px solid ${T.border}`,
+        borderRadius: 8,
+        padding: "5px 10px",
+        fontSize: 11,
+        color: T.text,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif",
+        flexShrink: 0
+      }
+    }, p.scheduled ? "Edit" : "Schedule"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => removeProduct(p.id),
+      style: {
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: T.muted,
+        fontSize: 20,
+        lineHeight: 1,
+        padding: "0 2px",
+        flexShrink: 0
+      }
+    }, "×")), isEditing && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 10,
+        marginLeft: 22,
+        background: T.faint,
+        border: `1px solid ${T.border}`,
+        borderRadius: 10,
+        padding: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+      style: {
+        fontSize: 10
+      }
+    }, "Session"), /*#__PURE__*/React.createElement("select", {
+      value: p.session || "",
+      onChange: e => updateSchedule(p.id, {
+        session: e.target.value
+      }),
+      style: selSty
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "Select…"), /*#__PURE__*/React.createElement("option", {
+      value: "am"
+    }, "AM"), /*#__PURE__*/React.createElement("option", {
+      value: "pm"
+    }, "PM"), /*#__PURE__*/React.createElement("option", {
+      value: "both"
+    }, "AM + PM"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+      style: {
+        fontSize: 10
+      }
+    }, "Frequency"), /*#__PURE__*/React.createElement("select", {
+      value: p.frequency || "",
+      onChange: e => updateSchedule(p.id, {
+        frequency: e.target.value
+      }),
+      style: selSty
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "Select…"), Object.entries(FREQS).map(([k, v]) => /*#__PURE__*/React.createElement("option", {
+      key: k,
+      value: k
+    }, v))))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 8
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+      style: {
+        fontSize: 10
+      }
+    }, "Start date"), /*#__PURE__*/React.createElement("input", {
+      type: "date",
+      value: p.nextDate || todayStr(),
+      onChange: e => updateSchedule(p.id, {
+        nextDate: e.target.value
+      }),
+      style: selSty
+    })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+      style: {
+        fontSize: 10
+      }
+    }, "Step order"), /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      min: "1",
+      value: p.stepOrder || 1,
+      onChange: e => updateSchedule(p.id, {
+        stepOrder: parseInt(e.target.value) || 1
+      }),
+      style: selSty
+    }))), /*#__PURE__*/React.createElement(Btn, {
+      onClick: () => {
+        const ready = p.session && p.frequency;
+        updateSchedule(p.id, {
+          scheduled: !!ready,
+          nextDate: p.nextDate || todayStr(),
+          stepOrder: p.stepOrder || 1
+        });
+        if (ready) setEditId(null);
+      },
+      style: {
+        justifyContent: "center"
+      },
+      disabled: !p.session || !p.frequency
+    }, p.session && p.frequency ? "Save Schedule" : "Pick session & frequency")));
+  })), profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: 48
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 12
+    }
+  }, "🧴"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Cormorant Garamond',serif",
+      fontSize: 16,
+      fontWeight: 700,
+      color: T.text,
+      marginBottom: 8
+    }
+  }, "Add your products"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: T.muted,
+      marginBottom: 20
+    }
+  }, "Cleansers, serums, treatments, masks — anything you use. Or import them from the Claude.ai version via Sync."), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => setShowAdd(true)
+  }, "+ Add First Product")));
 };
 
 // ─── MAIN APP ───────────────────────────────────────────────────────────────────
 function App() {
-  const [profile,setProfile]       = useState(()=>{ const s=load(); return s||{...EMPTY_PROFILE}; });
-  const [savedFlash,setSavedFlash] = useState(false);
-  const [showData,setShowData]     = useState(false);
-  const [importText,setImportText] = useState("");
-  const [dataMsg,setDataMsg]       = useState("");
-
+  const [profile, setProfile] = useState(() => {
+    const s = load();
+    return s || {
+      ...EMPTY_PROFILE
+    };
+  });
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [showData, setShowData] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [dataMsg, setDataMsg] = useState("");
   const update = useCallback(patch => {
     setProfile(cur => {
-      const next = {...cur, ...patch};
+      const next = {
+        ...cur,
+        ...patch
+      };
       save(next);
       return next;
     });
-  },[]);
-
+  }, []);
   const prevProfile = useRef(null);
-  useEffect(()=>{
-    if(prevProfile.current !== null){
+  useEffect(() => {
+    if (prevProfile.current !== null) {
       setSavedFlash(true);
-      const t = setTimeout(()=>setSavedFlash(false),1200);
-      return ()=>clearTimeout(t);
+      const t = setTimeout(() => setSavedFlash(false), 1200);
+      return () => clearTimeout(t);
     }
     prevProfile.current = profile;
-  },[profile]);
-
-  const [activeTab,setActiveTab] = useState(0);
-  const TABS = ["📅 Calendar","👤 Profile","🧴 Products"];
-
-  const [imgLoading,setImgLoading] = useState(false);
-  const [imgError,setImgError]     = useState("");
+  }, [profile]);
+  const [activeTab, setActiveTab] = useState(0);
+  const TABS = ["📅 Calendar", "👤 Profile", "🧴 Products"];
+  const [imgLoading, setImgLoading] = useState(false);
+  const [imgError, setImgError] = useState("");
   const skinImgs = profile.skinImgs || [];
   const setSkinImgs = fn => {
-    update({skinImgs: typeof fn==="function" ? fn(profile.skinImgs||[]) : fn});
+    update({
+      skinImgs: typeof fn === "function" ? fn(profile.skinImgs || []) : fn
+    });
   };
-
   const handleImg = async e => {
-    const files = Array.from(e.target.files||[]); if(!files.length) return; e.target.value="";
-    setImgError(""); setImgLoading(true);
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    e.target.value = "";
+    setImgError("");
+    setImgLoading(true);
     const loaded = [];
-    const errs   = [];
-    for(const file of files){
-      try{
+    const errs = [];
+    for (const file of files) {
+      try {
         const img = await loadImage(file);
-        const preview = img.preview || URL.createObjectURL(
-          new Blob([Uint8Array.from(atob(img.b64),c=>c.charCodeAt(0))],{type:img.mime})
-        );
-        loaded.push({b64:img.b64, mime:img.mime, preview});
-      }catch(err){
-        const m = err.message||"";
-        errs.push(m==="HEIC_DECODE_FAILED"
-          ? "iPhone HEIC format not supported. In Settings → Camera → Formats, choose 'Most Compatible' (JPEG), or screenshot the photo."
-          : (m || "Unknown error reading photo. Try a screenshot."));
+        const preview = img.preview || URL.createObjectURL(new Blob([Uint8Array.from(atob(img.b64), c => c.charCodeAt(0))], {
+          type: img.mime
+        }));
+        loaded.push({
+          b64: img.b64,
+          mime: img.mime,
+          preview
+        });
+      } catch (err) {
+        const m = err.message || "";
+        errs.push(m === "HEIC_DECODE_FAILED" ? "iPhone HEIC format not supported. In Settings → Camera → Formats, choose 'Most Compatible' (JPEG), or screenshot the photo." : m || "Unknown error reading photo. Try a screenshot.");
       }
     }
-    if(loaded.length) setSkinImgs(cur => [...cur, ...loaded]);
-    if(errs.length)   setImgError(errs.join(" | "));
+    if (loaded.length) setSkinImgs(cur => [...cur, ...loaded]);
+    if (errs.length) setImgError(errs.join(" | "));
     setImgLoading(false);
   };
 
   // Export everything — SAME format ({v:4, profile} base64) as the Claude.ai version
   const exportData = () => {
     try {
-      const payload = JSON.stringify({v:4, profile});
+      const payload = JSON.stringify({
+        v: 4,
+        profile
+      });
       const b64 = btoa(unescape(encodeURIComponent(payload)));
-      if(navigator.clipboard?.writeText){
-        navigator.clipboard.writeText(b64).then(
-          ()=>setDataMsg("✓ Copied to clipboard! Paste it into the other version's Import box."),
-          ()=>setDataMsg("Select the text below and copy it manually.")
-        );
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(b64).then(() => setDataMsg("✓ Copied to clipboard! Paste it into the other version's Import box."), () => setDataMsg("Select the text below and copy it manually."));
       } else {
         setDataMsg("Select the text below and copy it manually.");
       }
       setImportText(b64);
       setShowData(true);
-    } catch(e){ setDataMsg("Export failed: "+e.message); }
+    } catch (e) {
+      setDataMsg("Export failed: " + e.message);
+    }
   };
-
   const importData = () => {
     try {
       const raw = importText.trim();
-      if(!raw){ setDataMsg("Paste your exported data first."); return; }
+      if (!raw) {
+        setDataMsg("Paste your exported data first.");
+        return;
+      }
       const json = decodeURIComponent(escape(atob(raw)));
       const parsed = parseProfileData(json);
-      if(!parsed){ setDataMsg("Couldn't read that data. Make sure you copied all of it."); return; }
+      if (!parsed) {
+        setDataMsg("Couldn't read that data. Make sure you copied all of it.");
+        return;
+      }
       setProfile(parsed);
       save(parsed);
-      setDataMsg(`✓ Imported ${parsed.products.length} products, ${(parsed.skinImgs||[]).length} photos!`);
-      setTimeout(()=>{ setShowData(false); setDataMsg(""); setImportText(""); }, 1800);
-    } catch(e){ setDataMsg("Import failed — the data may be incomplete. Try copying it again."); }
-  };
-
-  const renderTab = () => {
-    switch(activeTab) {
-      case 0: return <CalendarTab profile={profile} onUpdate={update}/>;
-
-      case 1: return (
-        <div style={{display:"flex",flexDirection:"column",gap:16}}>
-          <Card>
-            <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:22,fontWeight:700,color:T.text,marginBottom:4}}>My Skin Profile</div>
-            <div style={{fontSize:13,color:T.muted,marginBottom:18}}>Saved automatically on this device.</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-              <div><Lbl>Skin Type</Lbl>
-                <select value={profile.type} onChange={e=>update({type:e.target.value})} style={selSty}>
-                  <option value="">Select…</option>
-                  {SKIN_TYPES.map(t=><option key={t}>{t}</option>)}
-                </select>
-              </div>
-              <div><Lbl>Notes</Lbl><TxtIn value={profile.notes} onChange={v=>update({notes:v})} placeholder="Allergies, climate…"/></div>
-            </div>
-            <Lbl>Skin Concerns</Lbl>
-            <ConcernsSelector selected={profile.concerns} onChange={c=>update({concerns:c})}/>
-          </Card>
-
-          <Card>
-            <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,fontWeight:700,color:T.text,marginBottom:4}}>Skin Photos</div>
-            <div style={{fontSize:13,color:T.muted,marginBottom:12}}>Stored on this device only.</div>
-            {imgLoading&&<div style={{textAlign:"center",padding:16,color:T.muted}}>⏳ Loading…</div>}
-            {skinImgs.length>0&&(
-              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
-                {skinImgs.map((img,i)=>(
-                  <div key={i} style={{position:"relative",width:80,height:80,flexShrink:0}}>
-                    <img src={img.preview} alt="" style={{width:80,height:80,borderRadius:10,objectFit:"cover",border:`2px solid ${T.border}`}}/>
-                    <button onClick={()=>setSkinImgs(cur=>cur.filter((_,j)=>j!==i))}
-                      style={{position:"absolute",top:-6,right:-6,background:T.red,color:"#fff",border:"none",borderRadius:"50%",width:22,height:22,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',sans-serif",padding:0}}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!imgLoading&&(
-              <div style={{display:"flex",gap:10,marginBottom:8}}>
-                <label htmlFor="photo-profile-cam" style={{cursor:"pointer",position:"relative",display:"inline-block"}}>
-                  <div style={{background:T.accent,color:"#fff",borderRadius:100,padding:"10px 18px",fontSize:13,fontWeight:600,fontFamily:"'Inter',sans-serif"}}>📷 Camera</div>
-                  <input id="photo-profile-cam" type="file" accept="image/*" capture="user" onChange={handleImg}
-                    style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer"}}/>
-                </label>
-                <label htmlFor="photo-profile-lib" style={{cursor:"pointer",position:"relative",display:"inline-block"}}>
-                  <div style={{background:T.faint,color:T.accent,border:`1.5px solid ${T.accent}44`,borderRadius:100,padding:"10px 18px",fontSize:13,fontWeight:600,fontFamily:"'Inter',sans-serif"}}>🖼 Gallery</div>
-                  <input id="photo-profile-lib" type="file" accept="image/*" multiple onChange={handleImg}
-                    style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",opacity:0,cursor:"pointer"}}/>
-                </label>
-              </div>
-            )}
-            {imgError&&<div style={{color:T.red,fontSize:12,background:T.redSoft,padding:"10px 12px",borderRadius:8}}>⚠️ {imgError}</div>}
-          </Card>
-
-          <div style={{background:T.blueSoft,border:`1px solid ${T.blue}33`,borderRadius:12,padding:"12px 14px",fontSize:12,color:T.text,lineHeight:1.5}}>
-            💡 AI skin analysis, product scanning, and auto-routine-building live in the <strong>Claude.ai version</strong> of Skin Ritual. Use <strong>Sync</strong> (top right) to move products and photos between this phone app and that version.
-          </div>
-        </div>
-      );
-
-      case 2: return <ProductsTab profile={profile} onUpdate={update}/>;
-      default: return null;
+      setDataMsg(`✓ Imported ${parsed.products.length} products, ${(parsed.skinImgs || []).length} photos!`);
+      setTimeout(() => {
+        setShowData(false);
+        setDataMsg("");
+        setImportText("");
+      }, 1800);
+    } catch (e) {
+      setDataMsg("Import failed — the data may be incomplete. Try copying it again.");
     }
   };
-
-  return (
-    <div style={{minHeight:"100vh",background:T.bg,fontFamily:"'Inter',sans-serif"}}>
-      <style>{`
+  const renderTab = () => {
+    switch (activeTab) {
+      case 0:
+        return /*#__PURE__*/React.createElement(CalendarTab, {
+          profile: profile,
+          onUpdate: update
+        });
+      case 1:
+        return /*#__PURE__*/React.createElement("div", {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: 16
+          }
+        }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontFamily: "'Cormorant Garamond',serif",
+            fontSize: 22,
+            fontWeight: 700,
+            color: T.text,
+            marginBottom: 4
+          }
+        }, "My Skin Profile"), /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 13,
+            color: T.muted,
+            marginBottom: 18
+          }
+        }, "Saved automatically on this device."), /*#__PURE__*/React.createElement("div", {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 12,
+            marginBottom: 16
+          }
+        }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, null, "Skin Type"), /*#__PURE__*/React.createElement("select", {
+          value: profile.type,
+          onChange: e => update({
+            type: e.target.value
+          }),
+          style: selSty
+        }, /*#__PURE__*/React.createElement("option", {
+          value: ""
+        }, "Select…"), SKIN_TYPES.map(t => /*#__PURE__*/React.createElement("option", {
+          key: t
+        }, t)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, null, "Notes"), /*#__PURE__*/React.createElement(TxtIn, {
+          value: profile.notes,
+          onChange: v => update({
+            notes: v
+          }),
+          placeholder: "Allergies, climate…"
+        }))), /*#__PURE__*/React.createElement(Lbl, null, "Skin Concerns"), /*#__PURE__*/React.createElement(ConcernsSelector, {
+          selected: profile.concerns,
+          onChange: c => update({
+            concerns: c
+          })
+        })), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontFamily: "'Cormorant Garamond',serif",
+            fontSize: 20,
+            fontWeight: 700,
+            color: T.text,
+            marginBottom: 4
+          }
+        }, "Skin Photos"), /*#__PURE__*/React.createElement("div", {
+          style: {
+            fontSize: 13,
+            color: T.muted,
+            marginBottom: 12
+          }
+        }, "Stored on this device only."), imgLoading && /*#__PURE__*/React.createElement("div", {
+          style: {
+            textAlign: "center",
+            padding: 16,
+            color: T.muted
+          }
+        }, "⏳ Loading…"), skinImgs.length > 0 && /*#__PURE__*/React.createElement("div", {
+          style: {
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 12
+          }
+        }, skinImgs.map((img, i) => /*#__PURE__*/React.createElement("div", {
+          key: i,
+          style: {
+            position: "relative",
+            width: 80,
+            height: 80,
+            flexShrink: 0
+          }
+        }, /*#__PURE__*/React.createElement("img", {
+          src: img.preview,
+          alt: "",
+          style: {
+            width: 80,
+            height: 80,
+            borderRadius: 10,
+            objectFit: "cover",
+            border: `2px solid ${T.border}`
+          }
+        }), /*#__PURE__*/React.createElement("button", {
+          onClick: () => setSkinImgs(cur => cur.filter((_, j) => j !== i)),
+          style: {
+            position: "absolute",
+            top: -6,
+            right: -6,
+            background: T.red,
+            color: "#fff",
+            border: "none",
+            borderRadius: "50%",
+            width: 22,
+            height: 22,
+            cursor: "pointer",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "'Inter',sans-serif",
+            padding: 0
+          }
+        }, "✕")))), !imgLoading && /*#__PURE__*/React.createElement("div", {
+          style: {
+            display: "flex",
+            gap: 10,
+            marginBottom: 8
+          }
+        }, /*#__PURE__*/React.createElement("label", {
+          htmlFor: "photo-profile-cam",
+          style: {
+            cursor: "pointer",
+            position: "relative",
+            display: "inline-block"
+          }
+        }, /*#__PURE__*/React.createElement("div", {
+          style: {
+            background: T.accent,
+            color: "#fff",
+            borderRadius: 100,
+            padding: "10px 18px",
+            fontSize: 13,
+            fontWeight: 600,
+            fontFamily: "'Inter',sans-serif"
+          }
+        }, "📷 Camera"), /*#__PURE__*/React.createElement("input", {
+          id: "photo-profile-cam",
+          type: "file",
+          accept: "image/*",
+          capture: "user",
+          onChange: handleImg,
+          style: {
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            opacity: 0,
+            cursor: "pointer"
+          }
+        })), /*#__PURE__*/React.createElement("label", {
+          htmlFor: "photo-profile-lib",
+          style: {
+            cursor: "pointer",
+            position: "relative",
+            display: "inline-block"
+          }
+        }, /*#__PURE__*/React.createElement("div", {
+          style: {
+            background: T.faint,
+            color: T.accent,
+            border: `1.5px solid ${T.accent}44`,
+            borderRadius: 100,
+            padding: "10px 18px",
+            fontSize: 13,
+            fontWeight: 600,
+            fontFamily: "'Inter',sans-serif"
+          }
+        }, "🖼 Gallery"), /*#__PURE__*/React.createElement("input", {
+          id: "photo-profile-lib",
+          type: "file",
+          accept: "image/*",
+          multiple: true,
+          onChange: handleImg,
+          style: {
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            opacity: 0,
+            cursor: "pointer"
+          }
+        }))), imgError && /*#__PURE__*/React.createElement("div", {
+          style: {
+            color: T.red,
+            fontSize: 12,
+            background: T.redSoft,
+            padding: "10px 12px",
+            borderRadius: 8
+          }
+        }, "⚠️ ", imgError)), /*#__PURE__*/React.createElement("div", {
+          style: {
+            background: T.blueSoft,
+            border: `1px solid ${T.blue}33`,
+            borderRadius: 12,
+            padding: "12px 14px",
+            fontSize: 12,
+            color: T.text,
+            lineHeight: 1.5
+          }
+        }, "💡 AI skin analysis, product scanning, and auto-routine-building live in the ", /*#__PURE__*/React.createElement("strong", null, "Claude.ai version"), " of Skin Ritual. Use ", /*#__PURE__*/React.createElement("strong", null, "Sync"), " (top right) to move products and photos between this phone app and that version."));
+      case 2:
+        return /*#__PURE__*/React.createElement(ProductsTab, {
+          profile: profile,
+          onUpdate: update
+        });
+      default:
+        return null;
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      minHeight: "100vh",
+      background: T.bg,
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, /*#__PURE__*/React.createElement("style", null, `
         input:focus,select:focus{border-color:${T.accent}!important;box-shadow:0 0 0 3px ${T.accentSoft}!important;}
         button:hover:not(:disabled){opacity:0.88;transform:translateY(-1px);}
         button:active:not(:disabled){transform:translateY(0);}
-      `}</style>
-      {/* Header */}
-      <div style={{background:`linear-gradient(135deg,#fff,${T.accentSoft})`,borderBottom:`1px solid ${T.border}`,padding:"14px 20px",display:"flex",alignItems:"center",gap:14,boxShadow:"0 1px 12px rgba(232,131,122,0.08)"}}>
-        <div style={{width:38,height:38,borderRadius:"50%",background:`linear-gradient(135deg,${T.accent},${T.peach})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,boxShadow:"0 2px 10px rgba(232,131,122,0.3)"}}>✦</div>
-        <div>
-          <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:20,fontWeight:700,color:T.text}}>Skin Ritual</div>
-          <div style={{fontSize:10,color:T.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>Phone Tracker</div>
-        </div>
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
-          {savedFlash&&<span style={{fontSize:11,color:T.green,fontWeight:600}}>✓ Saved</span>}
-          <button onClick={()=>{setShowData(true);setDataMsg("");setImportText("");}}
-            style={{background:T.accentSoft,color:T.accent,border:`1.5px solid ${T.accent}44`,borderRadius:100,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
-            ⇄ Sync
-          </button>
-        </div>
-      </div>
-      {/* Tabs */}
-      <div style={{background:"#fff",borderBottom:`1px solid ${T.border}`,display:"flex",overflowX:"auto",padding:"0 8px"}}>
-        {TABS.map((tab,i)=>(
-          <button key={tab} onClick={()=>setActiveTab(i)} style={{padding:"13px 11px",background:"none",border:"none",whiteSpace:"nowrap",borderBottom:`2.5px solid ${activeTab===i?T.accent:"transparent"}`,color:activeTab===i?T.accent:T.muted,fontWeight:activeTab===i?700:400,fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif",transition:"all 0.15s"}}>
-            {tab}
-          </button>
-        ))}
-      </div>
-      {/* Content */}
-      <div style={{maxWidth:860,margin:"0 auto",padding:"20px 16px 80px"}}>
-        {renderTab()}
-      </div>
-
-      {/* Sync / Export-Import modal */}
-      {showData&&(
-        <div onClick={()=>setShowData(false)} style={{position:"fixed",inset:0,background:"rgba(44,36,32,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:520,maxHeight:"85vh",overflowY:"auto",boxShadow:T.shadowMd,padding:24}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-              <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:22,fontWeight:700,color:T.text}}>Move data between versions</div>
-              <button onClick={()=>setShowData(false)} style={{background:T.faint,border:"none",borderRadius:"50%",width:32,height:32,cursor:"pointer",fontSize:16,color:T.muted}}>×</button>
-            </div>
-            <div style={{fontSize:13,color:T.muted,marginBottom:18,lineHeight:1.5}}>
-              Export here, then paste into Import on the Claude.ai version (or vice versa). Carries <strong style={{color:T.text}}>all products, photos, and schedule</strong>.
-            </div>
-
-            <div style={{marginBottom:20}}>
-              <Lbl>1 · Export from here</Lbl>
-              <Btn onClick={exportData} style={{width:"100%",justifyContent:"center",marginBottom:10}}>
-                📋 Copy My Data ({profile.products.length} products, {(profile.skinImgs||[]).length} photos)
-              </Btn>
-              {importText&&(
-                <textarea readOnly value={importText} onClick={e=>e.target.select()}
-                  style={{width:"100%",height:90,background:T.faint,border:`1.5px solid ${T.border}`,borderRadius:10,padding:"10px 12px",fontSize:10,color:T.muted,fontFamily:"monospace",resize:"none",boxSizing:"border-box"}}/>
-              )}
-            </div>
-
-            <div style={{borderTop:`1px solid ${T.border}`,paddingTop:18}}>
-              <Lbl>2 · Import data</Lbl>
-              <textarea value={importText} onChange={e=>setImportText(e.target.value)} placeholder="Paste exported data here…"
-                style={{width:"100%",height:90,background:T.faint,border:`1.5px solid ${T.border}`,borderRadius:10,padding:"10px 12px",fontSize:10,color:T.text,fontFamily:"monospace",resize:"none",boxSizing:"border-box",marginBottom:10}}/>
-              <Btn onClick={importData} variant="ghost" style={{width:"100%",justifyContent:"center"}}>
-                ⬇ Load This Data
-              </Btn>
-            </div>
-
-            {dataMsg&&(
-              <div style={{marginTop:14,fontSize:13,padding:"10px 14px",borderRadius:10,fontWeight:600,background:dataMsg.startsWith("✓")?T.greenSoft:T.accentSoft,color:dataMsg.startsWith("✓")?T.green:T.accent}}>
-                {dataMsg}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+      `), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: `linear-gradient(135deg,#fff,${T.accentSoft})`,
+      borderBottom: `1px solid ${T.border}`,
+      padding: "14px 20px",
+      display: "flex",
+      alignItems: "center",
+      gap: 14,
+      boxShadow: "0 1px 12px rgba(232,131,122,0.08)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 38,
+      height: 38,
+      borderRadius: "50%",
+      background: `linear-gradient(135deg,${T.accent},${T.peach})`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontSize: 17,
+      boxShadow: "0 2px 10px rgba(232,131,122,0.3)"
+    }
+  }, "✦"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Cormorant Garamond',serif",
+      fontSize: 20,
+      fontWeight: 700,
+      color: T.text
+    }
+  }, "Skin Ritual"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: T.muted,
+      letterSpacing: "0.12em",
+      textTransform: "uppercase"
+    }
+  }, "Phone Tracker")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: "auto",
+      display: "flex",
+      alignItems: "center",
+      gap: 10
+    }
+  }, savedFlash && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: T.green,
+      fontWeight: 600
+    }
+  }, "✓ Saved"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setShowData(true);
+      setDataMsg("");
+      setImportText("");
+    },
+    style: {
+      background: T.accentSoft,
+      color: T.accent,
+      border: `1.5px solid ${T.accent}44`,
+      borderRadius: 100,
+      padding: "6px 14px",
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif",
+      whiteSpace: "nowrap"
+    }
+  }, "⇄ Sync"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fff",
+      borderBottom: `1px solid ${T.border}`,
+      display: "flex",
+      overflowX: "auto",
+      padding: "0 8px"
+    }
+  }, TABS.map((tab, i) => /*#__PURE__*/React.createElement("button", {
+    key: tab,
+    onClick: () => setActiveTab(i),
+    style: {
+      padding: "13px 11px",
+      background: "none",
+      border: "none",
+      whiteSpace: "nowrap",
+      borderBottom: `2.5px solid ${activeTab === i ? T.accent : "transparent"}`,
+      color: activeTab === i ? T.accent : T.muted,
+      fontWeight: activeTab === i ? 700 : 400,
+      fontSize: 12,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif",
+      transition: "all 0.15s"
+    }
+  }, tab))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 860,
+      margin: "0 auto",
+      padding: "20px 16px 80px"
+    }
+  }, renderTab()), showData && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setShowData(false),
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(44,36,32,0.5)",
+      zIndex: 1000,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: "#fff",
+      borderRadius: 20,
+      width: "100%",
+      maxWidth: 520,
+      maxHeight: "85vh",
+      overflowY: "auto",
+      boxShadow: T.shadowMd,
+      padding: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Cormorant Garamond',serif",
+      fontSize: 22,
+      fontWeight: 700,
+      color: T.text
+    }
+  }, "Move data between versions"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowData(false),
+    style: {
+      background: T.faint,
+      border: "none",
+      borderRadius: "50%",
+      width: 32,
+      height: 32,
+      cursor: "pointer",
+      fontSize: 16,
+      color: T.muted
+    }
+  }, "×")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: T.muted,
+      marginBottom: 18,
+      lineHeight: 1.5
+    }
+  }, "Export here, then paste into Import on the Claude.ai version (or vice versa). Carries ", /*#__PURE__*/React.createElement("strong", {
+    style: {
+      color: T.text
+    }
+  }, "all products, photos, and schedule"), "."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement(Lbl, null, "1 · Export from here"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: exportData,
+    style: {
+      width: "100%",
+      justifyContent: "center",
+      marginBottom: 10
+    }
+  }, "📋 Copy My Data (", profile.products.length, " products, ", (profile.skinImgs || []).length, " photos)"), importText && /*#__PURE__*/React.createElement("textarea", {
+    readOnly: true,
+    value: importText,
+    onClick: e => e.target.select(),
+    style: {
+      width: "100%",
+      height: 90,
+      background: T.faint,
+      border: `1.5px solid ${T.border}`,
+      borderRadius: 10,
+      padding: "10px 12px",
+      fontSize: 10,
+      color: T.muted,
+      fontFamily: "monospace",
+      resize: "none",
+      boxSizing: "border-box"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: `1px solid ${T.border}`,
+      paddingTop: 18
+    }
+  }, /*#__PURE__*/React.createElement(Lbl, null, "2 · Import data"), /*#__PURE__*/React.createElement("textarea", {
+    value: importText,
+    onChange: e => setImportText(e.target.value),
+    placeholder: "Paste exported data here…",
+    style: {
+      width: "100%",
+      height: 90,
+      background: T.faint,
+      border: `1.5px solid ${T.border}`,
+      borderRadius: 10,
+      padding: "10px 12px",
+      fontSize: 10,
+      color: T.text,
+      fontFamily: "monospace",
+      resize: "none",
+      boxSizing: "border-box",
+      marginBottom: 10
+    }
+  }), /*#__PURE__*/React.createElement(Btn, {
+    onClick: importData,
+    variant: "ghost",
+    style: {
+      width: "100%",
+      justifyContent: "center"
+    }
+  }, "⬇ Load This Data")), dataMsg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      fontSize: 13,
+      padding: "10px 14px",
+      borderRadius: 10,
+      fontWeight: 600,
+      background: dataMsg.startsWith("✓") ? T.greenSoft : T.accentSoft,
+      color: dataMsg.startsWith("✓") ? T.green : T.accent
+    }
+  }, dataMsg))));
 }
-
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+root.render(/*#__PURE__*/React.createElement(App, null));
+// Hide the loading screen once mounted
+try {
+  var bootEl = document.getElementById('boot-status');
+  if (bootEl) bootEl.classList.add('hide');
+} catch(e) {}
 </script>
 </body>
 </html>
