@@ -1,0 +1,19 @@
+{
+  "name": "Skin Ritual",
+  "short_name": "Skin Ritual",
+  "description": "Skincare routine tracker and calendar",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FAF7F4",
+  "theme_color": "#FAF7F4",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
