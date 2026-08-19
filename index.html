@@ -880,6 +880,194 @@ const DaySheet = ({
   }))));
 };
 
+// DayAgenda: inline (non-modal) single-day AM/PM routine view, reused by the
+// calendar's "day" toggle. Mirrors DaySheet's Block rendering but renders
+// inline in the page instead of as a bottom sheet.
+const DayAgenda = ({
+  date,
+  profile,
+  onUpdate
+}) => {
+  const ds = dateStr(date);
+  const prods = profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(ds)).sort((a, b) => a.stepOrder - b.stepOrder);
+  const amProds = prods.filter(p => p.session === "am" || p.session === "both");
+  const pmProds = prods.filter(p => p.session === "pm" || p.session === "both");
+  const logs = profile.logs.filter(l => l.date === ds);
+  const toggle = (productId, session) => {
+    const ex = logs.find(l => l.productId === productId && l.session === session);
+    const done = !ex?.done;
+    const newLogs = ex ? profile.logs.map(l => l.date === ds && l.productId === productId && l.session === session ? {
+      ...l,
+      done
+    } : l) : [...profile.logs, {
+      id: Date.now(),
+      date: ds,
+      productId,
+      session,
+      done: true
+    }];
+    onUpdate({
+      logs: newLogs
+    });
+  };
+  const markAll = (prodList, session) => {
+    let newLogs = [...profile.logs];
+    prodList.forEach(p => {
+      const ex = newLogs.find(l => l.date === ds && l.productId === p.id && l.session === session);
+      if (ex) newLogs = newLogs.map(l => l.date === ds && l.productId === p.id && l.session === session ? {
+        ...l,
+        done: true
+      } : l);else newLogs = [...newLogs, {
+        id: Date.now() + Math.random(),
+        date: ds,
+        productId: p.id,
+        session,
+        done: true
+      }];
+    });
+    onUpdate({
+      logs: newLogs
+    });
+  };
+  const Block = ({
+    prods,
+    session,
+    accent,
+    label,
+    icon
+  }) => {
+    const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: T.faint,
+        borderRadius: 14,
+        border: `1px solid ${T.border}`,
+        overflow: "hidden",
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        background: `linear-gradient(135deg,${accent}18,${accent}08)`,
+        padding: "10px 16px",
+        borderBottom: `1px solid ${T.border}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 700,
+        color: accent,
+        fontSize: 14,
+        fontFamily: "'Cormorant Garamond',serif"
+      }
+    }, icon, " ", label), /*#__PURE__*/React.createElement("button", {
+      onClick: () => markAll(prods, session),
+      style: {
+        padding: "5px 14px",
+        borderRadius: 100,
+        border: `1.5px solid ${allDone ? T.green : T.border}`,
+        background: allDone ? T.greenSoft : "transparent",
+        color: allDone ? T.green : T.text,
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, allDone ? "✓ All Done" : "Mark All Done")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        padding: "8px 16px"
+      }
+    }, prods.length === 0 && /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: T.muted,
+        fontSize: 13,
+        fontStyle: "italic",
+        padding: "8px 0"
+      }
+    }, "Nothing scheduled."), prods.map((p, i) => {
+      const done = logs.find(l => l.productId === p.id && l.session === session)?.done || false;
+      const col = pcolor(p);
+      return /*#__PURE__*/React.createElement("div", {
+        key: p.id,
+        onClick: () => toggle(p.id, session),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "9px 0",
+          borderBottom: i < prods.length - 1 ? `1px solid ${T.border}` : "none",
+          cursor: "pointer"
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          border: `2px solid ${done ? T.green : col.border}`,
+          background: done ? T.green : "transparent",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "all 0.15s"
+        }
+      }, done && /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: "#fff",
+          fontSize: 10,
+          fontWeight: 700
+        }
+      }, "✓")), /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: 1
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: done ? T.muted : T.text,
+          fontSize: 13,
+          fontWeight: 600,
+          textDecoration: done ? "line-through" : "none"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: done ? T.muted : accent,
+          fontSize: 12,
+          marginRight: 6
+        }
+      }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: T.muted,
+          fontWeight: 400,
+          fontSize: 12
+        }
+      }, " · ", p.brandName)), p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
+        style: {
+          marginLeft: 8,
+          fontSize: 10,
+          background: col.bg,
+          color: col.text,
+          borderRadius: 20,
+          padding: "1px 7px"
+        }
+      }, FREQS[p.frequency])));
+    })));
+  };
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Block, {
+    prods: amProds,
+    session: "am",
+    accent: T.accent,
+    label: "Morning Routine",
+    icon: "🌅"
+  }), /*#__PURE__*/React.createElement(Block, {
+    prods: pmProds,
+    session: "pm",
+    accent: T.blue,
+    label: "Evening Routine",
+    icon: "🌙"
+  }));
+};
+
 // ─── CALENDAR ──────────────────────────────────────────────────────────────────
 const CalendarTab = ({
   profile,
@@ -889,26 +1077,28 @@ const CalendarTab = ({
   const [view, setView] = useState("month");
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selected, setSelected] = useState(null);
-  const prev = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() - 1, 1) : addDays(d, -7));
-  const next = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() + 1, 1) : addDays(d, 7));
-  const rangeStart = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth(), 1) : (() => {
+  const prev = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() - 1, 1) : view === "day" ? addDays(d, -1) : addDays(d, -7));
+  const next = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() + 1, 1) : view === "day" ? addDays(d, 1) : addDays(d, 7));
+  const rangeStart = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth(), 1) : view === "day" ? cursor : (() => {
     const d = new Date(cursor);
     d.setDate(d.getDate() - d.getDay());
     return d;
   })();
-  const rangeEnd = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0) : addDays(rangeStart, 6);
+  const rangeEnd = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0) : view === "day" ? cursor : addDays(rangeStart, 6);
   const days = [];
-  if (view === "month") {
-    for (let i = 0; i < rangeStart.getDay(); i++) days.push(null);
+  if (view !== "day") {
+    if (view === "month") {
+      for (let i = 0; i < rangeStart.getDay(); i++) days.push(null);
+    }
+    for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
   }
-  for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
   const scheduledProds = useCallback(date => {
     return profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(dateStr(date)));
   }, [profile.products]);
   const nonDailyProds = useCallback(date => {
     return scheduledProds(date).filter(p => p.frequency !== "daily");
   }, [scheduledProds]);
-  const title = view === "month" ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}` : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
+  const title = view === "month" ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}` : view === "day" ? fmtLong(cursor) : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -925,7 +1115,7 @@ const CalendarTab = ({
       padding: 3,
       border: `1px solid ${T.border}`
     }
-  }, ["month", "week"].map(v => /*#__PURE__*/React.createElement("button", {
+  }, ["month", "week", "day"].map(v => /*#__PURE__*/React.createElement("button", {
     key: v,
     onClick: () => setView(v),
     style: {
@@ -972,13 +1162,17 @@ const CalendarTab = ({
       fontSize: 14
     }
   }, "›"), /*#__PURE__*/React.createElement(Btn, {
-    onClick: () => setCursor(new Date(today.getFullYear(), today.getMonth(), 1)),
+    onClick: () => setCursor(view === "month" ? new Date(today.getFullYear(), today.getMonth(), 1) : new Date(today.getFullYear(), today.getMonth(), today.getDate())),
     variant: "ghost",
     style: {
       padding: "8px 14px",
       fontSize: 12
     }
-  }, "Today")), /*#__PURE__*/React.createElement("div", {
+  }, "Today")), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
+    date: cursor,
+    profile: profile,
+    onUpdate: onUpdate
+  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(7,1fr)",
@@ -1093,7 +1287,7 @@ const CalendarTab = ({
         color: T.muted
       }
     }, "+", chips.length - 2));
-  })), selected && /*#__PURE__*/React.createElement(DaySheet, {
+  }))), selected && /*#__PURE__*/React.createElement(DaySheet, {
     date: selected,
     profile: profile,
     onUpdate: onUpdate,
