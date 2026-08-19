@@ -67,7 +67,8 @@ const {
   useState,
   useRef,
   useEffect,
-  useCallback
+  useCallback,
+  useMemo
 } = React;
 
 // ─── THEME (matches the Claude.ai / Skin Ritual artifact) ─────────────────────
@@ -589,27 +590,143 @@ const ConcernsSelector = ({
   })))));
 };
 
-// ─── DAY SHEET ─────────────────────────────────────────────────────────────────
-const DaySheet = ({
-  date,
-  profile,
-  onUpdate,
-  onClose,
-  onNavigate
-}) => {
+// ─── ROTATING SESSION SCHEDULER ────────────────────────────────────────────
+// Coordinates ALL scheduled products in a session (am/pm) together, instead
+// of each product picking its own dates independently. This is what fixes
+// the "15 steps piled onto one PM" bug: non-daily products (weekly, monthly,
+// etc.) are spread across days so a session rarely exceeds SESSION_CAP.
+// Daily items always show — they're non-negotiable. If daily items alone
+// already exceed the cap, we still guarantee at least one rotation slot per
+// day so weekly/monthly actives aren't starved forever.
+// Explicit "skip" carries a product over so it's guaranteed to appear again
+// the very next day.
+const SESSION_CAP = 5;
+const MIN_ROTATION_SLOTS = 1;
+const daysBetween = (aStr, bStr) => {
+  const a = parseDate(aStr),
+    b = parseDate(bStr);
+  if (!a || !b) return 0;
+  return Math.round((b - a) / 86400000);
+};
+const addDaysStr = (ds, n) => dateStr(addDays(parseDate(ds), n));
+const computeEpoch = (products, session) => {
+  const dates = products.filter(p => p.scheduled && (p.session === session || p.session === "both") && p.nextDate).map(p => p.nextDate).sort();
+  return dates[0] || todayStr();
+};
+const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP) => {
+  const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
+  const daily = sessionProducts.filter(p => p.frequency === "daily" && !p.isOneOff);
+  const nonDaily = sessionProducts.filter(p => p.frequency !== "daily" && !p.isOneOff && p.nextDate);
+  const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
+  const lastServed = {};
+  let pendingCarry = new Set();
+  const schedule = {};
+  let cur = epoch;
+  let guard = 0;
+  while (cur <= toDate && guard < 3000) {
+    guard++;
+    const ds = cur;
+    const dayList = [];
+    daily.forEach(p => {
+      dayList.push({
+        productId: p.id,
+        carried: false
+      });
+      lastServed[p.id] = ds;
+    });
+    oneOffs.forEach(p => {
+      if (p.nextDate === ds) {
+        dayList.push({
+          productId: p.id,
+          carried: false
+        });
+        lastServed[p.id] = ds;
+      }
+    });
+    const carriedIds = new Set(pendingCarry);
+    nonDaily.forEach(p => {
+      if (carriedIds.has(p.id)) {
+        dayList.push({
+          productId: p.id,
+          carried: true
+        });
+        lastServed[p.id] = ds;
+      }
+    });
+    pendingCarry = new Set();
+    const guaranteedCount = dayList.length;
+    const hadCarry = carriedIds.size > 0;
+    const budget = guaranteedCount >= cap ? hadCarry ? 0 : MIN_ROTATION_SLOTS : cap - guaranteedCount;
+    if (budget > 0) {
+      const candidates = nonDaily.filter(p => !carriedIds.has(p.id)).map(p => {
+        const iv = FREQ_DAYS[p.frequency] || 7;
+        const last = lastServed[p.id];
+        const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
+        const due = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
+        return {
+          p,
+          due,
+          overdue: since - iv
+        };
+      }).filter(c => c.due).sort((a, b) => b.overdue - a.overdue || (a.p.stepOrder || 0) - (b.p.stepOrder || 0));
+      candidates.slice(0, budget).forEach(c => {
+        dayList.push({
+          productId: c.p.id,
+          carried: false
+        });
+        lastServed[c.p.id] = ds;
+      });
+    }
+    dayList.sort((a, b) => {
+      const pa = products.find(p => p.id === a.productId);
+      const pb = products.find(p => p.id === b.productId);
+      return (pa?.stepOrder || 0) - (pb?.stepOrder || 0);
+    });
+    schedule[ds] = dayList;
+    dayList.forEach(({
+      productId
+    }) => {
+      const log = logs.find(l => l.date === ds && l.productId === productId && l.session === session);
+      if (log && log.skipped && !log.done) pendingCarry.add(productId);
+    });
+    cur = addDaysStr(cur, 1);
+  }
+  return schedule;
+};
+// Look up the resolved product list (with `carried` flag) for one date/session.
+const queueFor = (schedule, products, date) => {
   const ds = dateStr(date);
-  const isToday = date.toDateString() === new Date().toDateString();
-  const prods = profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(ds)).sort((a, b) => a.stepOrder - b.stepOrder);
-  const amProds = prods.filter(p => p.session === "am" || p.session === "both");
-  const pmProds = prods.filter(p => p.session === "pm" || p.session === "both");
-  const logs = profile.logs.filter(l => l.date === ds);
-  const toggle = (productId, session) => {
-    const ex = logs.find(l => l.productId === productId && l.session === session);
+  const entries = schedule[ds] || [];
+  return entries.map(e => ({
+    ...products.find(p => p.id === e.productId),
+    carried: e.carried
+  })).filter(p => p.id);
+};
+
+// ─── ROUTINE BLOCK ──────────────────────────────────────────────────────────
+// Shared AM/PM checklist block used by both the DaySheet modal and the
+// inline Day view. Each row supports Done (checkbox) and Skip (carries the
+// item over to guarantee it appears again tomorrow).
+const RoutineBlock = ({
+  prods,
+  session,
+  accent,
+  label,
+  icon,
+  ds,
+  logs,
+  onUpdate,
+  allLogs
+}) => {
+  const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
+  const toggleDone = (productId, session) => {
+    const ex = allLogs.find(l => l.date === ds && l.productId === productId && l.session === session);
     const done = !ex?.done;
-    const newLogs = ex ? profile.logs.map(l => l.date === ds && l.productId === productId && l.session === session ? {
+    const newLogs = ex ? allLogs.map(l => l.date === ds && l.productId === productId && l.session === session ? {
       ...l,
-      done
-    } : l) : [...profile.logs, {
+      done,
+      skipped: done ? false : l.skipped
+    } : l) : [...allLogs, {
       id: Date.now(),
       date: ds,
       productId,
@@ -620,13 +737,33 @@ const DaySheet = ({
       logs: newLogs
     });
   };
+  const toggleSkip = (productId, session) => {
+    const ex = allLogs.find(l => l.date === ds && l.productId === productId && l.session === session);
+    const skipped = !ex?.skipped;
+    const newLogs = ex ? allLogs.map(l => l.date === ds && l.productId === productId && l.session === session ? {
+      ...l,
+      skipped,
+      done: skipped ? false : l.done
+    } : l) : [...allLogs, {
+      id: Date.now(),
+      date: ds,
+      productId,
+      session,
+      done: false,
+      skipped: true
+    }];
+    onUpdate({
+      logs: newLogs
+    });
+  };
   const markAll = (prodList, session) => {
-    let newLogs = [...profile.logs];
+    let newLogs = [...allLogs];
     prodList.forEach(p => {
       const ex = newLogs.find(l => l.date === ds && l.productId === p.id && l.session === session);
       if (ex) newLogs = newLogs.map(l => l.date === ds && l.productId === p.id && l.session === session ? {
         ...l,
-        done: true
+        done: true,
+        skipped: false
       } : l);else newLogs = [...newLogs, {
         id: Date.now() + Math.random(),
         date: ds,
@@ -639,130 +776,179 @@ const DaySheet = ({
       logs: newLogs
     });
   };
-  const Block = ({
-    prods,
-    session,
-    accent,
-    label,
-    icon
-  }) => {
-    const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: T.faint,
+      borderRadius: 14,
+      border: `1px solid ${T.border}`,
+      overflow: "hidden",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: `linear-gradient(135deg,${accent}18,${accent}08)`,
+      padding: "10px 16px",
+      borderBottom: `1px solid ${T.border}`,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: accent,
+      fontSize: 14,
+      fontFamily: "'Cormorant Garamond',serif"
+    }
+  }, icon, " ", label), /*#__PURE__*/React.createElement("button", {
+    onClick: () => markAll(prods, session),
+    style: {
+      padding: "5px 14px",
+      borderRadius: 100,
+      border: `1.5px solid ${allDone ? T.green : T.border}`,
+      background: allDone ? T.greenSoft : "transparent",
+      color: allDone ? T.green : T.text,
+      fontSize: 11,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, allDone ? "✓ All Done" : "Mark All Done")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "8px 16px"
+    }
+  }, prods.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 13,
+      fontStyle: "italic",
+      padding: "8px 0"
+    }
+  }, "Nothing scheduled."), prods.map((p, i) => {
+    const log = logs.find(l => l.productId === p.id && l.session === session);
+    const done = log?.done || false;
+    const skipped = log?.skipped && !done;
+    const col = pcolor(p);
     return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
       style: {
-        background: T.faint,
-        borderRadius: 14,
-        border: `1px solid ${T.border}`,
-        overflow: "hidden",
-        marginBottom: 12
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: `linear-gradient(135deg,${accent}18,${accent}08)`,
-        padding: "10px 16px",
-        borderBottom: `1px solid ${T.border}`,
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between"
+        gap: 10,
+        padding: "9px 0",
+        borderBottom: i < prods.length - 1 ? `1px solid ${T.border}` : "none"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      onClick: () => toggleDone(p.id, session),
+      style: {
+        width: 22,
+        height: 22,
+        borderRadius: "50%",
+        border: `2px solid ${done ? T.green : skipped ? T.muted : col.border}`,
+        background: done ? T.green : "transparent",
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        transition: "all 0.15s"
+      }
+    }, done && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 700
+      }
+    }, "✓")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        cursor: "pointer"
+      },
+      onClick: () => toggleDone(p.id, session)
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: done ? T.muted : skipped ? T.muted : T.text,
+        fontSize: 13,
+        fontWeight: 600,
+        textDecoration: done ? "line-through" : "none"
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
-        fontWeight: 700,
-        color: accent,
-        fontSize: 14,
-        fontFamily: "'Cormorant Garamond',serif"
+        color: done ? T.muted : accent,
+        fontSize: 12,
+        marginRight: 6
       }
-    }, icon, " ", label), /*#__PURE__*/React.createElement("button", {
-      onClick: () => markAll(prods, session),
+    }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
       style: {
-        padding: "5px 14px",
-        borderRadius: 100,
-        border: `1.5px solid ${allDone ? T.green : T.border}`,
-        background: allDone ? T.greenSoft : "transparent",
-        color: allDone ? T.green : T.text,
-        fontSize: 11,
+        color: T.muted,
+        fontWeight: 400,
+        fontSize: 12
+      }
+    }, " · ", p.brandName)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 5,
+        marginTop: 2
+      }
+    }, p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        background: col.bg,
+        color: col.text,
+        borderRadius: 20,
+        padding: "1px 7px"
+      }
+    }, FREQS[p.frequency]), p.carried && !done && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        background: T.faint,
+        color: T.muted,
+        border: `1px solid ${T.border}`,
+        borderRadius: 20,
+        padding: "1px 7px"
+      }
+    }, "carried from yesterday"), skipped && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        background: T.faint,
+        color: T.muted,
+        border: `1px solid ${T.border}`,
+        borderRadius: 20,
+        padding: "1px 7px"
+      }
+    }, "skipped · tomorrow"))), /*#__PURE__*/React.createElement("button", {
+      onClick: () => toggleSkip(p.id, session),
+      style: {
+        flexShrink: 0,
+        padding: "4px 10px",
+        borderRadius: 8,
+        border: `1px solid ${skipped ? T.accent : T.border}`,
+        background: skipped ? T.accentSoft : "transparent",
+        color: skipped ? T.accent : T.muted,
+        fontSize: 10,
         fontWeight: 600,
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, allDone ? "✓ All Done" : "Mark All Done")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        padding: "8px 16px"
-      }
-    }, prods.length === 0 && /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: T.muted,
-        fontSize: 13,
-        fontStyle: "italic",
-        padding: "8px 0"
-      }
-    }, "Nothing scheduled."), prods.map((p, i) => {
-      const done = logs.find(l => l.productId === p.id && l.session === session)?.done || false;
-      const col = pcolor(p);
-      return /*#__PURE__*/React.createElement("div", {
-        key: p.id,
-        onClick: () => toggle(p.id, session),
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "9px 0",
-          borderBottom: i < prods.length - 1 ? `1px solid ${T.border}` : "none",
-          cursor: "pointer"
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          width: 22,
-          height: 22,
-          borderRadius: "50%",
-          border: `2px solid ${done ? T.green : col.border}`,
-          background: done ? T.green : "transparent",
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "all 0.15s"
-        }
-      }, done && /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#fff",
-          fontSize: 10,
-          fontWeight: 700
-        }
-      }, "✓")), /*#__PURE__*/React.createElement("div", {
-        style: {
-          flex: 1
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: done ? T.muted : T.text,
-          fontSize: 13,
-          fontWeight: 600,
-          textDecoration: done ? "line-through" : "none"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: done ? T.muted : accent,
-          fontSize: 12,
-          marginRight: 6
-        }
-      }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: T.muted,
-          fontWeight: 400,
-          fontSize: 12
-        }
-      }, " · ", p.brandName)), p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
-        style: {
-          marginLeft: 8,
-          fontSize: 10,
-          background: col.bg,
-          color: col.text,
-          borderRadius: 20,
-          padding: "1px 7px"
-        }
-      }, FREQS[p.frequency])));
-    })));
-  };
+    }, skipped ? "Skipped" : "Skip"));
+  })));
+};
+
+// ─── DAY SHEET ─────────────────────────────────────────────────────────────────
+const DaySheet = ({
+  date,
+  profile,
+  onUpdate,
+  onClose,
+  onNavigate,
+  amSchedule,
+  pmSchedule
+}) => {
+  const ds = dateStr(date);
+  const isToday = date.toDateString() === new Date().toDateString();
+  const amProds = queueFor(amSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const logs = profile.logs.filter(l => l.date === ds);
   return /*#__PURE__*/React.createElement("div", {
     onClick: onClose,
     style: {
@@ -865,206 +1051,62 @@ const DaySheet = ({
       padding: "16px 20px 32px",
       flex: 1
     }
-  }, /*#__PURE__*/React.createElement(Block, {
+  }, /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: amProds,
     session: "am",
     accent: T.accent,
     label: "Morning Routine",
-    icon: "🌅"
-  }), /*#__PURE__*/React.createElement(Block, {
+    icon: "🌅",
+    ds: ds,
+    logs: logs,
+    onUpdate: onUpdate,
+    allLogs: profile.logs
+  }), /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: pmProds,
     session: "pm",
     accent: T.blue,
     label: "Evening Routine",
-    icon: "🌙"
+    icon: "🌙",
+    ds: ds,
+    logs: logs,
+    onUpdate: onUpdate,
+    allLogs: profile.logs
   }))));
 };
 
-// DayAgenda: inline (non-modal) single-day AM/PM routine view, reused by the
-// calendar's "day" toggle. Mirrors DaySheet's Block rendering but renders
-// inline in the page instead of as a bottom sheet.
+// DayAgenda: inline (non-modal) single-day AM/PM routine view, used by the
+// calendar's "day" toggle.
 const DayAgenda = ({
   date,
   profile,
-  onUpdate
+  onUpdate,
+  amSchedule,
+  pmSchedule
 }) => {
   const ds = dateStr(date);
-  const prods = profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(ds)).sort((a, b) => a.stepOrder - b.stepOrder);
-  const amProds = prods.filter(p => p.session === "am" || p.session === "both");
-  const pmProds = prods.filter(p => p.session === "pm" || p.session === "both");
+  const amProds = queueFor(amSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
   const logs = profile.logs.filter(l => l.date === ds);
-  const toggle = (productId, session) => {
-    const ex = logs.find(l => l.productId === productId && l.session === session);
-    const done = !ex?.done;
-    const newLogs = ex ? profile.logs.map(l => l.date === ds && l.productId === productId && l.session === session ? {
-      ...l,
-      done
-    } : l) : [...profile.logs, {
-      id: Date.now(),
-      date: ds,
-      productId,
-      session,
-      done: true
-    }];
-    onUpdate({
-      logs: newLogs
-    });
-  };
-  const markAll = (prodList, session) => {
-    let newLogs = [...profile.logs];
-    prodList.forEach(p => {
-      const ex = newLogs.find(l => l.date === ds && l.productId === p.id && l.session === session);
-      if (ex) newLogs = newLogs.map(l => l.date === ds && l.productId === p.id && l.session === session ? {
-        ...l,
-        done: true
-      } : l);else newLogs = [...newLogs, {
-        id: Date.now() + Math.random(),
-        date: ds,
-        productId: p.id,
-        session,
-        done: true
-      }];
-    });
-    onUpdate({
-      logs: newLogs
-    });
-  };
-  const Block = ({
-    prods,
-    session,
-    accent,
-    label,
-    icon
-  }) => {
-    const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
-    return /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: T.faint,
-        borderRadius: 14,
-        border: `1px solid ${T.border}`,
-        overflow: "hidden",
-        marginBottom: 12
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: `linear-gradient(135deg,${accent}18,${accent}08)`,
-        padding: "10px 16px",
-        borderBottom: `1px solid ${T.border}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontWeight: 700,
-        color: accent,
-        fontSize: 14,
-        fontFamily: "'Cormorant Garamond',serif"
-      }
-    }, icon, " ", label), /*#__PURE__*/React.createElement("button", {
-      onClick: () => markAll(prods, session),
-      style: {
-        padding: "5px 14px",
-        borderRadius: 100,
-        border: `1.5px solid ${allDone ? T.green : T.border}`,
-        background: allDone ? T.greenSoft : "transparent",
-        color: allDone ? T.green : T.text,
-        fontSize: 11,
-        fontWeight: 600,
-        cursor: "pointer",
-        fontFamily: "'Inter',sans-serif"
-      }
-    }, allDone ? "✓ All Done" : "Mark All Done")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        padding: "8px 16px"
-      }
-    }, prods.length === 0 && /*#__PURE__*/React.createElement("div", {
-      style: {
-        color: T.muted,
-        fontSize: 13,
-        fontStyle: "italic",
-        padding: "8px 0"
-      }
-    }, "Nothing scheduled."), prods.map((p, i) => {
-      const done = logs.find(l => l.productId === p.id && l.session === session)?.done || false;
-      const col = pcolor(p);
-      return /*#__PURE__*/React.createElement("div", {
-        key: p.id,
-        onClick: () => toggle(p.id, session),
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "9px 0",
-          borderBottom: i < prods.length - 1 ? `1px solid ${T.border}` : "none",
-          cursor: "pointer"
-        }
-      }, /*#__PURE__*/React.createElement("div", {
-        style: {
-          width: 22,
-          height: 22,
-          borderRadius: "50%",
-          border: `2px solid ${done ? T.green : col.border}`,
-          background: done ? T.green : "transparent",
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "all 0.15s"
-        }
-      }, done && /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: "#fff",
-          fontSize: 10,
-          fontWeight: 700
-        }
-      }, "✓")), /*#__PURE__*/React.createElement("div", {
-        style: {
-          flex: 1
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: done ? T.muted : T.text,
-          fontSize: 13,
-          fontWeight: 600,
-          textDecoration: done ? "line-through" : "none"
-        }
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: done ? T.muted : accent,
-          fontSize: 12,
-          marginRight: 6
-        }
-      }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
-        style: {
-          color: T.muted,
-          fontWeight: 400,
-          fontSize: 12
-        }
-      }, " · ", p.brandName)), p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
-        style: {
-          marginLeft: 8,
-          fontSize: 10,
-          background: col.bg,
-          color: col.text,
-          borderRadius: 20,
-          padding: "1px 7px"
-        }
-      }, FREQS[p.frequency])));
-    })));
-  };
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Block, {
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: amProds,
     session: "am",
     accent: T.accent,
     label: "Morning Routine",
-    icon: "🌅"
-  }), /*#__PURE__*/React.createElement(Block, {
+    icon: "🌅",
+    ds: ds,
+    logs: logs,
+    onUpdate: onUpdate,
+    allLogs: profile.logs
+  }), /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: pmProds,
     session: "pm",
     accent: T.blue,
     label: "Evening Routine",
-    icon: "🌙"
+    icon: "🌙",
+    ds: ds,
+    logs: logs,
+    onUpdate: onUpdate,
+    allLogs: profile.logs
   }));
 };
 
@@ -1092,12 +1134,22 @@ const CalendarTab = ({
     }
     for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
   }
+
+  // Horizon covers the visible range plus a buffer for day-nav clicks in
+  // DaySheet/DayAgenda without needing an immediate recompute.
+  const horizonDate = selected && selected > rangeEnd ? selected : rangeEnd;
+  const toDate = dateStr(addDays(horizonDate, 14));
+  const amEpoch = useMemo(() => computeEpoch(profile.products, "am"), [profile.products]);
+  const pmEpoch = useMemo(() => computeEpoch(profile.products, "pm"), [profile.products]);
+  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate), [profile.products, profile.logs, amEpoch, toDate]);
+  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate), [profile.products, profile.logs, pmEpoch, toDate]);
   const scheduledProds = useCallback(date => {
-    return profile.products.filter(p => p.scheduled && scheduledDates(p, date, date).includes(dateStr(date)));
-  }, [profile.products]);
-  const nonDailyProds = useCallback(date => {
-    return scheduledProds(date).filter(p => p.frequency !== "daily");
-  }, [scheduledProds]);
+    const am = queueFor(amSchedule, profile.products, date);
+    const pm = queueFor(pmSchedule, profile.products, date);
+    const seen = new Set();
+    return [...am, ...pm].filter(p => seen.has(p.id) ? false : (seen.add(p.id), true));
+  }, [amSchedule, pmSchedule, profile.products]);
+  const nonDailyProds = useCallback(date => scheduledProds(date).filter(p => p.frequency !== "daily"), [scheduledProds]);
   const title = view === "month" ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}` : view === "day" ? fmtLong(cursor) : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1171,7 +1223,9 @@ const CalendarTab = ({
   }, "Today")), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
     date: cursor,
     profile: profile,
-    onUpdate: onUpdate
+    onUpdate: onUpdate,
+    amSchedule: amSchedule,
+    pmSchedule: pmSchedule
   }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -1292,9 +1346,12 @@ const CalendarTab = ({
     profile: profile,
     onUpdate: onUpdate,
     onNavigate: dir => setSelected(d => addDays(d, dir)),
-    onClose: () => setSelected(null)
+    onClose: () => setSelected(null),
+    amSchedule: amSchedule,
+    pmSchedule: pmSchedule
   }));
 };
+
 
 // ─── PRODUCTS TAB (no AI — manual scheduling instead of "Build Routine") ──────
 const ProductsTab = ({
