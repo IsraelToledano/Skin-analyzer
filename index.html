@@ -165,6 +165,50 @@ const PRODUCT_COLORS = {
     text: T.accent
   }
 };
+// Word-boundary keyword match — avoids false positives like "pha" matching
+// inside "Pharma".
+const hasKeyword = (text, kw) => new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(text);
+
+// ─── RULE-BASED AUTO-SCHEDULER (no AI) ─────────────────────────────────────
+// Suggests session + frequency for an unscheduled product from its name/
+// notes, using conservative dermatologist-style defaults. Order matters —
+// checked top to bottom, first match wins.
+const AUTO_SCHEDULE_RULES = [
+  { keywords: ["spf", "sunscreen"], session: "am", frequency: "daily", step: 90 },
+  { keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"], session: "pm", frequency: "weekly", step: 70 },
+  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 40 },
+  { keywords: ["vitamin c", "ascorbic acid"], session: "am", frequency: "twice-weekly", step: 30 },
+  { keywords: ["niacinamide"], session: "am", frequency: "daily", step: 30 },
+  { keywords: ["self tan", "self-tan", "tanning"], session: "pm", frequency: "weekly", step: 80 },
+  { keywords: ["sheet mask", "clay mask", "sleeping mask", "mask", "clay"], session: "pm", frequency: "weekly", step: 60 },
+  { keywords: ["cleansing oil", "oil cleanser", "cleanser", "cleansing", "wash", "micellar"], session: "both", frequency: "daily", step: 10 },
+  { keywords: ["toner"], session: "both", frequency: "daily", step: 20 },
+  { keywords: ["lip mask", "lip balm"], session: "pm", frequency: "daily", step: 85 },
+  { keywords: ["eye cream"], session: "both", frequency: "daily", step: 55 },
+  { keywords: ["face oil", "rosehip", "squalane", "jojoba", "bio-oil", "bio oil", "oil"], session: "pm", frequency: "daily", step: 65 },
+  { keywords: ["moisturizer", "night cream", "cream", "lotion", "barrier", "ceramide"], session: "both", frequency: "daily", step: 75 },
+  { keywords: ["serum", "essence", "hyaluronic", "snail", "centella"], session: "pm", frequency: "daily", step: 50 }
+];
+const suggestSchedule = p => {
+  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  for (const rule of AUTO_SCHEDULE_RULES) {
+    if (rule.keywords.some(kw => hasKeyword(text, kw))) {
+      return {
+        session: rule.session,
+        frequency: rule.frequency,
+        stepOrder: rule.step
+      };
+    }
+  }
+  // Fallback: no recognizable category — conservative PM/weekly so it
+  // doesn't crowd the daily cap, and it's obviously flagged for review.
+  return {
+    session: "pm",
+    frequency: "weekly",
+    stepOrder: 50
+  };
+};
+
 const pcolor = p => {
   const g = (p.genericName || "").toLowerCase();
   if (g.includes("cleanser") || g.includes("wash")) return PRODUCT_COLORS.cleanser;
@@ -593,15 +637,25 @@ const ConcernsSelector = ({
 // ─── ROTATING SESSION SCHEDULER ────────────────────────────────────────────
 // Coordinates ALL scheduled products in a session (am/pm) together, instead
 // of each product picking its own dates independently. This is what fixes
-// the "15 steps piled onto one PM" bug: non-daily products (weekly, monthly,
-// etc.) are spread across days so a session rarely exceeds SESSION_CAP.
-// Daily items always show — they're non-negotiable. If daily items alone
-// already exceed the cap, we still guarantee at least one rotation slot per
-// day so weekly/monthly actives aren't starved forever.
-// Explicit "skip" carries a product over so it's guaranteed to appear again
-// the very next day.
+// the "more than 5 steps piled onto one session" bug.
+//
+// SESSION_CAP is a HARD cap: a session will never schedule more than `cap`
+// products in a single day. Daily products are NOT automatically exempt —
+// they compete for slots in the same rotation pool as weekly/monthly
+// products. In practice a daily product is "due" every single day (its
+// overdue score resets to 0 right after being served), so it will almost
+// always win a slot back the next day — but if a user schedules more daily
+// products in one session than the cap allows, the overflow rotates through
+// fairly (whichever daily item waited longest gets priority) rather than
+// silently ignoring the cap.
+//
+// Priority order for the day's slots:
+//   1. Pinned one-off products (nextDate === today) — always shown.
+//   2. Carried-over products (explicit "skip" carries a product so it's
+//      guaranteed to reappear the very next day).
+//   3. Remaining budget filled from the full rotation pool (daily +
+//      non-daily together), most-overdue-first, so nothing is starved.
 const SESSION_CAP = 5;
-const MIN_ROTATION_SLOTS = 1;
 const daysBetween = (aStr, bStr) => {
   const a = parseDate(aStr),
     b = parseDate(bStr);
@@ -615,8 +669,8 @@ const computeEpoch = (products, session) => {
 };
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
-  const daily = sessionProducts.filter(p => p.frequency === "daily" && !p.isOneOff);
-  const nonDaily = sessionProducts.filter(p => p.frequency !== "daily" && !p.isOneOff && p.nextDate);
+  // Everything that rotates through the cap together — daily included.
+  const rotating = sessionProducts.filter(p => !p.isOneOff);
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
   const lastServed = {};
   let pendingCarry = new Set();
@@ -627,13 +681,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     guard++;
     const ds = cur;
     const dayList = [];
-    daily.forEach(p => {
-      dayList.push({
-        productId: p.id,
-        carried: false
-      });
-      lastServed[p.id] = ds;
-    });
+    // 1. Pinned one-offs for today.
     oneOffs.forEach(p => {
       if (p.nextDate === ds) {
         dayList.push({
@@ -643,8 +691,9 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         lastServed[p.id] = ds;
       }
     });
+    // 2. Carried-over skips — guaranteed to reappear.
     const carriedIds = new Set(pendingCarry);
-    nonDaily.forEach(p => {
+    rotating.forEach(p => {
       if (carriedIds.has(p.id)) {
         dayList.push({
           productId: p.id,
@@ -654,12 +703,15 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       }
     });
     pendingCarry = new Set();
-    const guaranteedCount = dayList.length;
-    const hadCarry = carriedIds.size > 0;
-    const budget = guaranteedCount >= cap ? hadCarry ? 0 : MIN_ROTATION_SLOTS : cap - guaranteedCount;
+    // 3. Fill remaining budget (hard cap) from the full rotation pool,
+    //    most-overdue-first. Daily items are "due" every day (iv=1) so
+    //    they win almost every slot — but if there are more due daily
+    //    items than budget allows, whichever has waited longest wins,
+    //    and the rest naturally get priority the following day.
+    const budget = Math.max(0, cap - dayList.length);
     if (budget > 0) {
-      const candidates = nonDaily.filter(p => !carriedIds.has(p.id)).map(p => {
-        const iv = FREQ_DAYS[p.frequency] || 7;
+      const candidates = rotating.filter(p => !carriedIds.has(p.id)).map(p => {
+        const iv = FREQ_DAYS[p.frequency] || 1;
         const last = lastServed[p.id];
         const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
         const due = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
@@ -707,6 +759,22 @@ const queueFor = (schedule, products, date) => {
 // Shared AM/PM checklist block used by both the DaySheet modal and the
 // inline Day view. Each row supports Done (checkbox) and Skip (carries the
 // item over to guarantee it appears again tomorrow).
+// Default collapse state for a session block when it first mounts:
+//  - Not today → always start expanded (time-of-day framing only applies to "now").
+//  - Today, before noon → AM expanded, PM collapsed (you're in your AM window).
+//  - Today, 6pm or later → AM collapsed, PM expanded (you're in your PM window).
+//  - Today, noon–6pm (in between) → both collapsed; neither is "now".
+// Whatever the time-based default says, a session that's already fully done
+// starts collapsed regardless.
+const sessionDefaultCollapsed = (session, date, allDoneNow) => {
+  if (allDoneNow) return true;
+  const isToday = date.toDateString() === new Date().toDateString();
+  if (!isToday) return false;
+  const hour = new Date().getHours();
+  if (hour < 12) return session === "pm";
+  if (hour >= 18) return session === "am";
+  return true; // 12pm–6pm: neither session is "now"
+};
 const RoutineBlock = ({
   prods,
   session,
@@ -714,11 +782,19 @@ const RoutineBlock = ({
   label,
   icon,
   ds,
+  date,
   logs,
   onUpdate,
   allLogs
 }) => {
   const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
+  const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || new Date(), allDone));
+  const prevAllDone = useRef(allDone);
+  useEffect(() => {
+    // Auto-collapse the moment every step gets checked off/skipped-through.
+    if (allDone && !prevAllDone.current) setCollapsed(true);
+    prevAllDone.current = allDone;
+  }, [allDone]);
   const toggleDone = (productId, session) => {
     const ex = allLogs.find(l => l.date === ds && l.productId === productId && l.session === session);
     const done = !ex?.done;
@@ -776,6 +852,7 @@ const RoutineBlock = ({
       logs: newLogs
     });
   };
+  const doneCount = prods.filter(p => logs.find(l => l.productId === p.id && l.session === session)?.done).length;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.faint,
@@ -785,23 +862,45 @@ const RoutineBlock = ({
       marginBottom: 12
     }
   }, /*#__PURE__*/React.createElement("div", {
+    onClick: () => setCollapsed(c => !c),
     style: {
       background: `linear-gradient(135deg,${accent}18,${accent}08)`,
       padding: "10px 16px",
-      borderBottom: `1px solid ${T.border}`,
+      borderBottom: collapsed ? "none" : `1px solid ${T.border}`,
       display: "flex",
       alignItems: "center",
-      justifyContent: "space-between"
+      justifyContent: "space-between",
+      cursor: "pointer"
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
       fontWeight: 700,
       color: accent,
       fontSize: 14,
       fontFamily: "'Cormorant Garamond',serif"
     }
-  }, icon, " ", label), /*#__PURE__*/React.createElement("button", {
-    onClick: () => markAll(prods, session),
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "inline-block",
+      fontSize: 10,
+      transition: "transform 0.15s",
+      transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)"
+    }
+  }, "▾"), icon, " ", label, prods.length > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: T.muted,
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, doneCount, "/", prods.length)), /*#__PURE__*/React.createElement("button", {
+    onClick: e => {
+      e.stopPropagation();
+      markAll(prods, session);
+    },
     style: {
       padding: "5px 14px",
       borderRadius: 100,
@@ -813,7 +912,7 @@ const RoutineBlock = ({
       cursor: "pointer",
       fontFamily: "'Inter',sans-serif"
     }
-  }, allDone ? "✓ All Done" : "Mark All Done")), /*#__PURE__*/React.createElement("div", {
+  }, allDone ? "✓ All Done" : "Mark All Done")), !collapsed && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "8px 16px"
     }
@@ -1058,6 +1157,7 @@ const DaySheet = ({
     label: "Morning Routine",
     icon: "🌅",
     ds: ds,
+    date: date,
     logs: logs,
     onUpdate: onUpdate,
     allLogs: profile.logs
@@ -1068,6 +1168,7 @@ const DaySheet = ({
     label: "Evening Routine",
     icon: "🌙",
     ds: ds,
+    date: date,
     logs: logs,
     onUpdate: onUpdate,
     allLogs: profile.logs
@@ -1094,6 +1195,7 @@ const DayAgenda = ({
     label: "Morning Routine",
     icon: "🌅",
     ds: ds,
+    date: date,
     logs: logs,
     onUpdate: onUpdate,
     allLogs: profile.logs
@@ -1104,6 +1206,7 @@ const DayAgenda = ({
     label: "Evening Routine",
     icon: "🌙",
     ds: ds,
+    date: date,
     logs: logs,
     onUpdate: onUpdate,
     allLogs: profile.logs
@@ -1417,6 +1520,29 @@ const ProductsTab = ({
       } : p)
     });
   };
+  const unscheduled = profile.products.filter(p => !p.scheduled);
+  const [autoScheduledFlash, setAutoScheduledFlash] = useState(0);
+  const autoScheduleAll = () => {
+    if (unscheduled.length === 0) return;
+    const today = todayStr();
+    const updated = profile.products.map(p => {
+      if (p.scheduled) return p;
+      const s = suggestSchedule(p);
+      return {
+        ...p,
+        session: s.session,
+        frequency: s.frequency,
+        stepOrder: s.stepOrder,
+        nextDate: p.nextDate || today,
+        scheduled: true
+      };
+    });
+    onUpdate({
+      products: updated
+    });
+    setAutoScheduledFlash(unscheduled.length);
+    setTimeout(() => setAutoScheduledFlash(0), 3000);
+  };
   const conflicts = findConflicts(profile.products.filter(p => p.scheduled));
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -1442,18 +1568,42 @@ const ProductsTab = ({
       fontSize: 12,
       color: T.muted
     }
-  }, "Add a product, then set when it's used.")), !showAdd && /*#__PURE__*/React.createElement(Btn, {
-    onClick: () => setShowAdd(true),
+  }, "Add a product, then set when it's used.")), !showAdd && /*#__PURE__*/React.createElement("div", {
     style: {
-      flexShrink: 0
+      display: "flex",
+      gap: 8,
+      flexShrink: 0,
+      alignItems: "center"
     }
-  }, "+ Add"), saved && /*#__PURE__*/React.createElement("span", {
+  }, unscheduled.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: autoScheduleAll,
+    title: "Suggests session, frequency, and order for unscheduled products using skincare-layering rules — no AI. Review each product afterward and adjust as needed.",
+    style: {
+      padding: "8px 14px",
+      borderRadius: 100,
+      border: `1.5px solid ${T.border}`,
+      background: T.faint,
+      color: T.text,
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, "✨ Auto-Schedule (", unscheduled.length, ")"), /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => setShowAdd(true)
+  }, "+ Add")), saved && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       color: T.green,
       fontWeight: 600
     }
-  }, "✓ Saved")), showAdd && /*#__PURE__*/React.createElement("div", {
+  }, "✓ Saved"), autoScheduledFlash > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: T.green,
+      fontWeight: 600
+    }
+  }, "✓ Auto-scheduled ", autoScheduledFlash, " — review below")), showAdd && /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
