@@ -232,12 +232,24 @@ const findConflicts = products => {
 };
 
 // ─── DATE HELPERS ──────────────────────────────────────────────────────────────
-const todayStr = () => new Date().toISOString().split("T")[0];
+// Local-component based (NOT toISOString/UTC) so the date string always
+// matches the device's own calendar day, regardless of timezone offset or
+// time of day. toISOString() converts through UTC first, which silently
+// shifts local-midnight-anchored dates back a day in any positive-UTC-offset
+// timezone (e.g. Israel, UTC+2/+3) — that mismatch was why the calendar's
+// day keys stopped lining up with the scheduler's day keys and every day
+// showed "Nothing scheduled."
+const dateStr = d => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const todayStr = () => dateStr(new Date());
 const parseDate = s => {
   const d = new Date(s + "T12:00:00");
   return isNaN(d) ? null : d;
 };
-const dateStr = d => d.toISOString().split("T")[0];
 const addDays = (d, n) => {
   const r = new Date(d);
   r.setDate(r.getDate() + n);
@@ -1219,22 +1231,19 @@ const CalendarTab = ({
   onUpdate
 }) => {
   const today = new Date();
-  const [view, setView] = useState("month");
-  const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [view, setView] = useState("week");
+  const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
   const [selected, setSelected] = useState(null);
-  const prev = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() - 1, 1) : view === "day" ? addDays(d, -1) : addDays(d, -7));
-  const next = () => setCursor(d => view === "month" ? new Date(d.getFullYear(), d.getMonth() + 1, 1) : view === "day" ? addDays(d, 1) : addDays(d, 7));
-  const rangeStart = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth(), 1) : view === "day" ? cursor : (() => {
+  const prev = () => setCursor(d => view === "day" ? addDays(d, -1) : addDays(d, -7));
+  const next = () => setCursor(d => view === "day" ? addDays(d, 1) : addDays(d, 7));
+  const rangeStart = view === "day" ? cursor : (() => {
     const d = new Date(cursor);
     d.setDate(d.getDate() - d.getDay());
     return d;
   })();
-  const rangeEnd = view === "month" ? new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0) : view === "day" ? cursor : addDays(rangeStart, 6);
+  const rangeEnd = view === "day" ? cursor : addDays(rangeStart, 6);
   const days = [];
   if (view !== "day") {
-    if (view === "month") {
-      for (let i = 0; i < rangeStart.getDay(); i++) days.push(null);
-    }
     for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
   }
 
@@ -1253,7 +1262,7 @@ const CalendarTab = ({
     return [...am, ...pm].filter(p => seen.has(p.id) ? false : (seen.add(p.id), true));
   }, [amSchedule, pmSchedule, profile.products]);
   const nonDailyProds = useCallback(date => scheduledProds(date).filter(p => p.frequency !== "daily"), [scheduledProds]);
-  const title = view === "month" ? `${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}` : view === "day" ? fmtLong(cursor) : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
+  const title = view === "day" ? fmtLong(cursor) : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -1270,7 +1279,7 @@ const CalendarTab = ({
       padding: 3,
       border: `1px solid ${T.border}`
     }
-  }, ["month", "week", "day"].map(v => /*#__PURE__*/React.createElement("button", {
+  }, ["week", "day"].map(v => /*#__PURE__*/React.createElement("button", {
     key: v,
     onClick: () => setView(v),
     style: {
@@ -1317,7 +1326,7 @@ const CalendarTab = ({
       fontSize: 14
     }
   }, "›"), /*#__PURE__*/React.createElement(Btn, {
-    onClick: () => setCursor(view === "month" ? new Date(today.getFullYear(), today.getMonth(), 1) : new Date(today.getFullYear(), today.getMonth(), today.getDate())),
+    onClick: () => setCursor(new Date(today.getFullYear(), today.getMonth(), today.getDate())),
     variant: "ghost",
     style: {
       padding: "8px 14px",
@@ -1357,7 +1366,6 @@ const CalendarTab = ({
     });
     const ds = dateStr(date);
     const isToday = date.toDateString() === today.toDateString();
-    const isOther = view === "month" && date.getMonth() !== cursor.getMonth();
     const chips = nonDailyProds(date);
     const allProds = scheduledProds(date);
     const dayLogs = profile.logs.filter(l => l.date === ds);
@@ -1372,10 +1380,10 @@ const CalendarTab = ({
         background: isToday ? T.accentSoft : T.card,
         border: `1.5px solid ${isToday ? T.accent : T.border}`,
         borderRadius: 12,
-        padding: view === "month" ? "7px 7px 8px" : "8px",
+        padding: "8px",
         cursor: "pointer",
-        minHeight: view === "month" ? 76 : 90,
-        opacity: isOther ? 0.3 : 1,
+        minHeight: 90,
+        opacity: 1,
         boxShadow: isToday ? `0 0 0 2px ${T.accent}33` : "none",
         display: "flex",
         flexDirection: "column",
