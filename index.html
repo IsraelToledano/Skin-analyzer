@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-21.3";
+const APP_VERSION = "2026-08-21.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -176,21 +176,33 @@ const hasKeyword = (text, kw) => new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${
 // Suggests session + frequency for an unscheduled product from its name/
 // notes, using conservative dermatologist-style defaults. Order matters —
 // checked top to bottom, first match wins.
+//
+// `step` values all live on ONE shared canonical scale (see below) so a
+// product added today sorts correctly against products added months ago —
+// previously this table used its own 10-90 range that collided with
+// hand-set legacy step numbers (1-10), scrambling routine order whenever
+// an Auto-Scheduled product landed between older manually-ordered ones.
+//
+// Canonical stage order: cleanse (oil) → cleanse (gel/wash) → tone/mist →
+// AM actives (vit C / niacinamide) → exfoliant/acid → retinoid → serum/
+// essence → eye cream → mask → face oil → moisturizer → lip → self-tan →
+// SPF (always last, AM only).
 const AUTO_SCHEDULE_RULES = [
-  { keywords: ["spf", "sunscreen"], session: "am", frequency: "daily", step: 90 },
-  { keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"], session: "pm", frequency: "weekly", step: 70 },
-  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 40 },
-  { keywords: ["vitamin c", "ascorbic acid"], session: "am", frequency: "twice-weekly", step: 30 },
-  { keywords: ["niacinamide"], session: "am", frequency: "daily", step: 30 },
-  { keywords: ["self tan", "self-tan", "tanning"], session: "pm", frequency: "weekly", step: 80 },
-  { keywords: ["sheet mask", "clay mask", "sleeping mask", "mask", "clay"], session: "pm", frequency: "weekly", step: 60 },
-  { keywords: ["cleansing oil", "oil cleanser", "cleanser", "cleansing", "wash", "micellar"], session: "both", frequency: "daily", step: 10 },
-  { keywords: ["toner"], session: "both", frequency: "daily", step: 20 },
+  { keywords: ["spf", "sunscreen"], session: "am", frequency: "daily", step: 95 },
+  { keywords: ["self tan", "self-tan", "tanning"], session: "pm", frequency: "weekly", step: 88 },
   { keywords: ["lip mask", "lip balm"], session: "pm", frequency: "daily", step: 85 },
+  { keywords: ["cleansing oil", "oil cleanser"], session: "pm", frequency: "daily", step: 10 },
+  { keywords: ["sheet mask", "clay mask", "sleeping mask", "mask", "clay"], session: "pm", frequency: "weekly", step: 60 },
+  { keywords: ["cleanser", "cleansing", "wash", "micellar"], session: "both", frequency: "daily", step: 15 },
+  { keywords: ["toner", "thermal water", "spring water", "mist"], session: "both", frequency: "daily", step: 20 },
+  { keywords: ["vitamin c", "ascorbic acid"], session: "am", frequency: "twice-weekly", step: 35 },
+  { keywords: ["niacinamide"], session: "am", frequency: "daily", step: 35 },
+  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 40 },
+  { keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"], session: "pm", frequency: "weekly", step: 45 },
+  { keywords: ["serum", "essence", "hyaluronic", "snail", "centella"], session: "pm", frequency: "daily", step: 50 },
   { keywords: ["eye cream"], session: "both", frequency: "daily", step: 55 },
   { keywords: ["face oil", "rosehip", "squalane", "jojoba", "bio-oil", "bio oil", "oil"], session: "pm", frequency: "daily", step: 65 },
-  { keywords: ["moisturizer", "night cream", "cream", "lotion", "barrier", "ceramide"], session: "both", frequency: "daily", step: 75 },
-  { keywords: ["serum", "essence", "hyaluronic", "snail", "centella"], session: "pm", frequency: "daily", step: 50 }
+  { keywords: ["moisturizer", "night cream", "cream", "lotion", "barrier", "ceramide"], session: "both", frequency: "daily", step: 75 }
 ];
 const suggestSchedule = p => {
   const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
@@ -210,6 +222,17 @@ const suggestSchedule = p => {
     frequency: "weekly",
     stepOrder: 50
   };
+};
+// Classifies a product's canonical step number ONLY (session/frequency are
+// left alone — those are already user-configured for existing products).
+// Returns null if nothing matches, so callers can choose to leave the
+// existing value untouched rather than clobbering a deliberate custom order.
+const classifyStepOrder = p => {
+  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  for (const rule of AUTO_SCHEDULE_RULES) {
+    if (rule.keywords.some(kw => hasKeyword(text, kw))) return rule.step;
+  }
+  return null;
 };
 
 const pcolor = p => {
@@ -378,6 +401,24 @@ const MIGRATIONS = [{
     }
     return profile;
   }
+}, {
+  id: "step_order_normalize_v1",
+  // Re-numbers every product's stepOrder onto the single canonical scale
+  // used by Auto-Schedule (see classifyStepOrder), without touching
+  // session/frequency/scheduled. Fixes routines that got scrambled when
+  // Auto-Scheduled products (10-90 scale) landed between older hand-set
+  // products (1-10 scale). Products that don't match any known category
+  // keep their existing stepOrder rather than being reset.
+  apply: profile => ({
+    ...profile,
+    products: (profile.products || []).map(p => {
+      const step = classifyStepOrder(p);
+      return step === null ? p : {
+        ...p,
+        stepOrder: step
+      };
+    })
+  })
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
