@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-21.1";
+const APP_VERSION = "2026-08-21.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -684,7 +684,6 @@ const computeEpoch = (products, session) => {
 };
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
-  // Everything that rotates through the cap together — daily included.
   const rotating = sessionProducts.filter(p => !p.isOneOff);
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
   const lastServed = {};
@@ -696,6 +695,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     guard++;
     const ds = cur;
     const dayList = [];
+    const placedIds = new Set();
     // 1. Pinned one-offs for today.
     oneOffs.forEach(p => {
       if (p.nextDate === ds) {
@@ -704,28 +704,41 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           carried: false
         });
         lastServed[p.id] = ds;
+        placedIds.add(p.id);
       }
     });
     // 2. Carried-over skips — guaranteed to reappear.
     const carriedIds = new Set(pendingCarry);
     rotating.forEach(p => {
-      if (carriedIds.has(p.id)) {
+      if (carriedIds.has(p.id) && !placedIds.has(p.id)) {
         dayList.push({
           productId: p.id,
           carried: true
         });
         lastServed[p.id] = ds;
+        placedIds.add(p.id);
       }
     });
     pendingCarry = new Set();
-    // 3. Fill remaining budget (hard cap) from the full rotation pool,
-    //    most-overdue-first. Daily items are "due" every day (iv=1) so
-    //    they win almost every slot — but if there are more due daily
-    //    items than budget allows, whichever has waited longest wins,
-    //    and the rest naturally get priority the following day.
+    // 3. Mandatory dailies — "daily" means every day, not "most days if it
+    //    wins the rotation." These never compete for the cap; they're
+    //    guaranteed together every session so paired steps (e.g. an oil
+    //    cleanser that must be followed by a gel cleanser) never split apart.
+    rotating.forEach(p => {
+      if (p.frequency === "daily" && !placedIds.has(p.id) && daysBetween(p.nextDate, ds) >= 0) {
+        dayList.push({
+          productId: p.id,
+          carried: false
+        });
+        lastServed[p.id] = ds;
+        placedIds.add(p.id);
+      }
+    });
+    // 4. Remaining cap budget goes to non-daily rotating items only,
+    //    most-overdue-first.
     const budget = Math.max(0, cap - dayList.length);
     if (budget > 0) {
-      const candidates = rotating.filter(p => !carriedIds.has(p.id)).map(p => {
+      const candidates = rotating.filter(p => p.frequency !== "daily" && !placedIds.has(p.id)).map(p => {
         const iv = FREQ_DAYS[p.frequency] || 1;
         const last = lastServed[p.id];
         const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
