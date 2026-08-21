@@ -99,6 +99,9 @@ const T = {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
+// Bump this on every push so it's obvious whether a device has the latest code.
+// Format: YYYY-MM-DD.N (N = push count that day, resets each day)
+const APP_VERSION = "2026-08-21.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2316,7 +2319,14 @@ function App() {
       letterSpacing: "0.12em",
       textTransform: "uppercase"
     }
-  }, "Phone Tracker")), /*#__PURE__*/React.createElement("div", {
+  }, "Phone Tracker"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      color: T.muted,
+      opacity: 0.6,
+      marginTop: 1
+    }
+  }, "v", APP_VERSION)), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: "auto",
       display: "flex",
@@ -2439,6 +2449,13 @@ function App() {
       color: T.text
     }
   }, "all products, photos, and schedule"), "."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: T.muted,
+      opacity: 0.6,
+      marginBottom: 14
+    }
+  }, "App version: v", APP_VERSION), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 20
     }
