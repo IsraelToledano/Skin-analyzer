@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-21.2";
+const APP_VERSION = "2026-08-21.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -346,9 +346,55 @@ const load = () => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (data?.profile) return parseProfileData(data);
+    if (data?.profile) {
+      const parsed = parseProfileData(data);
+      const migrated = applyMigrations(parsed);
+      if (migrated && migrated !== parsed) save(migrated);
+      return migrated;
+    }
   } catch (e) {}
   return null;
+};
+// One-time, idempotent data patches — tracked via profile.migrations so
+// they never reapply. Currently: auto-link the oil cleanser + gel cleanser
+// as a paired step (never scheduled apart) without requiring the user to
+// re-export/import or manually configure anything.
+const MIGRATIONS = [{
+  id: "linked_cleanse_pair_v1",
+  apply: profile => {
+    const isOilCleanser = p => /cleansing oil/i.test(p.genericName || "") || /cleansing oil/i.test(p.brandName || "");
+    const isGelCleanser = p => /gel cleanser/i.test(p.genericName || "") || /gel cleanser/i.test(p.brandName || "");
+    const oil = (profile.products || []).find(isOilCleanser);
+    const gel = (profile.products || []).find(isGelCleanser);
+    if (oil && gel && oil.id !== gel.id && !oil.linkGroup && !gel.linkGroup) {
+      const group = `cleanse-pair-${oil.id}-${gel.id}`;
+      return {
+        ...profile,
+        products: profile.products.map(p => p.id === oil.id || p.id === gel.id ? {
+          ...p,
+          linkGroup: group
+        } : p)
+      };
+    }
+    return profile;
+  }
+}];
+const applyMigrations = profile => {
+  if (!profile) return profile;
+  const applied = new Set(profile.migrations || []);
+  let next = profile;
+  let changed = false;
+  MIGRATIONS.forEach(m => {
+    if (!applied.has(m.id)) {
+      next = m.apply(next);
+      applied.add(m.id);
+      changed = true;
+    }
+  });
+  return changed ? {
+    ...next,
+    migrations: [...applied]
+  } : next;
 };
 const save = profile => {
   try {
@@ -667,9 +713,14 @@ const ConcernsSelector = ({
 // Priority order for the day's slots:
 //   1. Pinned one-off products (nextDate === today) — always shown.
 //   2. Carried-over products (explicit "skip" carries a product so it's
-//      guaranteed to reappear the very next day).
-//   3. Remaining budget filled from the full rotation pool (daily +
-//      non-daily together), most-overdue-first, so nothing is starved.
+//      guaranteed to reappear the very next day). If a linked group member
+//      carries, its whole group carries with it.
+//   3. Remaining budget filled from the full rotation pool, most-overdue-first.
+//      Products can be "linked" (p.linkGroup shares a value) so they always
+//      compete AND get scheduled as one atomic unit — e.g. an oil cleanser
+//      that must always be followed by a gel cleanser. A linked group only
+//      gets scheduled if the FULL group fits in the remaining budget; it is
+//      never split across days.
 const SESSION_CAP = 5;
 const daysBetween = (aStr, bStr) => {
   const a = parseDate(aStr),
@@ -682,10 +733,21 @@ const computeEpoch = (products, session) => {
   const dates = products.filter(p => p.scheduled && (p.session === session || p.session === "both") && p.nextDate).map(p => p.nextDate).sort();
   return dates[0] || todayStr();
 };
+// Groups rotating products by shared p.linkGroup (unlinked products are
+// their own solo group of size 1).
+const groupRotating = rotating => {
+  const groups = {};
+  rotating.forEach(p => {
+    const key = p.linkGroup ? `g:${p.linkGroup}` : `solo:${p.id}`;
+    (groups[key] = groups[key] || []).push(p);
+  });
+  return Object.values(groups);
+};
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
   const rotating = sessionProducts.filter(p => !p.isOneOff);
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
+  const groups = groupRotating(rotating);
   const lastServed = {};
   let pendingCarry = new Set();
   const schedule = {};
@@ -707,54 +769,64 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         placedIds.add(p.id);
       }
     });
-    // 2. Carried-over skips — guaranteed to reappear.
+    // 2. Carried-over skips — guaranteed to reappear, whole group together.
     const carriedIds = new Set(pendingCarry);
-    rotating.forEach(p => {
-      if (carriedIds.has(p.id) && !placedIds.has(p.id)) {
-        dayList.push({
-          productId: p.id,
-          carried: true
+    groups.forEach(group => {
+      if (group.some(p => carriedIds.has(p.id))) {
+        group.forEach(p => {
+          if (!placedIds.has(p.id)) {
+            dayList.push({
+              productId: p.id,
+              carried: true
+            });
+            lastServed[p.id] = ds;
+            placedIds.add(p.id);
+          }
         });
-        lastServed[p.id] = ds;
-        placedIds.add(p.id);
       }
     });
     pendingCarry = new Set();
-    // 3. Mandatory dailies — "daily" means every day, not "most days if it
-    //    wins the rotation." These never compete for the cap; they're
-    //    guaranteed together every session so paired steps (e.g. an oil
-    //    cleanser that must be followed by a gel cleanser) never split apart.
-    rotating.forEach(p => {
-      if (p.frequency === "daily" && !placedIds.has(p.id) && daysBetween(p.nextDate, ds) >= 0) {
-        dayList.push({
-          productId: p.id,
-          carried: false
-        });
-        lastServed[p.id] = ds;
-        placedIds.add(p.id);
-      }
-    });
-    // 4. Remaining cap budget goes to non-daily rotating items only,
-    //    most-overdue-first.
+    // 3. Fill remaining budget from the group pool, most-overdue-first.
+    //    A group's overdue score is its most-overdue member; a group only
+    //    gets scheduled if every not-yet-placed member fits in the budget.
     const budget = Math.max(0, cap - dayList.length);
     if (budget > 0) {
-      const candidates = rotating.filter(p => p.frequency !== "daily" && !placedIds.has(p.id)).map(p => {
-        const iv = FREQ_DAYS[p.frequency] || 1;
-        const last = lastServed[p.id];
-        const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
-        const due = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
-        return {
-          p,
-          due,
-          overdue: since - iv
-        };
-      }).filter(c => c.due).sort((a, b) => b.overdue - a.overdue || (a.p.stepOrder || 0) - (b.p.stepOrder || 0));
-      candidates.slice(0, budget).forEach(c => {
-        dayList.push({
-          productId: c.p.id,
-          carried: false
+      const candidates = groups.map(group => {
+        const members = group.filter(p => !placedIds.has(p.id));
+        if (members.length === 0) return null;
+        let bestOverdue = -Infinity,
+          anyDue = false,
+          minStepOrder = Infinity;
+        members.forEach(p => {
+          const iv = FREQ_DAYS[p.frequency] || 1;
+          const last = lastServed[p.id];
+          const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
+          const due = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
+          if (due) {
+            anyDue = true;
+            bestOverdue = Math.max(bestOverdue, since - iv);
+          }
+          minStepOrder = Math.min(minStepOrder, p.stepOrder || 0);
         });
-        lastServed[c.p.id] = ds;
+        return anyDue ? {
+          members,
+          overdue: bestOverdue,
+          stepOrder: minStepOrder
+        } : null;
+      }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.stepOrder - b.stepOrder);
+      let remaining = budget;
+      candidates.forEach(c => {
+        if (c.members.length <= remaining) {
+          c.members.forEach(p => {
+            dayList.push({
+              productId: p.id,
+              carried: false
+            });
+            lastServed[p.id] = ds;
+            placedIds.add(p.id);
+          });
+          remaining -= c.members.length;
+        }
       });
     }
     dayList.sort((a, b) => {
@@ -763,11 +835,21 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       return (pa?.stepOrder || 0) - (pb?.stepOrder || 0);
     });
     schedule[ds] = dayList;
+    // If ANY member of a linked group is skipped, carry the WHOLE group
+    // forward so they land back together tomorrow rather than splitting.
+    const skippedToday = new Set();
     dayList.forEach(({
       productId
     }) => {
       const log = logs.find(l => l.date === ds && l.productId === productId && l.session === session);
-      if (log && log.skipped && !log.done) pendingCarry.add(productId);
+      if (log && log.skipped && !log.done) skippedToday.add(productId);
+    });
+    groups.forEach(group => {
+      if (group.some(p => skippedToday.has(p.id))) {
+        group.forEach(p => {
+          if (dayList.some(e => e.productId === p.id)) pendingCarry.add(p.id);
+        });
+      }
     });
     cur = addDaysStr(cur, 1);
   }
