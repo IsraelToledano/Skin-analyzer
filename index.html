@@ -875,6 +875,12 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
   const groups = groupRotating(rotating);
   const lastServed = {};
+  // Tracks how many times each product has been placed so far in this
+  // schedule build. Used ONLY as a tiebreaker (after overdue score) when
+  // filling budget in step 3 below — see the comment there for why this
+  // exists: without it, same-frequency products beyond the cap settle into
+  // a permanent "anchor" split instead of rotating fairly.
+  const servedCount = {};
   let pendingCarry = new Set();
   const schedule = {};
   let cur = epoch;
@@ -892,6 +898,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           carried: false
         });
         lastServed[p.id] = ds;
+        servedCount[p.id] = (servedCount[p.id] || 0) + 1;
         placedIds.add(p.id);
       }
     });
@@ -907,6 +914,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           pinned: true
         });
         lastServed[pin.productId] = ds;
+        servedCount[pin.productId] = (servedCount[pin.productId] || 0) + 1;
         placedIds.add(pin.productId);
       }
     });
@@ -921,6 +929,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
               carried: true
             });
             lastServed[p.id] = ds;
+            servedCount[p.id] = (servedCount[p.id] || 0) + 1;
             placedIds.add(p.id);
           }
         });
@@ -930,6 +939,15 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     // 3. Fill remaining budget from the group pool, most-overdue-first.
     //    A group's overdue score is its most-overdue member; a group only
     //    gets scheduled if every not-yet-placed member fits in the budget.
+    //    TIEBREAK: when overdue scores tie (the common case for several
+    //    same-frequency dailies added on the same date), fall back to
+    //    whichever group has been served FEWEST times so far, before
+    //    finally falling back to stepOrder. Without this, a pure
+    //    overdue/stepOrder sort is static — the same subset of tied
+    //    products wins the tie every single day forever (they're always
+    //    reset back to identical scores together), permanently starving
+    //    the rest down to whatever single slot remains, instead of every
+    //    product rotating through the cap evenly over time.
     const budget = Math.max(0, cap - dayList.length);
     if (budget > 0) {
       const candidates = groups.map(group => {
@@ -937,7 +955,8 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         if (members.length === 0) return null;
         let bestOverdue = -Infinity,
           anyDue = false,
-          minStepOrder = Infinity;
+          minStepOrder = Infinity,
+          minServedCount = Infinity;
         members.forEach(p => {
           const iv = FREQ_DAYS[p.frequency] || 1;
           const last = lastServed[p.id];
@@ -948,13 +967,15 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
             bestOverdue = Math.max(bestOverdue, since - iv);
           }
           minStepOrder = Math.min(minStepOrder, p.stepOrder || 0);
+          minServedCount = Math.min(minServedCount, servedCount[p.id] || 0);
         });
         return anyDue ? {
           members,
           overdue: bestOverdue,
-          stepOrder: minStepOrder
+          stepOrder: minStepOrder,
+          served: minServedCount
         } : null;
-      }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.stepOrder - b.stepOrder);
+      }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.served - b.served || a.stepOrder - b.stepOrder);
       let remaining = budget;
       candidates.forEach(c => {
         if (c.members.length <= remaining) {
@@ -964,6 +985,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
               carried: false
             });
             lastServed[p.id] = ds;
+            servedCount[p.id] = (servedCount[p.id] || 0) + 1;
             placedIds.add(p.id);
           });
           remaining -= c.members.length;
