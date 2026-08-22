@@ -201,7 +201,12 @@ const AUTO_SCHEDULE_RULES = [
   { keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"], session: "pm", frequency: "weekly", step: 45 },
   { keywords: ["serum", "essence", "hyaluronic", "snail", "centella"], session: "pm", frequency: "daily", step: 50 },
   { keywords: ["eye cream"], session: "both", frequency: "daily", step: 55 },
-  { keywords: ["face oil", "rosehip", "squalane", "jojoba", "bio-oil", "bio oil", "oil"], session: "pm", frequency: "daily", step: 65 },
+  // Heavy occlusives (mineral-oil-based body/scar oils) checked before the
+  // generic "oil" catch-all below — nightly full-face use of these compounds
+  // for oily/acne-prone/combination skin risks clogged pores, so default to
+  // targeted, less-frequent use rather than a daily step.
+  { keywords: ["bio-oil", "bio oil", "mineral oil", "petrolatum"], session: "pm", frequency: "twice-weekly", step: 65 },
+  { keywords: ["face oil", "rosehip", "squalane", "jojoba", "oil"], session: "pm", frequency: "daily", step: 65 },
   { keywords: ["moisturizer", "night cream", "cream", "lotion", "barrier", "ceramide"], session: "both", frequency: "daily", step: 75 }
 ];
 const suggestSchedule = p => {
@@ -233,6 +238,85 @@ const classifyStepOrder = p => {
     if (rule.keywords.some(kw => hasKeyword(text, kw))) return rule.step;
   }
   return null;
+};
+// Returns the first matching AUTO_SCHEDULE_RULES entry for a product, or
+// null if unclassified. Shared by the auto-scheduler and the recommendation
+// scorer so "what session/type is this product" is defined in one place.
+const findRule = p => {
+  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  return AUTO_SCHEDULE_RULES.find(rule => rule.keywords.some(kw => hasKeyword(text, kw))) || null;
+};
+
+// ─── RECOMMENDATION SCORING (for Swap / Add Step) ──────────────────────────
+// Concern → ingredient/type keywords a derm would target that concern with.
+const CONCERN_KEYWORDS = {
+  "Oiliness": ["niacinamide", "salicylic", "bha", "clay", "tea tree", "charcoal", "mattif", "sebum", "witch hazel"],
+  "Blackheads / Whiteheads": ["salicylic", "bha", "clay", "charcoal", "retinol", "retinoid", "tretinoin", "adapalene"],
+  "Enlarged pores": ["niacinamide", "salicylic", "bha", "clay", "retinol", "retinoid", "tretinoin"],
+  "Scarring": ["vitamin c", "ascorbic acid", "retinol", "retinoid", "tretinoin", "niacinamide", "rosehip", "centella", "snail", "azelaic"]
+};
+// Heavy occlusives: comedogenic-leaning, mineral-oil-style bases. Nightly
+// full-face use fights an oily/pore-prone routine rather than helping it.
+const HEAVY_OCCLUSIVE_KEYWORDS = ["bio-oil", "bio oil", "mineral oil", "petrolatum", "vaseline"];
+// Lighter facial oils — generally fine daily even on combination/oily skin,
+// so they get a much smaller caution rather than a hard penalty.
+const LIGHT_OIL_KEYWORDS = ["squalane", "jojoba", "rosehip", "face oil"];
+const OILINESS_CONCERNS = ["Oiliness", "Blackheads / Whiteheads", "Enlarged pores"];
+// Scores how well `product` fits a specific session/day slot for this
+// profile — higher is more recommended. Used to sort the Swap/Add picker.
+// `otherActiveProducts` = products already occupying that same session on
+// that date (excluding the slot being replaced), used for conflict checks.
+const scoreCandidate = (product, {
+  session,
+  ds,
+  profile,
+  otherActiveProducts = []
+}) => {
+  const text = [product.genericName, product.brandName, product.notes].filter(Boolean).join(" ").toLowerCase();
+  const concerns = profile?.concerns || [];
+  let score = 0;
+
+  // 1. Concern match — up to 3 matched concerns counted.
+  let concernMatches = 0;
+  concerns.forEach(c => {
+    const kws = CONCERN_KEYWORDS[c];
+    if (kws && kws.some(kw => hasKeyword(text, kw))) concernMatches++;
+  });
+  score += Math.min(concernMatches, 3) * 25;
+
+  // 2. Session fit, from the same rule table the auto-scheduler uses.
+  const rule = findRule(product);
+  if (rule) {
+    if (rule.session === "both") score += 10;else if (rule.session === session) score += 15;else score -= 50;
+  } else {
+    score -= 5; // unclassified — let other factors decide, don't rank it up blind
+  }
+
+  // 3. Occlusive caution, weighted by whether oiliness/pores are a concern.
+  const hasOilConcern = concerns.some(c => OILINESS_CONCERNS.includes(c));
+  if (HEAVY_OCCLUSIVE_KEYWORDS.some(kw => hasKeyword(text, kw))) {
+    score += hasOilConcern ? -40 : -10;
+  } else if (LIGHT_OIL_KEYWORDS.some(kw => hasKeyword(text, kw))) {
+    score += hasOilConcern ? -5 : 0;
+  }
+
+  // 4. Conflict penalty against what's already active in this session today.
+  otherActiveProducts.forEach(other => {
+    if (other.id === product.id) return;
+    const otherText = [other.genericName, other.brandName, other.notes].filter(Boolean).join(" ").toLowerCase();
+    CONFLICT_PAIRS.forEach(([a, b]) => {
+      const matchesPair = hasKeyword(text, a) && hasKeyword(otherText, b) || hasKeyword(text, b) && hasKeyword(otherText, a);
+      if (matchesPair) score -= 60;
+    });
+  });
+
+  // 5. Overdue bonus for products already on a schedule — mildly favors
+  // swapping in something that's actually due soon over something fresh.
+  if (product.scheduled && product.nextDate) {
+    const since = daysBetween(product.nextDate, ds);
+    score += Math.max(0, Math.min(since, 14)) * 1.5;
+  }
+  return score;
 };
 
 const pcolor = p => {
@@ -327,7 +411,8 @@ const EMPTY_PROFILE = {
   analysisText: "",
   analysisGaps: [],
   logs: [],
-  skinImgs: []
+  skinImgs: [],
+  pins: [] // manual per-day swap/add overrides — see buildSessionSchedule step 1b
 };
 
 // ─── STORAGE (real localStorage — persists properly on this device) ───────────
@@ -784,7 +869,7 @@ const groupRotating = rotating => {
   });
   return Object.values(groups);
 };
-const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP) => {
+const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = []) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
   const rotating = sessionProducts.filter(p => !p.isOneOff);
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
@@ -808,6 +893,21 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         });
         lastServed[p.id] = ds;
         placedIds.add(p.id);
+      }
+    });
+    // 1b. Manual pins — explicit Swap/Add-step overrides for this exact
+    // date+session, created by the routine UI. Independent of the pinned
+    // product's own scheduling config (never mutates it), and always shown
+    // like the one-offs above, regardless of remaining budget.
+    pins.forEach(pin => {
+      if (pin.date === ds && pin.session === session && !placedIds.has(pin.productId)) {
+        dayList.push({
+          productId: pin.productId,
+          carried: false,
+          pinned: true
+        });
+        lastServed[pin.productId] = ds;
+        placedIds.add(pin.productId);
       }
     });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
@@ -902,7 +1002,8 @@ const queueFor = (schedule, products, date) => {
   const entries = schedule[ds] || [];
   return entries.map(e => ({
     ...products.find(p => p.id === e.productId),
-    carried: e.carried
+    carried: e.carried,
+    pinned: e.pinned || false
   })).filter(p => p.id);
 };
 
@@ -926,6 +1027,190 @@ const sessionDefaultCollapsed = (session, date, allDoneNow) => {
   if (hour >= 18) return session === "am";
   return true; // 12pm–6pm: neither session is "now"
 };
+// ─── SWAP / ADD STEP PICKER ─────────────────────────────────────────────────
+// Bottom-sheet product picker for swapping a step or adding an extra one.
+// Candidates are every product not already active in this exact session/day,
+// sorted by scoreCandidate (most dermatologically-appropriate match first).
+const fitLabel = score => {
+  if (score >= 40) return {
+    text: "Great fit",
+    color: T.green
+  };
+  if (score >= 15) return {
+    text: "Good fit",
+    color: T.accent
+  };
+  if (score < 0) return {
+    text: "Not ideal",
+    color: T.muted
+  };
+  return {
+    text: "Okay fit",
+    color: T.muted
+  };
+};
+const SwapPickerModal = ({
+  mode,
+  session,
+  ds,
+  profile,
+  excludeProduct,
+  activeProducts,
+  onSelect,
+  onClose
+}) => {
+  const [filter, setFilter] = useState("");
+  const activeIds = new Set(activeProducts.map(p => p.id));
+  const otherActiveProducts = activeProducts.filter(p => p.id !== excludeProduct?.id);
+  const candidates = (profile.products || []).filter(p => p.id !== excludeProduct?.id && !activeIds.has(p.id)).filter(p => !filter || `${p.genericName} ${p.brandName || ""}`.toLowerCase().includes(filter.toLowerCase())).map(p => ({
+    p,
+    score: scoreCandidate(p, {
+      session,
+      ds,
+      profile,
+      otherActiveProducts
+    })
+  })).sort((a, b) => b.score - a.score);
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: onClose,
+    style: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(44,36,32,0.5)",
+      zIndex: 1000,
+      display: "flex",
+      alignItems: "flex-end",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: e => e.stopPropagation(),
+    style: {
+      background: "#fff",
+      borderRadius: "24px 24px 0 0",
+      width: "100%",
+      maxWidth: 580,
+      maxHeight: "80vh",
+      display: "flex",
+      flexDirection: "column",
+      boxShadow: T.shadowMd
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "14px 20px 10px",
+      borderBottom: `1px solid ${T.border}`,
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 40,
+      height: 4,
+      background: T.border,
+      borderRadius: 2,
+      margin: "0 auto 10px"
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      color: T.text,
+      fontSize: 15,
+      fontFamily: "'Cormorant Garamond',serif"
+    }
+  }, mode === "swap" ? `Swap "${excludeProduct?.genericName || ""}"` : "Add a step"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: {
+      background: T.faint,
+      border: "none",
+      borderRadius: "50%",
+      width: 28,
+      height: 28,
+      cursor: "pointer",
+      fontSize: 14,
+      color: T.muted
+    }
+  }, "×")), /*#__PURE__*/React.createElement("input", {
+    value: filter,
+    onChange: e => setFilter(e.target.value),
+    placeholder: "Search products…",
+    style: {
+      width: "100%",
+      marginTop: 10,
+      padding: "8px 12px",
+      borderRadius: 8,
+      border: `1px solid ${T.border}`,
+      fontSize: 13,
+      fontFamily: "'Inter',sans-serif"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      overflowY: "auto",
+      padding: "8px 20px 24px",
+      flex: 1
+    }
+  }, candidates.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.muted,
+      fontSize: 13,
+      fontStyle: "italic",
+      padding: "16px 0",
+      textAlign: "center"
+    }
+  }, "No matching products."), candidates.map(({
+    p,
+    score
+  }) => {
+    const col = pcolor(p);
+    const fit = fitLabel(score);
+    return /*#__PURE__*/React.createElement("div", {
+      key: p.id,
+      onClick: () => onSelect(p),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 4px",
+        borderBottom: `1px solid ${T.border}`,
+        cursor: "pointer"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: col.border,
+        flexShrink: 0
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        fontWeight: 600,
+        color: T.text
+      }
+    }, p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.muted,
+        fontWeight: 400,
+        fontSize: 12
+      }
+    }, " · ", p.brandName))), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        color: fit.color,
+        flexShrink: 0
+      }
+    }, fit.text));
+  }))));
+};
 const RoutineBlock = ({
   prods,
   session,
@@ -936,10 +1221,56 @@ const RoutineBlock = ({
   date,
   logs,
   onUpdate,
-  allLogs
+  allLogs,
+  profile
 }) => {
   const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
   const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || new Date(), allDone));
+  const [picker, setPicker] = useState(null); // { mode: "swap"|"add", excludeProduct } | null
+  // Swap: pins the chosen product in for today and marks the outgoing
+  // product skipped (so its own rotation still carries forward normally).
+  // Add: just pins the chosen product in, no outgoing product involved.
+  const applySwap = newProduct => {
+    if (!picker) return;
+    const {
+      mode,
+      excludeProduct
+    } = picker;
+    const newPins = [...(profile.pins || [])];
+    if (!newPins.some(pin => pin.date === ds && pin.session === session && pin.productId === newProduct.id)) {
+      newPins.push({
+        id: Date.now() + Math.random(),
+        date: ds,
+        session,
+        productId: newProduct.id
+      });
+    }
+    const patch = {
+      pins: newPins
+    };
+    if (mode === "swap" && excludeProduct) {
+      const ex = allLogs.find(l => l.date === ds && l.productId === excludeProduct.id && l.session === session);
+      patch.logs = ex ? allLogs.map(l => l.date === ds && l.productId === excludeProduct.id && l.session === session ? {
+        ...l,
+        skipped: true,
+        done: false
+      } : l) : [...allLogs, {
+        id: Date.now(),
+        date: ds,
+        productId: excludeProduct.id,
+        session,
+        done: false,
+        skipped: true
+      }];
+    }
+    onUpdate(patch);
+    setPicker(null);
+  };
+  const removePin = productId => {
+    onUpdate({
+      pins: (profile.pins || []).filter(pin => !(pin.date === ds && pin.session === session && pin.productId === productId))
+    });
+  };
   const prevAllDone = useRef(allDone);
   useEffect(() => {
     // Auto-collapse the moment every step gets checked off/skipped-through.
@@ -1166,10 +1497,52 @@ const RoutineBlock = ({
         borderRadius: 20,
         padding: "1px 7px"
       }
-    }, "skipped · tomorrow"))), /*#__PURE__*/React.createElement("button", {
+    }, "skipped · tomorrow"), p.pinned && !done && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        background: T.accentSoft,
+        color: T.accent,
+        borderRadius: 20,
+        padding: "1px 7px"
+      }
+    }, "added today"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 5,
+        flexShrink: 0
+      }
+    }, !p.pinned && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPicker({
+        mode: "swap",
+        excludeProduct: p
+      }),
+      title: "Swap this step",
+      style: {
+        padding: "4px 8px",
+        borderRadius: 8,
+        border: `1px solid ${T.border}`,
+        background: "transparent",
+        color: T.muted,
+        fontSize: 12,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, "⇄"), p.pinned ? /*#__PURE__*/React.createElement("button", {
+      onClick: () => removePin(p.id),
+      style: {
+        padding: "4px 10px",
+        borderRadius: 8,
+        border: `1px solid ${T.border}`,
+        background: "transparent",
+        color: T.muted,
+        fontSize: 10,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, "Remove") : /*#__PURE__*/React.createElement("button", {
       onClick: () => toggleSkip(p.id, session),
       style: {
-        flexShrink: 0,
         padding: "4px 10px",
         borderRadius: 8,
         border: `1px solid ${skipped ? T.accent : T.border}`,
@@ -1180,8 +1553,36 @@ const RoutineBlock = ({
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, skipped ? "Skipped" : "Skip"));
-  })));
+    }, skipped ? "Skipped" : "Skip")));
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setPicker({
+      mode: "add",
+      excludeProduct: null
+    }),
+    style: {
+      width: "100%",
+      marginTop: 6,
+      padding: "8px 0",
+      borderRadius: 8,
+      border: `1px dashed ${T.border}`,
+      background: "transparent",
+      color: T.muted,
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, "+ Add step")), picker && /*#__PURE__*/React.createElement(SwapPickerModal, {
+    mode: picker.mode,
+    session: session,
+    ds: ds,
+    date: date,
+    profile: profile,
+    excludeProduct: picker.excludeProduct,
+    activeProducts: prods,
+    onSelect: applySwap,
+    onClose: () => setPicker(null)
+  }));
 };
 
 // ─── DAY SHEET ─────────────────────────────────────────────────────────────────
@@ -1311,7 +1712,8 @@ const DaySheet = ({
     date: date,
     logs: logs,
     onUpdate: onUpdate,
-    allLogs: profile.logs
+    allLogs: profile.logs,
+    profile: profile
   }), /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: pmProds,
     session: "pm",
@@ -1322,7 +1724,8 @@ const DaySheet = ({
     date: date,
     logs: logs,
     onUpdate: onUpdate,
-    allLogs: profile.logs
+    allLogs: profile.logs,
+    profile: profile
   }))));
 };
 
@@ -1349,7 +1752,8 @@ const DayAgenda = ({
     date: date,
     logs: logs,
     onUpdate: onUpdate,
-    allLogs: profile.logs
+    allLogs: profile.logs,
+    profile: profile
   }), /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: pmProds,
     session: "pm",
@@ -1360,7 +1764,8 @@ const DayAgenda = ({
     date: date,
     logs: logs,
     onUpdate: onUpdate,
-    allLogs: profile.logs
+    allLogs: profile.logs,
+    profile: profile
   }));
 };
 
@@ -1392,8 +1797,8 @@ const CalendarTab = ({
   const toDate = dateStr(addDays(horizonDate, 14));
   const amEpoch = useMemo(() => computeEpoch(profile.products, "am"), [profile.products]);
   const pmEpoch = useMemo(() => computeEpoch(profile.products, "pm"), [profile.products]);
-  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate), [profile.products, profile.logs, amEpoch, toDate]);
-  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate), [profile.products, profile.logs, pmEpoch, toDate]);
+  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins]);
+  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins]);
   const scheduledProds = useCallback(date => {
     const am = queueFor(amSchedule, profile.products, date);
     const pm = queueFor(pmSchedule, profile.products, date);
