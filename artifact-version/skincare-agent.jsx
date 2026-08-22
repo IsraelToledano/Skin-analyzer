@@ -203,7 +203,6 @@ const ISRAEL_PRODUCTS = () => {
     {id:27, genericName:"Essence Toner", brandName:"Beauty of Joseon Ginseng Essence Water", notes:"", session:"", frequency:"", stepOrder:0, nextDate:"", isOneOff:false, scheduled:false},
     {id:28, genericName:"thermal spring water spray", brandName:"Avène Eau Thermale Thermal Spring Water", notes:"", session:"", frequency:"", stepOrder:0, nextDate:"", isOneOff:false, scheduled:false},
     {id:29, genericName:"Purifying Gel Cleanser", brandName:"Caudalie Vinopure Purifying Gel Cleanser (Paris)", notes:"", session:"", frequency:"", stepOrder:0, nextDate:"", isOneOff:false, scheduled:false},
-    {id:30, genericName:"LED Light Therapy (Infrared)", brandName:"Infrared Light Therapy Mask", notes:"", session:"pm", frequency:"daily", stepOrder:2, nextDate:t, isOneOff:false, scheduled:true},
   ];
 };
 
@@ -216,9 +215,6 @@ const SEED_ADDITIONS = [
   { key:"caudalie_gel_cleanser_v1",
     product:{id:29, genericName:"Purifying Gel Cleanser", brandName:"Caudalie Vinopure Purifying Gel Cleanser (Paris)", notes:"", session:"", frequency:"", stepOrder:0, nextDate:"", isOneOff:false, scheduled:false},
     matches:p => (p.brandName||"").toLowerCase().includes("caudalie") && (p.genericName||"").toLowerCase().includes("gel cleanser") },
-  { key:"infrared_led_mask_v1",
-    product:{id:30, genericName:"LED Light Therapy (Infrared)", brandName:"Infrared Light Therapy Mask", notes:"", session:"pm", frequency:"daily", stepOrder:2, nextDate:new Date().toISOString().split("T")[0], isOneOff:false, scheduled:true},
-    matches:p => /infrared|led light/i.test(p.genericName||"") || /infrared|led light/i.test(p.brandName||"") },
 ];
 const applySeedAdditions = (profile) => {
   const done = new Set(profile.migrations || []);
