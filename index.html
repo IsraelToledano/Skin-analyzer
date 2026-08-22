@@ -1797,7 +1797,7 @@ const CalendarTab = ({
   onUpdate
 }) => {
   const today = new Date();
-  const [view, setView] = useState("week");
+  const [view, setView] = useState("day");
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
   const [selected, setSelected] = useState(null);
   const prev = () => setCursor(d => view === "day" ? addDays(d, -1) : addDays(d, -7));
