@@ -239,6 +239,12 @@ const classifyStepOrder = p => {
   }
   return null;
 };
+// Recommended stepOrder for a product that hasn't been manually positioned
+// yet: keep an existing manually-set value untouched, otherwise fall back
+// to the keyword-classified canonical stage, otherwise a neutral mid-scale
+// default (matches suggestSchedule's own fallback) so a brand-new product
+// lands in a sensible spot instead of always sorting first/last.
+const recommendStepOrder = p => p.stepOrder || classifyStepOrder(p) || 50;
 // Returns the first matching AUTO_SCHEDULE_RULES entry for a product, or
 // null if unclassified. Shared by the auto-scheduler and the recommendation
 // scorer so "what session/type is this product" is defined in one place.
@@ -1249,6 +1255,93 @@ const RoutineBlock = ({
   const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
   const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || new Date(), allDone));
   const [picker, setPicker] = useState(null); // { mode: "swap"|"add", excludeProduct } | null
+
+  // ── Drag-to-reorder ──────────────────────────────────────────────────
+  // Steps are ordered by each product's global stepOrder. Dragging a row
+  // in today's list renumbers just the products currently shown in THIS
+  // session (10, 20, 30…) so their relative order changes; it does not
+  // touch products that aren't part of today's list. A product scheduled
+  // for "both" sessions shares one stepOrder value, so reordering it here
+  // also moves it in the other session's list — same tradeoff as manually
+  // editing its Step order number in the Products tab.
+  const prodIds = prods.map(p => p.id).join(",");
+  const [dragOrder, setDragOrder] = useState(() => prods.map(p => p.id));
+  const [dragId, setDragId] = useState(null);
+  const rowRefs = useRef({});
+  const dragOrderRef = useRef(dragOrder);
+  const dragIdRef = useRef(dragId);
+  useEffect(() => {
+    dragOrderRef.current = dragOrder;
+  }, [dragOrder]);
+  useEffect(() => {
+    dragIdRef.current = dragId;
+  }, [dragId]);
+  useEffect(() => {
+    if (!dragId) setDragOrder(prods.map(p => p.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prodIds, dragId]);
+  const orderedProds = dragOrder.map(id => prods.find(p => p.id === id)).filter(Boolean);
+  prods.forEach(p => {
+    if (!orderedProds.find(x => x.id === p.id)) orderedProds.push(p);
+  });
+  const handleDragPointerDown = (id, e) => {
+    e.preventDefault();
+    setDragId(id);
+  };
+  // Window-level listeners (rather than pointer capture on the handle
+  // itself) so the drag reliably tracks and completes even as rows
+  // reorder/move under the finger mid-gesture — capture on a row element
+  // that's being repositioned in the list proved unreliable across
+  // browsers during testing.
+  useEffect(() => {
+    if (dragId == null) return;
+    const onMove = e => {
+      const y = e.clientY;
+      const ids = dragOrderRef.current;
+      const curId = dragIdRef.current;
+      const idx = ids.indexOf(curId);
+      if (idx === -1) return;
+      let targetIdx = ids.length - 1;
+      for (let i = 0; i < ids.length; i++) {
+        const el = rowRefs.current[ids[i]];
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        if (y < mid) {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx !== idx) {
+        const newIds = [...ids];
+        newIds.splice(idx, 1);
+        newIds.splice(targetIdx, 0, curId);
+        setDragOrder(newIds);
+      }
+    };
+    const onUp = () => {
+      const finalOrder = dragOrderRef.current;
+      setDragId(null);
+      onUpdate({
+        products: (profile.products || []).map(pr => {
+          const idx = finalOrder.indexOf(pr.id);
+          return idx === -1 ? pr : {
+            ...pr,
+            stepOrder: (idx + 1) * 10
+          };
+        })
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragId]);
   // Swap: pins the chosen product in for today and marks the outgoing
   // product skipped (so its own rotation still carries forward normally).
   // Add: just pins the chosen product in, no outgoing product involved.
@@ -1270,6 +1363,16 @@ const RoutineBlock = ({
     const patch = {
       pins: newPins
     };
+    // A product pinned in for today that has never been positioned (no
+    // stepOrder yet — e.g. added but never Auto-Scheduled) gets a
+    // recommended stage position now, instead of silently defaulting to 0
+    // and sorting before everything else.
+    if (!newProduct.stepOrder) {
+      patch.products = (profile.products || []).map(pr => pr.id === newProduct.id ? {
+        ...pr,
+        stepOrder: recommendStepOrder(pr)
+      } : pr);
+    }
     if (mode === "swap" && excludeProduct) {
       const ex = allLogs.find(l => l.date === ds && l.productId === excludeProduct.id && l.session === session);
       patch.logs = ex ? allLogs.map(l => l.date === ds && l.productId === excludeProduct.id && l.session === session ? {
@@ -1427,21 +1530,39 @@ const RoutineBlock = ({
       fontStyle: "italic",
       padding: "8px 0"
     }
-  }, "Nothing scheduled."), prods.map((p, i) => {
+  }, "Nothing scheduled."), orderedProds.map((p, i) => {
     const log = logs.find(l => l.productId === p.id && l.session === session);
     const done = log?.done || false;
     const skipped = log?.skipped && !done;
     const col = pcolor(p);
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
+      ref: el => {
+        rowRefs.current[p.id] = el;
+      },
       style: {
         display: "flex",
         alignItems: "center",
         gap: 10,
         padding: "9px 0",
-        borderBottom: i < prods.length - 1 ? `1px solid ${T.border}` : "none"
+        borderBottom: i < orderedProds.length - 1 ? `1px solid ${T.border}` : "none",
+        opacity: dragId === p.id ? 0.45 : 1,
+        background: dragId === p.id ? T.faint : "transparent"
       }
     }, /*#__PURE__*/React.createElement("div", {
+      onPointerDown: e => handleDragPointerDown(p.id, e),
+      title: "Drag to reorder",
+      style: {
+        width: 18,
+        flexShrink: 0,
+        textAlign: "center",
+        color: T.muted,
+        fontSize: 15,
+        cursor: "grab",
+        touchAction: "none",
+        userSelect: "none"
+      }
+    }, "⠿"), /*#__PURE__*/React.createElement("div", {
       onClick: () => toggleDone(p.id, session),
       style: {
         width: 22,
@@ -2453,7 +2574,7 @@ const ProductsTab = ({
     }, "Step order"), /*#__PURE__*/React.createElement("input", {
       type: "number",
       min: "1",
-      value: p.stepOrder || 1,
+      value: recommendStepOrder(p),
       onChange: e => updateSchedule(p.id, {
         stepOrder: parseInt(e.target.value) || 1
       }),
@@ -2464,7 +2585,7 @@ const ProductsTab = ({
         updateSchedule(p.id, {
           scheduled: !!ready,
           nextDate: p.nextDate || todayStr(),
-          stepOrder: p.stepOrder || 1
+          stepOrder: recommendStepOrder(p)
         });
         if (ready) setEditId(null);
       },
