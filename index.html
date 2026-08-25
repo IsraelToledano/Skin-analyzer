@@ -125,6 +125,31 @@ const FREQ_DAYS = {
   "8-weekly": 56
 };
 const CONFLICT_PAIRS = [["glycolic acid", "retinol"], ["aha", "retinol"], ["bha", "retinol"], ["lactic acid", "retinol"], ["salicylic acid", "retinol"], ["vitamin c", "retinol"], ["ascorbic acid", "retinol"], ["benzoyl peroxide", "retinol"], ["benzoyl peroxide", "vitamin c"], ["glycolic acid", "lactic acid"], ["aha", "bha"], ["niacinamide", "vitamin c"]];
+// Same-active exclusivity: unlike CONFLICT_PAIRS (which only warns about
+// DIFFERENT actives clashing), this catches two products that share the
+// SAME active landing in the same session on the same day — e.g. two
+// separate niacinamide serums, or two retinoids. Text-matched against
+// name/notes, same as AUTO_SCHEDULE_RULES, so a product only gets tagged
+// if its active is actually named somewhere in its genericName, brandName,
+// or notes — a product whose notes don't mention its active won't be
+// caught here.
+const ACTIVE_GROUP_RULES = [{
+  group: "retinoid",
+  keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol", "retinal", "retinyl"]
+}, {
+  group: "vitamin-c",
+  keywords: ["vitamin c", "ascorbic acid"]
+}, {
+  group: "niacinamide",
+  keywords: ["niacinamide"]
+}, {
+  group: "acid-exfoliant",
+  keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "lactic", "salicylic acid", "salicylic", "mandelic acid", "mandelic"]
+}];
+const classifyActiveGroups = p => {
+  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  return ACTIVE_GROUP_RULES.filter(rule => rule.keywords.some(kw => hasKeyword(text, kw))).map(rule => rule.group);
+};
 const SUGGESTIONS = ["Cleanser", "Foaming Cleanser", "Gel Cleanser", "Cream Cleanser", "Oil Cleanser", "Micellar Water", "Balm Cleanser", "Toner", "Hydrating Toner", "Essence", "Vitamin C Serum", "Vitamin C (Ascorbic Acid)", "Niacinamide Serum", "Hyaluronic Acid Serum", "Retinol", "Retinoid", "Tretinoin", "Adapalene", "Bakuchiol", "Salicylic Acid", "BHA Exfoliant", "Glycolic Acid", "AHA Exfoliant", "Lactic Acid", "Mandelic Acid", "Azelaic Acid", "Benzoyl Peroxide", "Kojic Acid", "Alpha Arbutin", "Moisturizer", "Night Cream", "Gel Moisturizer", "Barrier Cream", "Ceramide Moisturizer", "Eye Cream", "SPF 30", "SPF 50", "Mineral Sunscreen", "Chemical Sunscreen", "Tinted SPF", "Face Oil", "Rosehip Oil", "Squalane", "Jojoba Oil", "Clay Mask", "Sheet Mask", "Sleeping Mask", "Exfoliant (AHA/BHA)", "LED Light Therapy", "Microneedling", "Gua Sha", "Scalp Serum", "Scalp Treatment", "Lip Balm", "Neck Cream"];
 const PRODUCT_COLORS = {
   cleanser: {
@@ -956,6 +981,14 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     //    product rotating through the cap evenly over time.
     const budget = Math.max(0, cap - dayList.length);
     if (budget > 0) {
+      // Active-ingredient groups already guaranteed for today (one-offs,
+      // pins, carried-over skips) — automatic fill below won't stack a
+      // same-active product on top of these.
+      const placedGroups = new Set();
+      placedIds.forEach(id => {
+        const prod = products.find(p => p.id === id);
+        if (prod) classifyActiveGroups(prod).forEach(g => placedGroups.add(g));
+      });
       const candidates = groups.map(group => {
         const members = group.filter(p => !placedIds.has(p.id));
         if (members.length === 0) return null;
@@ -984,6 +1017,16 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.served - b.served || a.stepOrder - b.stepOrder);
       let remaining = budget;
       candidates.forEach(c => {
+        // Same-active exclusivity: if any member's active-ingredient group
+        // is already covered by something placed today (either a
+        // guaranteed slot above, or an earlier-placed candidate this same
+        // loop), defer this whole group to a future day rather than
+        // double up on one active. Deferred groups stay "due" and keep
+        // their servedCount, so the existing overdue/served tiebreak
+        // naturally rotates which one wins on subsequent days instead of
+        // one permanently starving the other.
+        const groupClash = c.members.some(p => classifyActiveGroups(p).some(g => placedGroups.has(g)));
+        if (groupClash) return;
         if (c.members.length <= remaining) {
           c.members.forEach(p => {
             dayList.push({
@@ -993,6 +1036,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
             lastServed[p.id] = ds;
             servedCount[p.id] = (servedCount[p.id] || 0) + 1;
             placedIds.add(p.id);
+            classifyActiveGroups(p).forEach(g => placedGroups.add(g));
           });
           remaining -= c.members.length;
         }
