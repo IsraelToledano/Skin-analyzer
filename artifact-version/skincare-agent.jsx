@@ -188,7 +188,6 @@ const ISRAEL_PRODUCTS = () => {
     {id:12, genericName:"Brightening Face Serum", brandName:"Mars Safranal Face Serum (Saffron + Niacinamide)", notes:"", session:"am", frequency:"daily", stepOrder:4, nextDate:t, isOneOff:false, scheduled:true},
     {id:13, genericName:"Niacinamide Serum", brandName:"Yeouth Niacinamide Serum", notes:"", session:"am", frequency:"daily", stepOrder:5, nextDate:t, isOneOff:false, scheduled:true},
     {id:14, genericName:"Blemish Control Salicylic Acid Serum", brandName:"Caudalie Vinopure Blemish Control Salicylic Serum", notes:"", session:"pm", frequency:"weekly", stepOrder:4, nextDate:t, isOneOff:false, scheduled:true},
-    {id:15, genericName:"Specialist Skincare Oil", brandName:"Bio-Oil", notes:"", session:"pm", frequency:"daily", stepOrder:10, nextDate:t, isOneOff:false, scheduled:true},
     {id:16, genericName:"overnight lip sleeping mask", brandName:"Petitfée Oil Blossom Lip Mask", notes:"", session:"pm", frequency:"daily", stepOrder:99, nextDate:t, isOneOff:false, scheduled:true},
     {id:17, genericName:"Essence / Hydrating Serum", brandName:"COSRX Advanced Snail 96 Mucin Power Essence", notes:"", session:"pm", frequency:"daily", stepOrder:6, nextDate:t, isOneOff:false, scheduled:true},
     {id:18, genericName:"Hydrating Serum", brandName:"The Ordinary Marine Hyaluronics", notes:"", session:"pm", frequency:"daily", stepOrder:5, nextDate:t, isOneOff:false, scheduled:true},
