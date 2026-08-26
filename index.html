@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-21.4";
+const APP_VERSION = "2026-08-26.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2637,7 +2637,24 @@ const ProductsTab = ({
         justifyContent: "center"
       },
       disabled: !p.session || !p.frequency
-    }, p.session && p.frequency ? "Save Schedule" : "Pick session & frequency")));
+    }, p.session && p.frequency ? "Save Schedule" : "Pick session & frequency"), p.scheduled && /*#__PURE__*/React.createElement(Btn, {
+      onClick: () => {
+        updateSchedule(p.id, {
+          scheduled: false,
+          session: "",
+          frequency: "",
+          nextDate: "",
+          stepOrder: 0
+        });
+        setEditId(null);
+      },
+      variant: "ghost",
+      style: {
+        justifyContent: "center",
+        marginTop: 8,
+        color: T.muted
+      }
+    }, "Remove from Routine")));
   })), profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
