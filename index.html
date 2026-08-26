@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.9";
+const APP_VERSION = "2026-08-27.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -348,10 +348,14 @@ const AUTO_SCHEDULE_RULES = [
   { keywords: ["cleansing oil", "oil cleanser"], session: "pm", frequency: "daily", step: 10 },
   { keywords: ["sheet mask", "clay mask", "sleeping mask", "mask", "clay"], session: "pm", frequency: "weekly", step: 60 },
   { keywords: ["cleanser", "cleansing", "wash", "micellar"], session: "both", frequency: "daily", step: 15 },
+  // Exfoliant-acid check comes BEFORE the generic toner rule below — an
+  // "AHA/BHA/PHA toner" is functionally a leave-on chemical exfoliant, not
+  // a basic toner, and needs to sort/group with other exfoliants (not get
+  // stranded early in the routine with a serum splitting the two apart).
+  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 40 },
   { keywords: ["toner", "thermal water", "spring water", "mist"], session: "both", frequency: "daily", step: 20 },
   { keywords: ["vitamin c", "ascorbic acid"], session: "am", frequency: "twice-weekly", step: 35 },
   { keywords: ["niacinamide"], session: "am", frequency: "daily", step: 35 },
-  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 40 },
   { keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"], session: "pm", frequency: "weekly", step: 45 },
   { keywords: ["serum", "essence", "hyaluronic", "snail", "centella"], session: "pm", frequency: "daily", step: 50 },
   { keywords: ["eye cream"], session: "both", frequency: "daily", step: 55 },
@@ -732,6 +736,21 @@ const MIGRATIONS = [{
       products: profile.products.map(p => isEffaclarMat(p) && p.session === "pm" ? { ...p, session: "am" } : p)
     };
   }
+}, {
+  id: "step_order_normalize_v2",
+  // Re-runs the stepOrder normalization now that AUTO_SCHEDULE_RULES checks
+  // exfoliant-acid keywords before the generic toner rule (an "AHA/BHA/PHA
+  // toner" was previously classified as a plain toner and sorted away from
+  // other exfoliants, splitting a serum between two exfoliant steps). The
+  // v1 migration already ran once under the old, buggy rule order and
+  // won't re-fire, so this repeats the same normalization under the fix.
+  apply: profile => ({
+    ...profile,
+    products: (profile.products || []).map(p => {
+      const step = classifyStepOrder(p);
+      return step === null ? p : { ...p, stepOrder: step };
+    })
+  })
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
