@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.4";
+const APP_VERSION = "2026-08-26.5";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -248,6 +248,27 @@ const CATEGORY_GROUP_MAP = {
 };
 const CATEGORY_DISPLAY_ORDER = ["Cleansers", "Toners", "Essences", "Vitamin C", "Niacinamide", "Exfoliants", "Retinoids", "Serums", "Eye Care", "Masks", "Face Oils", "Moisturizers", "Lip Care", "Self-Tan", "SPF", "Other"];
 const productCategoryGroup = p => CATEGORY_GROUP_MAP[detectType(p)] || "Other";
+// One distinct color per category, used for the category tag pill and the
+// row's leading dot. Kept separate from RANK_STYLE's palette (green/blue/
+// red) so category color never gets confused with a Best/Good/Bad rank.
+const CATEGORY_COLORS = {
+  "Cleansers": "#6B9FBF",
+  "Toners": "#5FA8A8",
+  "Essences": "#9B8ABF",
+  "Vitamin C": "#E8A83F",
+  "Niacinamide": "#7FBFA0",
+  "Exfoliants": "#C77DBF",
+  "Retinoids": "#E8A87A",
+  "Serums": "#5BAA82",
+  "Eye Care": "#8AA0C7",
+  "Masks": "#C97B63",
+  "Face Oils": "#C9A227",
+  "Moisturizers": "#B0A08A",
+  "Lip Care": "#D687A0",
+  "Self-Tan": "#B8834D",
+  "SPF": "#D4A017",
+  "Other": "#9E8E87"
+};
 
 // ─── PRODUCT RANKINGS (from the dermatologist-style review run against
 // Israel's skin profile — combination skin; oiliness, blackheads/whiteheads,
@@ -2337,10 +2358,10 @@ const ProductRow = ({
   updateSchedule,
   removeProduct
 }) => {
-  const col = pcolor(p);
   const isEditing = editId === rowKey;
   const rank = getProductRank(p);
   const cat = productCategoryGroup(p);
+  const catColor = CATEGORY_COLORS[cat] || T.muted;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "11px 0",
@@ -2357,7 +2378,7 @@ const ProductRow = ({
       width: 10,
       height: 10,
       borderRadius: "50%",
-      background: col.border,
+      background: catColor,
       flexShrink: 0,
       marginTop: 3
     }
@@ -2372,7 +2393,12 @@ const ProductRow = ({
       color: T.text,
       fontSize: 13
     }
-  }, p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+  }, rank?.tag === "best" && /*#__PURE__*/React.createElement("span", {
+    title: "Best in its category",
+    style: {
+      marginRight: 4
+    }
+  }, "🏆"), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
     style: {
       color: T.muted,
       fontWeight: 400,
@@ -2396,9 +2422,9 @@ const ProductRow = ({
     style: {
       display: "inline-flex",
       alignItems: "center",
-      background: T.faint,
-      color: T.muted,
-      border: `1px solid ${T.border}`,
+      background: `${catColor}18`,
+      color: catColor,
+      border: `1px solid ${catColor}44`,
       borderRadius: 100,
       padding: "1px 8px",
       fontSize: 10,
@@ -2414,8 +2440,8 @@ const ProductRow = ({
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
-      background: col.bg,
-      color: col.text,
+      background: T.faint,
+      color: T.muted,
       borderRadius: 20,
       padding: "1px 8px",
       fontSize: 11,
