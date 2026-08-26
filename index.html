@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.7";
+const APP_VERSION = "2026-08-26.8";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -699,6 +699,20 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: profile.products.filter(p => !isBioOil(p))
+    };
+  }
+}, {
+  id: "effaclar_mat_to_am_v1",
+  // Personal preference: the mattifying finish is about daytime appearance,
+  // not something that matters right before bed, so it belongs in the AM
+  // routine instead of PM.
+  apply: profile => {
+    const isEffaclarMat = p => /effaclar/i.test(p.genericName || "") || /effaclar/i.test(p.brandName || "");
+    const needsMove = (profile.products || []).some(p => isEffaclarMat(p) && p.session === "pm");
+    if (!needsMove) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isEffaclarMat(p) && p.session === "pm" ? { ...p, session: "am" } : p)
     };
   }
 }];
