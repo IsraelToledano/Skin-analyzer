@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.8";
+const APP_VERSION = "2026-08-26.9";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -515,7 +515,7 @@ const dateStr = d => {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 };
-const todayStr = () => dateStr(new Date());
+const todayStr = () => dateStr(appToday());
 const parseDate = s => {
   const d = new Date(s + "T12:00:00");
   return isNaN(d) ? null : d;
@@ -524,6 +524,23 @@ const addDays = (d, n) => {
   const r = new Date(d);
   r.setDate(r.getDate() + n);
   return r;
+};
+// The day doesn't roll over at midnight — it rolls over at 2am, so
+// finishing the PM routine after midnight still counts as tonight rather
+// than jumping the calendar to tomorrow. `appToday()`/`appHour()` are the
+// shifted versions of "today"/"the current hour" and should be used
+// anywhere the app decides which calendar day is "today" or whether it's
+// currently the AM or PM window — real Date.now()/new Date() elsewhere
+// (log ids, actual timestamps) are left alone.
+const DAY_ROLLOVER_HOUR = 2;
+const appToday = () => {
+  const now = new Date();
+  const shifted = now.getHours() < DAY_ROLLOVER_HOUR ? addDays(now, -1) : now;
+  return new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate());
+};
+const appHour = () => {
+  const h = new Date().getHours();
+  return h < DAY_ROLLOVER_HOUR ? h + 24 : h;
 };
 const fmtLong = d => d.toLocaleDateString("en-US", {
   weekday: "long",
@@ -1272,9 +1289,9 @@ const queueFor = (schedule, products, date) => {
 // starts collapsed regardless.
 const sessionDefaultCollapsed = (session, date, allDoneNow) => {
   if (allDoneNow) return true;
-  const isToday = date.toDateString() === new Date().toDateString();
+  const isToday = date.toDateString() === appToday().toDateString();
   if (!isToday) return false;
-  const hour = new Date().getHours();
+  const hour = appHour();
   if (hour < 12) return session === "pm";
   if (hour >= 18) return session === "am";
   return true; // 12pm–6pm: neither session is "now"
@@ -1477,7 +1494,7 @@ const RoutineBlock = ({
   profile
 }) => {
   const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
-  const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || new Date(), allDone));
+  const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || appToday(), allDone));
   const [picker, setPicker] = useState(null); // { mode: "swap"|"add", excludeProduct } | null
 
   // ── Drag-to-reorder ──────────────────────────────────────────────────
@@ -1963,8 +1980,7 @@ const DaySheet = ({
   pmSchedule
 }) => {
   const ds = dateStr(date);
-  const isToday = date.toDateString() === new Date().toDateString();
-  const amProds = queueFor(amSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const isToday = date.toDateString() === appToday().toDateString();
   const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
   const logs = profile.logs.filter(l => l.date === ds);
   return /*#__PURE__*/React.createElement("div", {
@@ -2141,7 +2157,7 @@ const CalendarTab = ({
   profile,
   onUpdate
 }) => {
-  const today = new Date();
+  const today = appToday();
   const [view, setView] = useState("day");
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
   const [selected, setSelected] = useState(null);
