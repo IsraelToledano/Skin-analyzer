@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.6";
+const APP_VERSION = "2026-08-26.7";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -685,6 +685,22 @@ const MIGRATIONS = [{
       return ranked;
     })
   })
+}, {
+  id: "delete_bio_oil_v1",
+  // Bio-Oil was removed from the product roster entirely per an earlier
+  // explicit request ("shouldn't be at all — delete it"). Removing it from
+  // ISRAEL_PRODUCTS() only stops it being added to brand-new profiles —
+  // it does nothing for a profile that already synced it in beforehand.
+  // This migration reaches into existing data and deletes it for real,
+  // once, on whatever device it's still lingering on.
+  apply: profile => {
+    const isBioOil = p => /bio-oil|bio oil/i.test(p.genericName || "") || /bio-oil|bio oil/i.test(p.brandName || "");
+    if (!(profile.products || []).some(isBioOil)) return profile;
+    return {
+      ...profile,
+      products: profile.products.filter(p => !isBioOil(p))
+    };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
