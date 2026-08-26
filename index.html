@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.2";
+const APP_VERSION = "2026-08-26.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -196,6 +196,109 @@ const PRODUCT_COLORS = {
 // Word-boundary keyword match — avoids false positives like "pha" matching
 // inside "Pharma".
 const hasKeyword = (text, kw) => new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(text);
+
+// ─── PRODUCT CATEGORIES (ported from the Claude.ai version's detectType, so
+// both apps group products the same way) ───────────────────────────────────
+const INGREDIENT_CATEGORIES = {
+  retinoid: ["retinol", "retinoid", "retinal", "retinaldehyde", "tretinoin", "tretinoina", "ret-avit", "adapalene", "tazarotene", "retin-a", "retinyl", "vitamin a", "a313", "pommade"],
+  exfoliant: ["aha", "bha", "pha", "glycolic", "lactic", "salicylic", "mandelic", "azelaic", "exfoliant", "exfoliating", "peeling", "peel", "microfoliant", "enzyme"],
+  vitaminc: ["vitamin c", "ascorbic", "ascorbyl"],
+  niacinamide: ["niacinamide", "nicotinamide"],
+  benzoyl: ["benzoyl peroxide", "benzoyl"]
+};
+const productCategories = p => {
+  const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+  const cats = new Set();
+  for (const cat in INGREDIENT_CATEGORIES) if (INGREDIENT_CATEGORIES[cat].some(k => hasKeyword(hay, k))) cats.add(cat);
+  return cats;
+};
+const detectType = p => {
+  const hay = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+  if (/spf|sunscreen|sun serum|sun cream/.test(hay)) return "spf";
+  if (/self.?tan/.test(hay)) return "selftan";
+  if (/lip/.test(hay)) return "lip";
+  if (/mask/.test(hay)) return "mask";
+  if (/cleansing oil|cleansing balm/.test(hay)) return "cleanser_oil";
+  if (/cleanser|cleansing|face wash|facial wash|soap|foaming/.test(hay)) return "cleanser";
+  const cats = productCategories(p);
+  if (cats.has("exfoliant")) return "exfoliant";
+  if (cats.has("retinoid")) return "retinoid";
+  if (cats.has("vitaminc")) return "vitc";
+  if (cats.has("niacinamide")) return "niacinamide";
+  if (/thermal|spring water|mist|spray/.test(hay)) return "mist";
+  if (/moisturi|water gel|gel cream|effaclar mat|red bean/.test(hay)) return "moisturizer";
+  if (/eye/.test(hay)) return "eye";
+  if (/bio-oil|face oil|facial oil|vitamin e|squalane|jojoba|rosehip/.test(hay)) return "faceoil";
+  if (/toner/.test(hay)) return "toner";
+  if (/essence/.test(hay)) return "essence";
+  if (/serum/.test(hay)) return "serum";
+  return "other";
+};
+const CATEGORY_GROUP_MAP = {
+  cleanser: "Cleansers", cleanser_oil: "Cleansers",
+  toner: "Toners", mist: "Toners",
+  essence: "Essences",
+  vitc: "Vitamin C", niacinamide: "Niacinamide",
+  exfoliant: "Exfoliants", retinoid: "Retinoids",
+  serum: "Serums", eye: "Eye Care",
+  mask: "Masks", faceoil: "Face Oils",
+  moisturizer: "Moisturizers", lip: "Lip Care",
+  selftan: "Self-Tan", spf: "SPF",
+  other: "Other"
+};
+const CATEGORY_DISPLAY_ORDER = ["Cleansers", "Toners", "Essences", "Vitamin C", "Niacinamide", "Exfoliants", "Retinoids", "Serums", "Eye Care", "Masks", "Face Oils", "Moisturizers", "Lip Care", "Self-Tan", "SPF", "Other"];
+const productCategoryGroup = p => CATEGORY_GROUP_MAP[detectType(p)] || "Other";
+
+// ─── PRODUCT RANKINGS (from the dermatologist-style review run against
+// Israel's skin profile — combination skin; oiliness, blackheads/whiteheads,
+// enlarged pores, scarring). Matched by id (fast path, from the canonical
+// product roster) with a name-keyword fallback so it still works if a
+// product's id ever drifts from the original seed. `match` entries require
+// ALL listed substrings present (case-insensitive) — combined so each rule
+// is specific enough not to cross-match a different product with a shared
+// brand or ingredient word. tag: "best" | "good" | "bad".
+const RANK_DATA = [
+  { id: 1, match: ["jason", "vitamin e"], tag: "bad", reason: "Heavy, occlusive, very high-dose vitamin E oil — comedogenic risk for combination/pore-prone skin and works against your blackhead/pore goals." },
+  { id: 2, match: ["la roche-posay", "retinol"], tag: "best", reason: "Well-suited retinol for blackheads, pores, and scarring at an appropriate weekly frequency." },
+  { id: 3, match: ["a313"], tag: "bad", reason: "A third retinoid product alongside your existing retinol and tretinoin — redundant and raises irritation risk without added benefit." },
+  { id: 4, match: ["ret-avit"], tag: "best", reason: "Prescription-strength tretinoin — the most clinically effective active for blackheads, pores, and scarring." },
+  { id: 5, match: ["pura", "vitamin c"], tag: "good", reason: "Effective for scarring, but 20% is a high, unbuffered concentration that can irritate combination skin — a gentler stabilized formula could work as well with less irritation." },
+  { id: 6, match: ["dermalogica", "microfoliant"], tag: "best", reason: "Gentle enzyme/physical exfoliant well suited to blackheads and pores." },
+  { id: 7, match: ["caudalie", "purifying toner"], tag: "best", reason: "Salicylic-acid toner well matched to oiliness and blackheads." },
+  { id: 8, match: ["skin1004", "cleansing oil"], tag: "best", reason: "Gentle first-cleanse step, well suited to combination skin." },
+  { id: 9, match: ["some by mi"], tag: "good", reason: "Effective exfoliating toner, but one of several acid-exfoliant products in rotation — consider consolidating to reduce over-exfoliation risk." },
+  { id: 10, match: ["vinohydra"], tag: "best", reason: "Hydrating mask that supports combination skin's drier patches." },
+  { id: 11, match: ["st. tropez"], tag: "good", reason: "Cosmetic self-tanner — no treatment value for your skin concerns, but not counterproductive either." },
+  { id: 12, match: ["mars", "safranal"], tag: "bad", reason: "A second niacinamide product alongside Yeouth Niacinamide Serum — redundant, and the app's own conflict checker already flags niacinamide+niacinamide as duplicated actives." },
+  { id: 13, match: ["yeouth"], tag: "best", reason: "Clean, dedicated niacinamide serum well matched to oiliness and enlarged pores." },
+  { id: 14, match: ["vinopure", "salicylic"], tag: "good", reason: "Effective for blackheads and pores, but one of several acid-exfoliant products in rotation — worth reviewing for redundancy." },
+  { id: 16, match: ["lip mask"], tag: "best", reason: "Lip-specific overnight treatment, no conflict with facial actives." },
+  { id: 17, match: ["cosrx", "snail"], tag: "best", reason: "Barrier-supporting hydration well suited to scarring and combination skin." },
+  { id: 18, match: ["marine hyaluronics"], tag: "good", reason: "Effective hydrator, but functionally overlaps with the COSRX Snail Essence already in your PM routine." },
+  { id: 19, match: ["red bean water gel"], tag: "best", reason: "Lightweight, non-comedogenic moisturizer well suited to combination/oily skin." },
+  { id: 20, match: ["effaclar"], tag: "best", reason: "Mattifying moisturizer that directly targets oiliness and enlarged pores." },
+  { id: 21, match: ["hyalu-cica", "sun serum"], tag: "best", reason: "Broad-spectrum SPF in a gentle, centella-based formula — essential for preventing post-inflammatory scarring." },
+  { id: 22, match: ["aha 30"], tag: "good", reason: "Effective as an occasional intensive treatment, but you already have several other exfoliating products in weekly rotation — monitor cumulative irritation." },
+  { id: 23, match: ["aztec"], tag: "good", reason: "Good clay mask for oiliness and blackheads if reactivated, but overlaps with the other pore/clay masks in your unscheduled list." },
+  { id: 24, match: ["beauty of joseon", "pore mask"], tag: "good", reason: "Good pore-refining mask if reactivated, but overlaps with Aztec Secret Clay for the same purpose." },
+  { id: 25, match: ["anua"], tag: "best", reason: "Gentle, soothing toner that would genuinely complement an actives-heavy routine if reactivated." },
+  { id: 26, match: ["cosrx", "aha/bha"], tag: "bad", reason: "Another exfoliating toner — redundant with the acid toners already active in your routine; no need to add this." },
+  { id: 27, match: ["ginseng"], tag: "good", reason: "Gentle hydrating essence-toner, but overlaps in purpose with the COSRX Snail Essence already active." },
+  { id: 28, match: ["thermal spring water"], tag: "good", reason: "Soothing, situational — nice for calming or a midday refresh, not essential." },
+  { id: 29, match: ["gel cleanser"], tag: "best", reason: "Would fill a real gap — you don't currently have a dedicated AM cleanser scheduled." }
+];
+const getProductRank = p => {
+  const byId = RANK_DATA.find(r => r.id === p.id);
+  if (byId) return byId;
+  const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+  return RANK_DATA.find(r => r.match.every(kw => hay.includes(kw))) || null;
+};
+const RANK_STYLE = {
+  best: { color: T.green, bg: T.greenSoft, label: "Best" },
+  good: { color: T.blue, bg: T.blueSoft, label: "Good" },
+  bad: { color: T.red, bg: T.redSoft, label: "Bad" }
+};
+
 
 // ─── RULE-BASED AUTO-SCHEDULER (no AI) ─────────────────────────────────────
 // Suggests session + frequency for an unscheduled product from its name/
@@ -533,6 +636,27 @@ const MIGRATIONS = [{
         ...p,
         stepOrder: step
       };
+    })
+  })
+}, {
+  id: "product_rank_analysis_v1",
+  // Applies the dermatologist-style best/good/bad ranking (RANK_DATA, run
+  // against Israel's skin profile) to any matching product, and — one time
+  // only — auto-unschedules any product that comes back "bad" and is
+  // currently scheduled. This is a soft removal (same as "Remove from
+  // Routine"): the product stays in the library and can be manually
+  // re-scheduled afterward without this migration re-firing on it, since
+  // it only ever runs once per profile (tracked via profile.migrations).
+  apply: profile => ({
+    ...profile,
+    products: (profile.products || []).map(p => {
+      const r = getProductRank(p);
+      if (!r) return p;
+      const ranked = { ...p, rank: r.tag, rankReason: r.reason };
+      if (r.tag === "bad" && ranked.scheduled) {
+        return { ...ranked, scheduled: false, session: "", frequency: "", nextDate: "", stepOrder: 0 };
+      }
+      return ranked;
     })
   })
 }];
@@ -2283,6 +2407,10 @@ const ProductsTab = ({
     setTimeout(() => setAutoScheduledFlash(0), 3000);
   };
   const conflicts = findConflicts(profile.products.filter(p => p.scheduled));
+  // Group products by category (Cleansers, Toners, Serums, etc.) while
+  // preserving each product's relative order within its category — used to
+  // render category header rows above the product list.
+  const sortedProducts = CATEGORY_DISPLAY_ORDER.flatMap(cat => profile.products.filter(p => productCategoryGroup(p) === cat));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -2428,14 +2556,28 @@ const ProductsTab = ({
       fontSize: 12,
       color: T.muted
     }
-  }, profile.products.filter(p => p.scheduled).length, " scheduled")), profile.products.map((p, i) => {
+  }, profile.products.filter(p => p.scheduled).length, " scheduled")), sortedProducts.map((p, i) => {
     const col = pcolor(p);
     const isEditing = editId === p.id;
-    return /*#__PURE__*/React.createElement("div", {
+    const rank = getProductRank(p);
+    const cat = productCategoryGroup(p);
+    const categoryHeader = (i === 0 || productCategoryGroup(sortedProducts[i - 1]) !== cat) ? /*#__PURE__*/React.createElement("div", {
+      key: "cat-" + cat,
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        color: T.muted,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        marginTop: i === 0 ? 0 : 12,
+        marginBottom: 2
+      }
+    }, cat) : null;
+    return [categoryHeader, /*#__PURE__*/React.createElement("div", {
       key: p.id,
       style: {
         padding: "11px 0",
-        borderBottom: i < profile.products.length - 1 ? `1px solid ${T.border}` : "none"
+        borderBottom: i < sortedProducts.length - 1 ? `1px solid ${T.border}` : "none"
       }
     }, /*#__PURE__*/React.createElement("div", {
       style: {
@@ -2469,7 +2611,21 @@ const ProductsTab = ({
         fontWeight: 400,
         fontSize: 12
       }
-    }, " · ", p.brandName)), p.scheduled ? /*#__PURE__*/React.createElement("div", {
+    }, " · ", p.brandName)), rank && /*#__PURE__*/React.createElement("span", {
+      title: rank.reason,
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        background: RANK_STYLE[rank.tag].bg,
+        color: RANK_STYLE[rank.tag].color,
+        border: `1px solid ${RANK_STYLE[rank.tag].color}44`,
+        borderRadius: 100,
+        padding: "1px 8px",
+        fontSize: 10,
+        fontWeight: 700,
+        marginTop: 3
+      }
+    }, RANK_STYLE[rank.tag].label), p.scheduled ? /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 6,
@@ -2634,7 +2790,7 @@ const ProductsTab = ({
         marginTop: 8,
         color: T.muted
       }
-    }, "Remove from Routine")));
+    }, "Remove from Routine")))];
   })), profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
