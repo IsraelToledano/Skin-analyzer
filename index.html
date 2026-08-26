@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.1";
+const APP_VERSION = "2026-08-26.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2412,27 +2412,7 @@ const ProductsTab = ({
       setShowSugs(false);
     },
     variant: "ghost"
-  }, "Cancel")))), conflicts.length > 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: T.redSoft,
-      border: `1px solid ${T.red}33`,
-      borderRadius: 12,
-      padding: "12px 14px"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: T.red,
-      fontWeight: 700,
-      fontSize: 13,
-      marginBottom: 6
-    }
-  }, "⚠️ ", conflicts.length, " ingredient conflict", conflicts.length > 1 ? "s" : ""), conflicts.map((c, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: {
-      color: T.muted,
-      fontSize: 12
-    }
-  }, "• ", c.p1.genericName, " + ", c.p2.genericName, " — schedule at different sessions or days"))), profile.products.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+  }, "Cancel")))), profile.products.length > 0 && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
@@ -2681,7 +2661,27 @@ const ProductsTab = ({
     }
   }, "Cleansers, serums, treatments, masks — anything you use. Or import them from the Claude.ai version via Sync."), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => setShowAdd(true)
-  }, "+ Add First Product")));
+  }, "+ Add First Product")), conflicts.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: T.redSoft,
+      border: `1px solid ${T.red}33`,
+      borderRadius: 12,
+      padding: "12px 14px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: T.red,
+      fontWeight: 700,
+      fontSize: 13,
+      marginBottom: 6
+    }
+  }, "⚠️ ", conflicts.length, " ingredient conflict", conflicts.length > 1 ? "s" : ""), conflicts.map((c, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      color: T.muted,
+      fontSize: 12
+    }
+  }, "• ", c.p1.genericName, " + ", c.p2.genericName, " — schedule at different sessions or days"))));
 };
 
 // ─── MAIN APP ───────────────────────────────────────────────────────────────────
