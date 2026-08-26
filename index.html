@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-26.5";
+const APP_VERSION = "2026-08-26.6";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -312,7 +312,12 @@ const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
   if (byId) return byId;
   const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
-  return RANK_DATA.find(r => r.match.every(kw => hay.includes(kw))) || null;
+  const matched = RANK_DATA.find(r => r.match.every(kw => hay.includes(kw)));
+  if (matched) return matched;
+  // Not part of the analyzed roster (e.g. added after the review ran) —
+  // default to Good rather than leaving it in limbo. Nothing here claims a
+  // specific clinical reason since it hasn't actually been reviewed.
+  return { tag: "good", reason: "Added after the last product review — not yet individually assessed." };
 };
 const RANK_STYLE = {
   best: { color: T.green, bg: T.greenSoft, label: "Best" },
@@ -2339,8 +2344,8 @@ const CalendarTab = ({
   }));
 };
 
-const RANK_GROUP_ORDER = ["best", "good", "bad", "unranked"];
-const RANK_GROUP_LABEL = { best: "Best", good: "Good", bad: "Bad", unranked: "Unranked" };
+const RANK_GROUP_ORDER = ["best", "good", "bad"];
+const RANK_GROUP_LABEL = { best: "Best", good: "Good", bad: "Bad" };
 
 // Single product row, reused by both the Ranked list and the Categories
 // list. `tagMode` controls which small pill shows next to the name —
@@ -2720,7 +2725,7 @@ const ProductsTab = ({
   // products' original relative order.
   const rankGroups = RANK_GROUP_ORDER.map(tag => ({
     label: RANK_GROUP_LABEL[tag],
-    items: profile.products.filter(p => (getProductRank(p)?.tag || "unranked") === tag)
+    items: profile.products.filter(p => getProductRank(p).tag === tag)
   })).filter(g => g.items.length);
   // Categories list groups: Cleansers → Toners → ... → Other.
   const categoryGroups = CATEGORY_DISPLAY_ORDER.map(cat => ({
