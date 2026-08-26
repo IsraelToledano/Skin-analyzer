@@ -613,12 +613,29 @@ const detectType = (p) => {
   if(/thermal|spring water|mist|spray/.test(hay)) return "mist";
   if(/moisturi|water gel|gel cream|effaclar mat|red bean/.test(hay)) return "moisturizer";
   if(/eye/.test(hay)) return "eye";
-  if(/bio-oil|face oil|facial oil|vitamin e oil|squalane/.test(hay)) return "faceoil";
+  if(/bio-oil|face oil|facial oil|vitamin e|squalane|jojoba|rosehip/.test(hay)) return "faceoil";
   if(/toner/.test(hay)) return "toner";
   if(/essence/.test(hay)) return "essence";
   if(/serum/.test(hay)) return "serum";
   return "other";
 };
+// Groups the fine-grained detectType() buckets into the coarser display
+// categories shown as section headers in the Products list (e.g. "cleanser"
+// and "cleanser_oil" both show under "Cleansers").
+const CATEGORY_GROUP_MAP = {
+  cleanser:"Cleansers", cleanser_oil:"Cleansers",
+  toner:"Toners", mist:"Toners",
+  essence:"Essences",
+  vitc:"Vitamin C", niacinamide:"Niacinamide",
+  exfoliant:"Exfoliants", retinoid:"Retinoids",
+  serum:"Serums", eye:"Eye Care",
+  mask:"Masks", faceoil:"Face Oils",
+  moisturizer:"Moisturizers", lip:"Lip Care",
+  selftan:"Self-Tan", spf:"SPF",
+  other:"Other",
+};
+const CATEGORY_DISPLAY_ORDER = ["Cleansers","Toners","Essences","Vitamin C","Niacinamide","Exfoliants","Retinoids","Serums","Eye Care","Masks","Face Oils","Moisturizers","Lip Care","Self-Tan","SPF","Other"];
+const productCategoryGroup = (p) => CATEGORY_GROUP_MAP[detectType(p)] || "Other";
 // type → [session, frequency, stepOrder, waitInstruction]; "extra" = rules for
 // 2nd+ product of the same type (rotate instead of stacking).
 const OFFLINE_RULES = {
@@ -733,14 +750,14 @@ const offlineAnalysis = (products) => {
       byCat[k].slice(1).forEach(p=>{
         if(flagged.has(p.id)) return;
         flagged.add(p.id);
-        items.push({ id:String(p.id), tag:"consider-removing",
+        items.push({ id:String(p.id), tag:"bad",
           reason:`You have ${byCat[k].length} ${dupCats[k]} products — one is enough. Extras add irritation risk without added benefit.`,
           alternatives:[] });
       });
     }
   }
   (products||[]).filter(p=>!flagged.has(p.id)).forEach(p=>{
-    items.push({ id:String(p.id), tag:"keep-asis",
+    items.push({ id:String(p.id), tag:"best",
       reason:"Rule-based check passed: no duplicate actives or ingredient conflicts. For a full clinical review, run analysis on desktop.",
       alternatives:[] });
   });
@@ -1217,15 +1234,14 @@ ${skinCtx}
 PRODUCTS TO RANK:
 ${listStr}
 
-For EACH product assign exactly one ranking tag:
-- "keep-asis" — clinically effective, well-suited to this skin, no change needed
-- "upgrade" — works but a more effective / better-researched product exists; give exactly 3 upgrade options with brand names
-- "nice-to-have" — harmless but little benefit for this skin
-- "consider-removing" — may cause harm, irritation, or works against this skin's goals
+For EACH product assign exactly one ranking:
+- "best" — clinically effective, well-suited to this skin, no change needed
+- "good" — works reasonably well, but either a more effective / better-researched product exists, or it's harmless with modest benefit for this skin
+- "bad" — may cause harm, irritation, or works against this skin's goals; should not stay in the routine
 
 Return ONLY a JSON array, no markdown, no extra text:
-[{"id":"NUMERIC_ID","productName":"name","tag":"keep-asis|upgrade|nice-to-have|consider-removing","reason":"one clinical sentence","alternatives":[{"name":"Brand Product","why":"why more effective"},{"name":"Brand Product","why":"why"},{"name":"Brand Product","why":"why"}]}]
-Include "alternatives" (exactly 3) ONLY for tag="upgrade"; omit it otherwise.`;
+[{"id":"NUMERIC_ID","productName":"name","tag":"best|good|bad","reason":"one clinical sentence","alternatives":[{"name":"Brand Product","why":"why more effective"},{"name":"Brand Product","why":"why"},{"name":"Brand Product","why":"why"}]}]
+Include "alternatives" (up to 3) ONLY for tag="good" when a clearly better product exists; omit it otherwise. Never include alternatives for tag="bad" — the recommendation there is removal, not replacement.`;
 
         const content = [];
         if(b===0) content.push(...apiImageBlocks(skinImgs));
@@ -1251,6 +1267,7 @@ Include "alternatives" (exactly 3) ONLY for tag="upgrade"; omit it otherwise.`;
       setAnalyzeProgress({done:total, total, label:"Done"});
       if(!all.length) throw new Error("No results returned. Please try again.");
       setAnalysisResult({items:all, analyzedAt:new Date().toISOString()});
+      unscheduleBadRanked(all);
     } catch(err) {
       if(/All models rejected|fetch rejected|Network/i.test(err.message)){
         // AI bridge unreachable (phone) — run the deterministic rule-based analysis.
@@ -1258,11 +1275,28 @@ Include "alternatives" (exactly 3) ONLY for tag="upgrade"; omit it otherwise.`;
         setAnalyzeProgress({done:1, total:1, label:"Done"});
         setAnalysisResult({items, analyzedAt:new Date().toISOString(), offline:true});
         setAnalyzeMsg("");
+        unscheduleBadRanked(items);
       } else {
         setAnalyzeMsg(`Analysis failed: ${err.message}`);
       }
     }
     setAnalyzing(false);
+  };
+
+  // Any product freshly ranked "bad" this analysis run gets pulled out of the
+  // routine automatically (scheduled:false) — but only a soft removal: the
+  // product stays in the library and the person can manually re-add it via
+  // Edit/Schedule at any time, same as "Remove from Routine".
+  const unscheduleBadRanked = (items) => {
+    const badIds = new Set((items||[]).filter(it=>it.tag==="bad" && it.id!=null).map(it=>String(it.id)));
+    if(!badIds.size) return;
+    const next = profile.products.map(p =>
+      badIds.has(String(p.id)) && p.scheduled
+        ? {...p, scheduled:false, session:"", frequency:"", nextDate:"", stepOrder:0}
+        : p
+    );
+    const changed = next.some((p,i)=>p!==profile.products[i]);
+    if(changed) onUpdate({products:next});
   };
 
   // When user accepts a "missing" recommendation, find 3 concrete products to choose from
@@ -1668,10 +1702,9 @@ Keep each day to ~4–6 steps per session by rotating extras. Every product exac
       {/* ── Unified product list: routine + analysis in one card each ────── */}
       {profile.products.length>0&&(()=>{
         const TAG_STYLE = {
-          "keep-asis":         {color:T.green, bg:T.greenSoft, label:"Keep",     dot:"✓", rank:0},
-          "upgrade":           {color:T.blue,  bg:T.blueSoft,  label:"Upgrade",  dot:"⬆", rank:1},
-          "nice-to-have":      {color:T.muted, bg:T.faint,     label:"Optional", dot:"○", rank:2},
-          "consider-removing": {color:T.red,   bg:T.redSoft,   label:"Remove",   dot:"✕", rank:3},
+          "best": {color:T.green, bg:T.greenSoft, label:"Best", dot:"✓", rank:0},
+          "good": {color:T.blue,  bg:T.blueSoft,  label:"Good", dot:"○", rank:1},
+          "bad":  {color:T.red,   bg:T.redSoft,   label:"Bad",  dot:"✕", rank:2},
         };
         const items   = analysisResult?.items || [];
         const hasAna  = items.length>0;
@@ -1695,7 +1728,7 @@ Keep each day to ~4–6 steps per session by rotating extras. Every product exac
           });
           list = [...withTag, ...noTag];
         }
-        const FILTERS = [["all","All"],["keep-asis","Keep"],["upgrade","Upgrade"],["nice-to-have","Optional"],["consider-removing","Remove"]];
+        const FILTERS = [["all","All"],["best","Best"],["good","Good"],["bad","Bad"]];
         const analyzedDate = analysisResult?.analyzedAt ? new Date(analysisResult.analyzedAt) : null;
 
         return (
@@ -1787,20 +1820,28 @@ Keep each day to ~4–6 steps per session by rotating extras. Every product exac
             </div>
           )}
 
-          {/* Unified product cards */}
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {list.length===0&&(
-              <div style={{textAlign:"center",padding:"28px 0",color:T.muted,fontSize:13,fontStyle:"italic"}}>No products match this filter.</div>
-            )}
-            {list.map(p=>{
+          {/* Unified product cards, grouped by category */}
+          {list.length===0&&(
+            <div style={{textAlign:"center",padding:"28px 0",color:T.muted,fontSize:13,fontStyle:"italic"}}>No products match this filter.</div>
+          )}
+          {CATEGORY_DISPLAY_ORDER.map(catName => {
+            const catItems = list.filter(p => productCategoryGroup(p) === catName);
+            if(!catItems.length) return null;
+            return (
+            <div key={catName} style={{marginBottom:18}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.muted,textTransform:"uppercase",letterSpacing:"0.07em",margin:"4px 2px 8px"}}>
+                {catName} <span style={{opacity:0.6,fontWeight:600}}>({catItems.length})</span>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {catItems.map(p=>{
               const col = pcolor(p);
               const ana = anaById[String(p.id)];
-              const ts  = ana ? (TAG_STYLE[ana.tag]||TAG_STYLE["nice-to-have"]) : null;
+              const ts  = ana ? (TAG_STYLE[ana.tag]||TAG_STYLE["good"]) : null;
               const sessionIcon = p.session==="am"?"☀️":p.session==="pm"?"🌙":p.session==="both"?"☀️🌙":"";
               const sessionLbl  = p.session==="both"?"AM + PM":p.session?.toUpperCase();
               const buyName = p.brandName || p.genericName;
               const expanded = expandedIds.has(p.id);
-              const hasUpgrades = ana?.tag==="upgrade" && ana.alternatives?.length>0;
+              const hasUpgrades = ana?.tag==="good" && ana.alternatives?.length>0;
               return (
                 <div key={p.id} style={{position:"relative",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px 14px 18px",boxShadow:T.shadow,overflow:"hidden"}}>
                   {/* category accent stripe */}
@@ -1842,7 +1883,7 @@ Keep each day to ~4–6 steps per session by rotating extras. Every product exac
                         <span>{sessionIcon}</span>{sessionLbl} · {FREQS[p.frequency]||p.frequency}
                       </span>
                     ):(
-                      <span style={{display:"inline-flex",alignItems:"center",gap:5,background:ana?.tag==="consider-removing"?T.redSoft:T.faint,color:ana?.tag==="consider-removing"?T.red:T.muted,border:`1px solid ${ana?.tag==="consider-removing"?T.red+"33":T.border}`,borderRadius:100,padding:"3px 11px",fontSize:11,fontWeight:600,fontStyle:"italic"}}>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:5,background:ana?.tag==="bad"?T.redSoft:T.faint,color:ana?.tag==="bad"?T.red:T.muted,border:`1px solid ${ana?.tag==="bad"?T.red+"33":T.border}`,borderRadius:100,padding:"3px 11px",fontSize:11,fontWeight:600,fontStyle:"italic"}}>
                         ○ Not scheduled
                       </span>
                     )}
@@ -1850,9 +1891,9 @@ Keep each day to ~4–6 steps per session by rotating extras. Every product exac
 
                   {/* not-scheduled explanation — always shown, never a silent gap */}
                   {!p.scheduled&&(
-                    ana?.tag==="consider-removing"?(
+                    ana?.tag==="bad"?(
                       <div style={{marginTop:7,fontSize:11,color:T.muted,lineHeight:1.4}}>
-                        Analysis flagged this for removal, so it was left out of your routine on purpose. Remove it with × if you no longer want it, or schedule it anyway below.
+                        Ranked "Bad" and automatically removed from your routine. Remove it with × if you no longer want it, or schedule it anyway below.
                       </div>
                     ):(
                       <div style={{marginTop:7,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -1915,8 +1956,11 @@ Keep each day to ~4–6 steps per session by rotating extras. Every product exac
                   )}
                 </div>
               );
-            })}
-          </div>
+              })}
+              </div>
+            </div>
+            );
+          })}
         </div>
         );
       })()}
