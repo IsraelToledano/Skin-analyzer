@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Skin Ritual</title>
 <meta name="theme-color" content="#FAF7F4">
@@ -101,7 +104,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.8";
+const APP_VERSION = "2026-08-27.9";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3160,6 +3163,21 @@ function App() {
   const TABS = ["📅 Calendar", "👤 Profile", "🧴 Products"];
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState("");
+  // Meta cache-control tags are advisory — iOS's standalone home-screen
+  // WebView doesn't reliably re-fetch the app shell just because we asked
+  // it to, especially when relaunching an icon rather than navigating in
+  // Safari. This actively checks the deployed copy for a newer
+  // APP_VERSION so at least there's a visible, honest signal instead of
+  // silently running stale code indefinitely.
+  const [newerVersion, setNewerVersion] = useState(null);
+  useEffect(() => {
+    fetch(location.pathname + "?_v=" + Date.now(), {
+      cache: "no-store"
+    }).then(r => r.text()).then(html => {
+      const m = html.match(/const APP_VERSION = "([^"]+)"/);
+      if (m && m[1] !== APP_VERSION) setNewerVersion(m[1]);
+    }).catch(() => {});
+  }, []);
   const skinImgs = profile.skinImgs || [];
   const setSkinImgs = fn => {
     update({
@@ -3543,7 +3561,18 @@ function App() {
       fontFamily: "'Inter',sans-serif",
       whiteSpace: "nowrap"
     }
-  }, "⇄ Sync"))), /*#__PURE__*/React.createElement("div", {
+  }, "⇄ Sync"))), newerVersion && /*#__PURE__*/React.createElement("div", {
+    onClick: () => location.reload(true),
+    style: {
+      background: T.accent,
+      color: "#fff",
+      textAlign: "center",
+      padding: "8px 12px",
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer"
+    }
+  }, "⟳ Update available (v", newerVersion, ") — tap to refresh"), /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff",
       borderBottom: `1px solid ${T.border}`,
