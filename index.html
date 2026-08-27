@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.1";
+const APP_VERSION = "2026-08-27.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -751,6 +751,23 @@ const MIGRATIONS = [{
       return step === null ? p : { ...p, stepOrder: step };
     })
   })
+}, {
+  id: "exfoliant_session_fix_v1",
+  // Before yesterday's fix, AUTO_SCHEDULE_RULES matched the generic toner
+  // rule (session: "both") ahead of the exfoliant-acid rule. Clicking
+  // Auto-Schedule on an AHA/BHA/PHA-named "toner" while that ordering bug
+  // was live would have assigned it session "both" — meaning it ran in
+  // the AM routine too. Every exfoliant rule that actually exists is
+  // PM-only, so this corrects any exfoliant still carrying an AM or
+  // "both" session back to PM, one time.
+  apply: profile => {
+    const isMisplacedExfoliant = p => classifyStepOrder(p) === 40 && (p.session === "am" || p.session === "both");
+    if (!(profile.products || []).some(isMisplacedExfoliant)) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isMisplacedExfoliant(p) ? { ...p, session: "pm" } : p)
+    };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
