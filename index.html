@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.3";
+const APP_VERSION = "2026-08-27.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -149,6 +149,21 @@ const ACTIVE_GROUP_RULES = [{
 const classifyActiveGroups = p => {
   const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
   return ACTIVE_GROUP_RULES.filter(rule => rule.keywords.some(kw => hasKeyword(text, kw))).map(rule => rule.group);
+};
+// Not every redundancy is a chemical-conflict risk. Two toners or two
+// hydrating essences on the same night won't irritate skin the way two
+// retinoids would, but they're still doing the same job twice for no
+// added benefit — layering toner→essence→serum is a normal, intentional
+// routine; TWO toners or TWO essences the same night is just clutter.
+// These "layer" types piggyback on the exact same one-per-day mechanism
+// as ACTIVE_GROUP_RULES via classifySingletonGroups below, rather than
+// needing a second, separately-maintained enforcement path.
+const LAYER_SINGLETON_TYPES = new Set(["toner", "essence"]);
+const classifySingletonGroups = p => {
+  const groups = classifyActiveGroups(p);
+  const type = detectType(p);
+  if (LAYER_SINGLETON_TYPES.has(type)) groups.push(`layer:${type}`);
+  return groups;
 };
 const SUGGESTIONS = ["Cleanser", "Foaming Cleanser", "Gel Cleanser", "Cream Cleanser", "Oil Cleanser", "Micellar Water", "Balm Cleanser", "Toner", "Hydrating Toner", "Essence", "Vitamin C Serum", "Vitamin C (Ascorbic Acid)", "Niacinamide Serum", "Hyaluronic Acid Serum", "Retinol", "Retinoid", "Tretinoin", "Adapalene", "Bakuchiol", "Salicylic Acid", "BHA Exfoliant", "Glycolic Acid", "AHA Exfoliant", "Lactic Acid", "Mandelic Acid", "Azelaic Acid", "Benzoyl Peroxide", "Kojic Acid", "Alpha Arbutin", "Moisturizer", "Night Cream", "Gel Moisturizer", "Barrier Cream", "Ceramide Moisturizer", "Eye Cream", "SPF 30", "SPF 50", "Mineral Sunscreen", "Chemical Sunscreen", "Tinted SPF", "Face Oil", "Rosehip Oil", "Squalane", "Jojoba Oil", "Clay Mask", "Sheet Mask", "Sleeping Mask", "Exfoliant (AHA/BHA)", "LED Light Therapy", "Microneedling", "Gua Sha", "Scalp Serum", "Scalp Treatment", "Lip Balm", "Neck Cream"];
 const PRODUCT_COLORS = {
@@ -1224,7 +1239,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       const placedTexts = [];
       const registerPlaced = prod => {
         if (!prod) return;
-        classifyActiveGroups(prod).forEach(g => placedGroups.add(g));
+        classifySingletonGroups(prod).forEach(g => placedGroups.add(g));
         placedTexts.push([prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase());
       };
       placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
@@ -1270,7 +1285,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // existing overdue/served tiebreak naturally rotates which one
         // wins on subsequent days instead of one permanently starving
         // the other.
-        const groupClash = c.members.some(p => classifyActiveGroups(p).some(g => placedGroups.has(g)) || conflictsWithToday(p));
+        const groupClash = c.members.some(p => classifySingletonGroups(p).some(g => placedGroups.has(g)) || conflictsWithToday(p));
         if (groupClash) return;
         if (c.members.length <= remaining) {
           c.members.forEach(p => {
