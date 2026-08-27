@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.6";
+const APP_VERSION = "2026-08-27.7";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1237,6 +1237,62 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       }
     });
     pendingCarry = new Set();
+    // Active-ingredient / layer-singleton groups already guaranteed for
+    // today (one-offs, pins, carried-over skips) — everything below won't
+    // stack a same-active or same-layer-type product on top of these.
+    // Also tracks each placed product's own text so CONFLICT_PAIRS
+    // (cross-active clashes like retinol+salicylic-acid, or self-tan+any
+    // active) can be checked against everything placed today.
+    const placedGroups = new Set();
+    const placedTexts = [];
+    const registerPlaced = prod => {
+      if (!prod) return;
+      classifySingletonGroups(prod).forEach(g => placedGroups.add(g));
+      placedTexts.push([prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase());
+    };
+    placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
+    const conflictsWithToday = prod => {
+      const hay = [prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase();
+      return CONFLICT_PAIRS.some(([a, b]) => hay.includes(a) && placedTexts.some(t => t.includes(b)) || hay.includes(b) && placedTexts.some(t => t.includes(a)));
+    };
+    // 2c. Guaranteed foundational steps: cleanser and moisturizer claim a
+    // slot whenever something in that category is due, ahead of the
+    // general competitive fill below — a routine meant to always run 5
+    // steps shouldn't lose its cleanser or moisturizer some nights just
+    // because several weekly actives happened to be due the same day.
+    // Picks the single best-priority candidate per category (same
+    // overdue/served ranking as the general fill); a second product in
+    // the same category can still win a spot in the general fill below
+    // if there's room and it isn't a hard-blocked layer-singleton type
+    // (e.g. a legitimate oil-cleanse + gel-cleanse double-cleanse isn't
+    // blocked — only a second MOISTURIZER is, same as before).
+    ["cleanser", "moisturizer"].forEach(cat => {
+      if (dayList.length >= cap) return;
+      if (placedGroups.has(`layer:${cat}`)) return;
+      const isCat = p => detectType(p) === cat || cat === "cleanser" && detectType(p) === "cleanser_oil";
+      const due = rotating.filter(p => isCat(p) && !placedIds.has(p.id)).map(p => {
+        const iv = FREQ_DAYS[p.frequency] || 1;
+        const last = lastServed[p.id];
+        const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
+        const isDue = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
+        return isDue ? {
+          p,
+          overdue: (since - iv) / iv,
+          served: servedCount[p.id] || 0
+        } : null;
+      }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.served - b.served);
+      if (due.length && !conflictsWithToday(due[0].p)) {
+        const winner = due[0].p;
+        dayList.push({
+          productId: winner.id,
+          carried: false
+        });
+        lastServed[winner.id] = ds;
+        servedCount[winner.id] = (servedCount[winner.id] || 0) + 1;
+        placedIds.add(winner.id);
+        registerPlaced(winner);
+      }
+    });
     // 3. Fill remaining budget from the group pool, most-overdue-first.
     //    A group's overdue score is its most-overdue member; a group only
     //    gets scheduled if every not-yet-placed member fits in the budget.
@@ -1251,24 +1307,6 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     //    product rotating through the cap evenly over time.
     const budget = Math.max(0, cap - dayList.length);
     if (budget > 0) {
-      // Active-ingredient groups already guaranteed for today (one-offs,
-      // pins, carried-over skips) — automatic fill below won't stack a
-      // same-active product on top of these. Also tracks each placed
-      // product's own text so CONFLICT_PAIRS (cross-active clashes like
-      // retinol+salicylic-acid, or self-tan+any active) can be checked
-      // against everything placed today, not just same-group duplicates.
-      const placedGroups = new Set();
-      const placedTexts = [];
-      const registerPlaced = prod => {
-        if (!prod) return;
-        classifySingletonGroups(prod).forEach(g => placedGroups.add(g));
-        placedTexts.push([prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase());
-      };
-      placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
-      const conflictsWithToday = prod => {
-        const hay = [prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase();
-        return CONFLICT_PAIRS.some(([a, b]) => hay.includes(a) && placedTexts.some(t => t.includes(b)) || hay.includes(b) && placedTexts.some(t => t.includes(a)));
-      };
       const candidates = groups.map(group => {
         const members = group.filter(p => !placedIds.has(p.id));
         if (members.length === 0) return null;
