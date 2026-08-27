@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.5";
+const APP_VERSION = "2026-08-27.6";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -166,10 +166,25 @@ const classifyActiveGroups = p => {
 // as ACTIVE_GROUP_RULES via classifySingletonGroups below, rather than
 // needing a second, separately-maintained enforcement path.
 const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer"]);
+// A "serum" that carries no treatment active of its own — just a
+// humectant/hydrator — is functionally an essence wearing a different
+// label. COSRX Snail 96 Essence and The Ordinary Marine Hyaluronics do
+// the same job (this was actually already noted in the rank analysis:
+// "functionally overlaps with the COSRX Snail Essence" — that reasoning
+// just never got wired into scheduling until now). Scoped narrowly so a
+// genuine treatment serum (vitamin C, retinol, niacinamide, an
+// exfoliant) is never swept in — those already carry their own active
+// group and are excluded below.
+const HYDRATION_SERUM_KEYWORDS = ["hyaluronic", "hyaluronate", "marine", "snail", "centella", "ceramide"];
 const classifySingletonGroups = p => {
   const groups = classifyActiveGroups(p);
   const type = detectType(p);
-  if (LAYER_SINGLETON_TYPES.has(type)) groups.push(`layer:${type}`);
+  if (LAYER_SINGLETON_TYPES.has(type)) {
+    groups.push(`layer:${type}`);
+  } else if (type === "serum" && groups.length === 0) {
+    const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    if (HYDRATION_SERUM_KEYWORDS.some(kw => hay.includes(kw))) groups.push("layer:essence");
+  }
   return groups;
 };
 const SUGGESTIONS = ["Cleanser", "Foaming Cleanser", "Gel Cleanser", "Cream Cleanser", "Oil Cleanser", "Micellar Water", "Balm Cleanser", "Toner", "Hydrating Toner", "Essence", "Vitamin C Serum", "Vitamin C (Ascorbic Acid)", "Niacinamide Serum", "Hyaluronic Acid Serum", "Retinol", "Retinoid", "Tretinoin", "Adapalene", "Bakuchiol", "Salicylic Acid", "BHA Exfoliant", "Glycolic Acid", "AHA Exfoliant", "Lactic Acid", "Mandelic Acid", "Azelaic Acid", "Benzoyl Peroxide", "Kojic Acid", "Alpha Arbutin", "Moisturizer", "Night Cream", "Gel Moisturizer", "Barrier Cream", "Ceramide Moisturizer", "Eye Cream", "SPF 30", "SPF 50", "Mineral Sunscreen", "Chemical Sunscreen", "Tinted SPF", "Face Oil", "Rosehip Oil", "Squalane", "Jojoba Oil", "Clay Mask", "Sheet Mask", "Sleeping Mask", "Exfoliant (AHA/BHA)", "LED Light Therapy", "Microneedling", "Gua Sha", "Scalp Serum", "Scalp Treatment", "Lip Balm", "Neck Cream"];
