@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.7";
+const APP_VERSION = "2026-08-27.8";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -803,6 +803,20 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: profile.products.map(p => isMisplacedExfoliant(p) ? { ...p, session: "pm" } : p)
+    };
+  }
+}, {
+  id: "water_gel_both_sessions_v1",
+  // Personal preference: the Red Bean Water Gel is the designated
+  // moisturizer for both AM and PM — previously AM-only, which left PM
+  // with no moisturizer product at all once Effaclar Mat moved to AM.
+  apply: profile => {
+    const isWaterGel = p => /red bean water gel/i.test(p.genericName || "") || /red bean water gel/i.test(p.brandName || "");
+    const needsFix = (profile.products || []).some(p => isWaterGel(p) && p.session !== "both");
+    if (!needsFix) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isWaterGel(p) ? { ...p, session: "both" } : p)
     };
   }
 }];
