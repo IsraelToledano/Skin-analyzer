@@ -822,6 +822,24 @@ const MIGRATIONS = [{
       products: profile.products.map(p => isWaterGel(p) ? { ...p, session: "both" } : p)
     };
   }
+}, {
+  id: "step_order_normalize_v3",
+  // step_order_normalize_v1/v2 only ever run once per profile (migrations
+  // are tracked and never re-fire). Any product added or renamed AFTER
+  // those migrations already completed never got its stepOrder checked
+  // against AUTO_SCHEDULE_RULES, so a manually-entered value can silently
+  // drift out of sync with the canonical scale (e.g. a toner and a
+  // cleanser added later ended up with their stepOrder values swapped —
+  // toner at 10, cleanser at 20 — sorting the toner ahead of the cleanser
+  // in the session view). Re-runs the same normalization as v1/v2 one
+  // more time to sweep up anything added since.
+  apply: profile => ({
+    ...profile,
+    products: (profile.products || []).map(p => {
+      const step = classifyStepOrder(p);
+      return step === null ? p : { ...p, stepOrder: step };
+    })
+  })
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
