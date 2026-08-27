@@ -101,7 +101,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.4";
+const APP_VERSION = "2026-08-27.5";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -143,8 +143,15 @@ const ACTIVE_GROUP_RULES = [{
   group: "niacinamide",
   keywords: ["niacinamide"]
 }, {
+  // Renamed in spirit from "acid-exfoliant" — now covers physical/
+  // mechanical exfoliants too (microfoliant, powder exfoliant, enzyme
+  // peels), not just named acids. Layering a physical scrub on top of an
+  // AHA/BHA/salicylic product the same night is the classic
+  // over-exfoliation mistake, and the narrower acid-only list let it
+  // through since a product like "Daily Microfoliant" never mentions any
+  // acid by name.
   group: "acid-exfoliant",
-  keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "lactic", "salicylic acid", "salicylic", "mandelic acid", "mandelic"]
+  keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "lactic", "salicylic acid", "salicylic", "mandelic acid", "mandelic", "exfoliant", "exfoliating", "exfoliator", "microfoliant", "peeling", "enzyme"]
 }];
 const classifyActiveGroups = p => {
   const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
@@ -158,7 +165,7 @@ const classifyActiveGroups = p => {
 // These "layer" types piggyback on the exact same one-per-day mechanism
 // as ACTIVE_GROUP_RULES via classifySingletonGroups below, rather than
 // needing a second, separately-maintained enforcement path.
-const LAYER_SINGLETON_TYPES = new Set(["toner", "essence"]);
+const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer"]);
 const classifySingletonGroups = p => {
   const groups = classifyActiveGroups(p);
   const type = detectType(p);
@@ -1261,7 +1268,15 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           const due = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
           if (due) {
             anyDue = true;
-            bestOverdue = Math.max(bestOverdue, since - iv);
+            // Normalized to each product's own interval (not a raw day
+            // count) — otherwise a monthly item needs a full 30 days of
+            // being overdue before it numerically catches up to a weekly
+            // item that's merely 1 day overdue, so in any session near
+            // capacity it loses every tiebreak for its entire first cycle
+            // and can go unscheduled far longer than intended. A ratio
+            // means "half again as overdue as your own interval" scores
+            // the same whether that's a weekly or a monthly product.
+            bestOverdue = Math.max(bestOverdue, (since - iv) / iv);
           }
           minStepOrder = Math.min(minStepOrder, p.stepOrder || 0);
           minServedCount = Math.min(minServedCount, servedCount[p.id] || 0);
