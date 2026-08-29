@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.1";
+const APP_VERSION = "2026-08-30.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -881,6 +881,50 @@ const MIGRATIONS = [{
       return step === null ? p : { ...p, stepOrder: step };
     })
   })
+}, {
+  id: "exfoliant_mask_rotation_v1",
+  // Personal preference: rather than three fixed dedicated weekly PM
+  // exfoliant nights, one of those three nights should reliably be a clay
+  // mask instead — rotating fairly between his two clay masks — while the
+  // three chemical exfoliants rotate fairly for the two remaining nights
+  // (no single exfoliant permanently dropped; see ROTATION_SLOTS /
+  // buildSessionSchedule step 2d for the actual weekly pick logic). This
+  // migration only flags membership + sets a shared rotationAnchor; if any
+  // of the five expected products aren't found (e.g. not added yet, or
+  // renamed), it's a no-op rather than guessing.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isMicrofoliant = p => hay(p).includes("dermalogica") && hay(p).includes("microfoliant");
+    const isSomeByMi = p => hay(p).includes("some by mi");
+    const isVinopureSalicylic = p => hay(p).includes("vinopure") && hay(p).includes("salicylic");
+    const isAztecClay = p => hay(p).includes("aztec");
+    const isPoreMask = p => hay(p).includes("beauty of joseon") && hay(p).includes("pore mask");
+    const products = profile.products || [];
+    const exfA = products.find(isMicrofoliant);
+    const exfB = products.find(isSomeByMi);
+    const exfC = products.find(isVinopureSalicylic);
+    const maskA = products.find(isAztecClay);
+    const maskB = products.find(isPoreMask);
+    if (!exfA || !exfB || !exfC || !maskA || !maskB) return profile;
+    // Anchor the rotation to the earliest of the three exfoliants' current
+    // nextDate, so the change lands close to their existing schedule
+    // instead of resetting timing to today.
+    const anchor = [exfA, exfB, exfC].map(p => p.nextDate).filter(Boolean).sort()[0] || todayStr();
+    const exfoliantIds = new Set([exfA.id, exfB.id, exfC.id]);
+    const maskIds = new Set([maskA.id, maskB.id]);
+    return {
+      ...profile,
+      products: products.map(p => {
+        if (exfoliantIds.has(p.id)) {
+          return { ...p, inRotationPool: true, rotationRole: "exfoliant", rotationAnchor: anchor };
+        }
+        if (maskIds.has(p.id)) {
+          return { ...p, inRotationPool: true, rotationRole: "mask", rotationAnchor: anchor, scheduled: true, session: "pm", frequency: "weekly", stepOrder: 40 };
+        }
+        return p;
+      })
+    };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -1225,6 +1269,21 @@ const ConcernsSelector = ({
 //      gets scheduled if the FULL group fits in the remaining budget; it is
 //      never split across days.
 const SESSION_CAP = 5;
+// Israel's PM exfoliant/mask rotation (see exfoliant_mask_rotation_v1 and
+// step 2d in buildSessionSchedule below). Three weekly night-slots, each
+// with its own 7-day-recurring anchor date (offsetDays from a shared
+// rotationAnchor set once by the migration): two draw from his three
+// chemical exfoliants, one draws from his two clay masks.
+const ROTATION_SLOTS = [{
+  role: "exfoliant",
+  offsetDays: 0
+}, {
+  role: "exfoliant",
+  offsetDays: 2
+}, {
+  role: "mask",
+  offsetDays: 4
+}];
 const daysBetween = (aStr, bStr) => {
   const a = parseDate(aStr),
     b = parseDate(bStr);
@@ -1248,7 +1307,12 @@ const groupRotating = rotating => {
 };
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = []) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
-  const rotating = sessionProducts.filter(p => !p.isOneOff);
+  // Rotation-pool members (see ROTATION_SLOTS / step 2d below) are
+  // scheduled exclusively through the dedicated pool logic — excluding
+  // them here stops them from ALSO being picked up by the normal
+  // due-date/group machinery, which would double-schedule them.
+  const poolMembers = sessionProducts.filter(p => p.inRotationPool);
+  const rotating = sessionProducts.filter(p => !p.isOneOff && !p.inRotationPool);
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
   const groups = groupRotating(rotating);
   const lastServed = {};
@@ -1379,6 +1443,47 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         });
       }
     });
+    // 2d. Rotation pools (currently used for one thing: Israel's PM
+    // exfoliant/mask nights). Members are flagged inRotationPool by the
+    // exfoliant_mask_rotation_v1 migration and are excluded from the
+    // normal `rotating`/`groups` machinery entirely — this is their only
+    // path to being scheduled. Three weekly PM night-slots are defined in
+    // ROTATION_SLOTS, each anchored to its own date (staggered a few days
+    // apart, same spacing the three exfoliants used to have individually)
+    // and recurring every 7 days from that anchor. Two slots draw from the
+    // "exfoliant" role (his three chemical exfoliants) and one draws from
+    // the "mask" role (his two clay masks) — so the routine keeps exactly
+    // the three PM exfoliant/mask nights it always had, but one of them is
+    // now reliably a clay mask instead of a fixed dedicated exfoliant.
+    // Each slot's winner is whichever eligible member has the LOWEST
+    // servedCount so far (ties broken by stepOrder then id) — since
+    // servedCount is simulated fresh from epoch every time the schedule is
+    // rebuilt, this naturally rotates fairly: no member is ever
+    // permanently favored or permanently skipped.
+    if (poolMembers.length) {
+      const anchor = poolMembers[0].rotationAnchor;
+      ROTATION_SLOTS.forEach(slot => {
+        if (dayList.length >= cap) return; // same deliberate allowance pattern as the cleanser/moisturizer guarantee above — a foundational slot can push slightly past cap, but not compound further once already there
+        const slotDate = addDaysStr(anchor, slot.offsetDays);
+        const offset = daysBetween(slotDate, ds);
+        if (offset < 0 || offset % 7 !== 0) return;
+        const candidates = poolMembers.filter(p => p.rotationRole === slot.role && !placedIds.has(p.id)).map(p => ({
+          p,
+          served: servedCount[p.id] || 0
+        })).sort((a, b) => a.served - b.served || (a.p.stepOrder || 0) - (b.p.stepOrder || 0) || String(a.p.id).localeCompare(String(b.p.id)));
+        if (!candidates.length) return;
+        const winner = candidates[0].p;
+        if (conflictsWithToday(winner)) return;
+        dayList.push({
+          productId: winner.id,
+          carried: false
+        });
+        lastServed[winner.id] = ds;
+        servedCount[winner.id] = (servedCount[winner.id] || 0) + 1;
+        placedIds.add(winner.id);
+        registerPlaced(winner);
+      });
+    }
     // 3. Fill remaining budget from the group pool, most-overdue-first.
     //    A group's overdue score is its most-overdue member; a group only
     //    gets scheduled if every not-yet-placed member fits in the budget.
