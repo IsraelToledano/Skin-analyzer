@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.4";
+const APP_VERSION = "2026-08-30.5";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -827,6 +827,70 @@ const MIGRATIONS = [{
     };
   }
 }, {
+  id: "unschedule_redundant_retinoid_v1",
+  // Derm-holistic audit finding: three retinoid products (Retinol B3,
+  // A313, and prescription Tretinoin) were concurrently scheduled. Running
+  // three overlapping retinoids is not the same risk category as one
+  // scheduling collision — CONFLICT_PAIRS/singleton-group logic already
+  // prevents any two from landing on the SAME night, but nothing prevented
+  // all three from independently rotating across the week, which is a
+  // real cumulative-irritation/barrier concern, especially alongside an
+  // already-active weekly exfoliant rotation. The app's own RANK_DATA
+  // already concluded this — A313 is tagged "bad" specifically for being
+  // "a third retinoid product... redundant and raises irritation risk" —
+  // but that verdict was never enforced; A313 stayed scheduled indefinitely
+  // (see also the RANK_STYLE "bad" badge fix in RoutineBlock, which makes
+  // this kind of thing visible going forward instead of silently sitting
+  // in the routine forever). Tretinoin (prescription, most effective) and
+  // Retinol B3 (OTC, gentler) both stay; A313 is unscheduled specifically
+  // by name, once — matching an explicit decision, not a blanket "remove
+  // everything tagged bad" purge, since that would also catch products a
+  // person may deliberately want to keep scheduled for their own reasons.
+  apply: profile => {
+    const isA313 = p => /a313/i.test(p.genericName || "") || /a313/i.test(p.brandName || "");
+    if (!(profile.products || []).some(p => isA313(p) && p.scheduled)) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isA313(p) && p.scheduled ? {
+        ...p,
+        scheduled: false,
+        session: "",
+        frequency: "",
+        nextDate: "",
+        linkGroup: undefined
+      } : p)
+    };
+  }
+}, {
+  id: "rotate_hyaluronics_essence_v1",
+  // Revised from an earlier version of this migration that unscheduled
+  // Marine Hyaluronics outright — kept scheduled instead, alternating with
+  // COSRX Snail Essence rather than dropping either. Both are PM daily and
+  // already share the "layer:essence" singleton group (see
+  // classifySingletonGroups/HYDRATION_SERUM_KEYWORDS above), which blocks
+  // them from landing on the SAME night and lets the existing overdue/
+  // servedCount tiebreak alternate which one wins each night — so no
+  // scheduling change is actually needed for the two to rotate; this
+  // migration only needs to make sure Marine Hyaluronics is/stays
+  // scheduled (a prior version of this migration unscheduled it, so any
+  // profile that already ran that version gets it turned back on here).
+  apply: profile => {
+    const isMarineHyaluronics = p => /marine hyaluronics/i.test(p.genericName || "") || /marine hyaluronics/i.test(p.brandName || "");
+    const needsFix = (profile.products || []).some(p => isMarineHyaluronics(p) && !p.scheduled);
+    if (!needsFix) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isMarineHyaluronics(p) && !p.scheduled ? {
+        ...p,
+        scheduled: true,
+        session: "pm",
+        frequency: "daily",
+        stepOrder: 50,
+        nextDate: p.nextDate || todayStr()
+      } : p)
+    };
+  }
+}, {
   id: "step_order_normalize_v1",
   // Re-numbers every product's stepOrder onto the single canonical scale
   // used by Auto-Schedule (see classifyStepOrder), without touching
@@ -1460,6 +1524,26 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // exists: without it, same-frequency products beyond the cap settle into
   // a permanent "anchor" split instead of rotating fairly.
   const servedCount = {};
+  // Tracks the most recent date any active-ingredient product (retinoid or
+  // acid/mechanical exfoliant — see isActiveIngredient below) was placed in
+  // this session's schedule. Used to enforce a minimum rest night between
+  // active nights (see the isActiveIngredient cooldown check in the
+  // rotation-pool and general-fill placement steps below) — derm-holistic
+  // audit finding: simulating the real schedule before this fix showed
+  // actives (retinoid rotation + exfoliant rotation, running independently
+  // of each other) landing on ~5 of every 7 PM nights, leaving only 2
+  // genuine rest nights per week. CONFLICT_PAIRS/singleton-group logic
+  // already prevented two actives from landing on the SAME night, but
+  // nothing prevented back-to-back active nights on CONSECUTIVE days,
+  // which is its own irritation/barrier-repair concern for compromised-
+  // barrier skin, independent of same-night stacking.
+  let lastActiveDate = null;
+  // A product counts toward the rest-night cooldown if it carries a
+  // retinoid or an acid/mechanical exfoliant active (ACTIVE_GROUP_RULES'
+  // "retinoid" and "acid-exfoliant" groups) — clay masks, hydrating
+  // essences, toners, and moisturizers don't trigger it, since they're not
+  // the barrier-stressing actives the rest night is protecting against.
+  const isActiveIngredient = p => classifyActiveGroups(p).some(g => g === "retinoid" || g === "acid-exfoliant");
   let pendingCarry = new Set();
   const schedule = {};
   let cur = epoch;
@@ -1527,6 +1611,13 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       if (!prod) return;
       classifySingletonGroups(prod).forEach(g => placedGroups.add(g));
       placedTexts.push([prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase());
+      // Rest-night tracking: registerPlaced is the one hook every placement
+      // path (one-offs, pins, carried skips, the foundational cleanser/
+      // moisturizer slot, rotation-pool exfoliant/mask nights, and the
+      // general group fill) already runs through, so recording active-
+      // ingredient placements here — rather than duplicating this check in
+      // each individual placement site — can't miss a path.
+      if (isActiveIngredient(prod)) lastActiveDate = ds;
     };
     placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
     const conflictsWithToday = prod => {
@@ -1626,6 +1717,13 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         if (!candidates.length) return;
         const winner = candidates[0].p;
         if (conflictsWithToday(winner)) return;
+        // Rest-night cooldown: if the winner carries an active ingredient
+        // and an active was already placed YESTERDAY, defer this slot
+        // rather than stacking two active nights back to back. Deferring
+        // (not skipping servedCount) means the slot's own weekly cadence
+        // just shifts by a day next time it's due, rather than being
+        // silently dropped for a whole cycle.
+        if (isActiveIngredient(winner) && lastActiveDate && daysBetween(lastActiveDate, ds) === 1) return;
         dayList.push({
           productId: winner.id,
           carried: false
@@ -1698,6 +1796,17 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // the other.
         const groupClash = c.members.some(p => classifySingletonGroups(p).some(g => placedGroups.has(g)) || conflictsWithToday(p));
         if (groupClash) return;
+        // Rest-night cooldown: same reasoning as the rotation-pool slots
+        // above — if this group carries an active ingredient and an active
+        // already landed YESTERDAY, defer to a future day instead of
+        // stacking two active nights back to back. This is what actually
+        // catches the common real-world case: an independently-scheduled
+        // retinoid (not in the rotation pool, so not spaced by
+        // ROTATION_SLOTS' built-in offsets) landing the night right after
+        // a rotation-pool exfoliant/mask night, or right after another
+        // retinoid product's own due night.
+        const activeClash = c.members.some(p => isActiveIngredient(p)) && lastActiveDate && daysBetween(lastActiveDate, ds) === 1;
+        if (activeClash) return;
         if (c.members.length <= remaining) {
           c.members.forEach(p => {
             dayList.push({
@@ -2363,7 +2472,28 @@ const RoutineBlock = ({
         borderRadius: 20,
         padding: "1px 7px"
       }
-    }, "added today"))), /*#__PURE__*/React.createElement("div", {
+    }, "added today"), getProductRank(p).tag === "bad" && /*#__PURE__*/React.createElement("span", {
+      title: getProductRank(p).reason,
+      style: {
+        fontSize: 10,
+        background: RANK_STYLE.bad.bg,
+        color: RANK_STYLE.bad.color,
+        border: `1px solid ${RANK_STYLE.bad.color}44`,
+        borderRadius: 20,
+        padding: "1px 7px",
+        fontWeight: 700,
+        cursor: "help"
+      }
+      // Surfaces the rank verdict right where the routine is actually used
+      // day to day, not just in the Products tab where it's easy to never
+      // see again once a product is scheduled. This used to be purely
+      // descriptive text sitting next to the product with no visibility at
+      // the point of daily use — a scheduled "bad"-tagged product could run
+      // for weeks without ever being seen again. This does NOT auto-remove
+      // anything; it's a visible flag, not enforcement, so a product kept
+      // scheduled on purpose (e.g. to finish out a bottle) still shows up
+      // normally — just with an honest label attached.
+    }, "⚠ ", RANK_STYLE.bad.label))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 5,
