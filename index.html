@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.3";
+const APP_VERSION = "2026-08-30.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -804,6 +804,26 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: [...(profile.products || []).map(p => p.id === oil.id ? { ...p, linkGroup: group } : p), gelCleanser]
+    };
+  }
+}, {
+  id: "oil_cleanser_weekly_v1",
+  // Explicit request: the oil cleanse should run weekly, not nightly — the
+  // gel cleanser (added above) is the nightly base cleanse; the oil
+  // cleanse is an occasional deeper step, not a daily one. Separately,
+  // buildSessionSchedule's linked-group placement was fixed (see the
+  // "isDueToday" check in the foundational cleanser-slot logic) so a
+  // weekly oil cleanser linked to a daily gel cleanser no longer gets
+  // dragged in every night just because its daily partner is always due —
+  // but that fix only matters once the oil cleanser's own frequency is
+  // actually weekly, which is what this migration sets, once.
+  apply: profile => {
+    const isOilCleanser = p => /cleansing oil/i.test(p.genericName || "") || /cleansing oil/i.test(p.brandName || "");
+    const needsFix = (profile.products || []).some(p => isOilCleanser(p) && p.scheduled && p.frequency !== "weekly");
+    if (!needsFix) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isOilCleanser(p) && p.scheduled ? { ...p, frequency: "weekly" } : p)
     };
   }
 }, {
@@ -1542,14 +1562,28 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       if (due.length && !conflictsWithToday(due[0].p)) {
         const winner = due[0].p;
         // If the winner is part of a linked group (e.g. oil cleanser +
-        // gel cleanser), guarantee every not-yet-placed member of that
-        // group too — otherwise only the single category winner gets the
-        // foundational slot and its paired product is left to compete in
-        // the general fill below, where it can lose out on capped nights
-        // and never reliably appear alongside its pair as intended.
+        // gel cleanser), also guarantee any OTHER not-yet-placed member of
+        // that group — but only the ones that are THEMSELVES due today.
+        // This used to force in every group member unconditionally, which
+        // is correct when both members share the same frequency but breaks
+        // down for an asymmetric pairing like a weekly oil cleanse linked
+        // to a daily gel cleanse: the gel cleanser is due every night, so
+        // the old code dragged the oil cleanser in every night too,
+        // regardless of its own weekly schedule. Checking each partner's
+        // own due status keeps the intended one-way relationship — an oil-
+        // cleanse night always pulls in the (also-due, since it's daily)
+        // gel cleanser, but a plain gel-cleanse night no longer force-adds
+        // the oil cleanser just because they're linked.
+        const isDueToday = p => {
+          const iv2 = FREQ_DAYS[p.frequency] || 1;
+          const last2 = lastServed[p.id];
+          const since2 = last2 ? daysBetween(last2, ds) : daysBetween(p.nextDate, ds);
+          return last2 ? since2 >= iv2 : daysBetween(p.nextDate, ds) >= 0;
+        };
         const winnerGroup = groups.find(g => g.some(p => p.id === winner.id)) || [winner];
         winnerGroup.forEach(p => {
           if (placedIds.has(p.id)) return;
+          if (p.id !== winner.id && !isDueToday(p)) return;
           dayList.push({
             productId: p.id,
             carried: false
