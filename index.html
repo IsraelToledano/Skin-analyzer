@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.2";
+const APP_VERSION = "2026-08-30.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -389,6 +389,17 @@ const AUTO_SCHEDULE_RULES = [
   { keywords: ["cleansing oil", "oil cleanser"], session: "pm", frequency: "daily", step: 10 },
   { keywords: ["sheet mask", "clay mask", "sleeping mask", "mask", "clay"], session: "pm", frequency: "weekly", step: 60 },
   { keywords: ["cleanser", "cleansing", "wash", "micellar"], session: "both", frequency: "daily", step: 15 },
+  // Specific-phrase check BEFORE the generic toner rule below — a product
+  // named e.g. "Essence Toner" or "Essence Water" (Beauty of Joseon Ginseng
+  // Essence Water is the case that surfaced this) is functionally a
+  // hydrating finishing essence, not a basic prep toner: it contains the
+  // literal word "toner"/"water", which would otherwise match the generic
+  // toner rule below (step 20) and land it BEFORE the acid exfoliant step
+  // (step 40) — the opposite of correct layering, since an exfoliating acid
+  // should hit bare, freshly-cleansed skin before any hydrating essence
+  // goes on. Routing "essence toner"/"essence water" to the essence/serum
+  // stage (step 50) fixes that ordering.
+  { keywords: ["essence toner", "essence water"], session: "pm", frequency: "daily", step: 50 },
   // Exfoliant-acid check comes BEFORE the generic toner rule below — an
   // "AHA/BHA/PHA toner" is functionally a leave-on chemical exfoliant, not
   // a basic toner, and needs to sort/group with other exfoliants (not get
@@ -749,6 +760,53 @@ const MIGRATIONS = [{
     };
   }
 }, {
+  id: "add_gel_cleanser_v1",
+  // Complements linked_cleanse_pair_v1/v2 above, which only ever LINK an
+  // already-existing gel cleanser to the oil cleanser — neither creates one.
+  // If no product matching /gel cleanser/i exists in the library at all
+  // (the double-cleanse gap flagged when Israel asked about breakout risk
+  // from oil-cleansing alone on combination/pore-prone skin), this adds a
+  // placeholder gel cleanser directly: PM daily, stepOrder 15 (right after
+  // the oil cleanse, same canonical slot AUTO_SCHEDULE_RULES gives any
+  // generic cleanser), linked via linkGroup so it's never scheduled/carried
+  // apart from the oil cleanse. Sets the link itself rather than counting
+  // on v1/v2 to re-fire — like every migration here, they only ever run
+  // once per profile, so if either already ran before this product existed
+  // it won't retroactively pick it up. No-op (by design) if a matching gel
+  // cleanser is already present — i.e. if linked_cleanse_pair_v2 already
+  // found and linked a real one, this never fires. Placeholder brand/name —
+  // replace via the Products tab once a specific product is chosen.
+  apply: profile => {
+    const hasGelCleanser = (profile.products || []).some(p => /gel cleanser/i.test(p.genericName || "") || /gel cleanser/i.test(p.brandName || ""));
+    if (hasGelCleanser) return profile;
+    const oil = (profile.products || []).find(p => /cleansing oil/i.test(p.genericName || "") || /cleansing oil/i.test(p.brandName || ""));
+    if (!oil) return profile;
+    const group = `cleanse-pair-${oil.id}-gel-cleanser-v1`;
+    const gelCleanser = {
+      id: "gel-cleanser-v1",
+      genericName: "Gel Cleanser",
+      brandName: "(placeholder — replace with your chosen product)",
+      // Careful wording here: this text feeds classifyStepOrder() same as
+      // any product's genericName/brandName. The phrase "oil cleanser" (or
+      // "cleansing oil") would collide with the AUTO_SCHEDULE_RULES entry
+      // for that exact stage (step 10) and silently misclassify this
+      // gel-cleanser step as if it WERE the oil cleanse — so this note
+      // deliberately avoids both phrases.
+      notes: "Auto-added as a second-cleanse pairing for the SKIN1004 product; edit brand/name once you pick a specific gel cleanser.",
+      session: "pm",
+      frequency: "daily",
+      stepOrder: 15,
+      nextDate: todayStr(),
+      isOneOff: false,
+      scheduled: true,
+      linkGroup: group
+    };
+    return {
+      ...profile,
+      products: [...(profile.products || []).map(p => p.id === oil.id ? { ...p, linkGroup: group } : p), gelCleanser]
+    };
+  }
+}, {
   id: "step_order_normalize_v1",
   // Re-numbers every product's stepOrder onto the single canonical scale
   // used by Auto-Schedule (see classifyStepOrder), without touching
@@ -787,6 +845,43 @@ const MIGRATIONS = [{
       return ranked;
     })
   })
+}, {
+  id: "unschedule_flagged_pool_products_v1",
+  // Root-cause fix for a bug where two deliberately-unscheduled pool
+  // products (Beauty of Joseon Ginseng Essence, COSRX AHA/BHA Toner) were
+  // showing up scheduled in the PM routine. Both got flipped to
+  // scheduled:true by the old "Auto-Schedule (N)" button, which — before
+  // the accompanying autoScheduleAll fix — bulk-scheduled EVERY unscheduled
+  // product with no regard for RANK_DATA overlap/redundancy flags.
+  // product_rank_analysis_v1 (above) only auto-unschedules "bad"-tagged
+  // products, and only ever runs once per profile — so a product that
+  // became scheduled AFTER that migration already fired (like COSRX
+  // AHA/BHA, RANK_DATA id 26, tag "bad") never got caught. Ginseng
+  // Essence (RANK_DATA id 27) is tagged "good", not "bad", so the old
+  // migration would never have caught it regardless of timing — it was
+  // only ever meant to sit in the unscheduled pool per Israel's product
+  // roster. This migration force-unschedules both by name, once, matching
+  // their intended pool-only state; the product rows themselves stay in
+  // the library and can still be manually rescheduled from the Products
+  // tab.
+  apply: profile => {
+    const isGinsengEssence = p => /ginseng/i.test(p.genericName || "") || /ginseng/i.test(p.brandName || "");
+    const isCosrxAhaBha = p => /cosrx/i.test([p.genericName, p.brandName].join(" ")) && /aha\s*[/.]?\s*bha/i.test([p.genericName, p.brandName].join(" "));
+    const isTarget = p => isGinsengEssence(p) || isCosrxAhaBha(p);
+    if (!(profile.products || []).some(p => isTarget(p) && p.scheduled)) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isTarget(p) && p.scheduled ? {
+        ...p,
+        scheduled: false,
+        session: "",
+        frequency: "",
+        nextDate: "",
+        stepOrder: 0,
+        linkGroup: undefined
+      } : p)
+    };
+  }
 }, {
   id: "delete_bio_oil_v1",
   // Bio-Oil was removed from the product roster entirely per an earlier
@@ -877,6 +972,29 @@ const MIGRATIONS = [{
   apply: profile => ({
     ...profile,
     products: (profile.products || []).map(p => {
+      const step = classifyStepOrder(p);
+      return step === null ? p : { ...p, stepOrder: step };
+    })
+  })
+}, {
+  id: "step_order_normalize_v4",
+  // Re-runs stepOrder normalization now that AUTO_SCHEDULE_RULES has a
+  // specific-phrase rule for "essence toner" / "essence water" ahead of the
+  // generic toner rule (an essence-named product was previously classified
+  // as a plain toner and sorted ahead of the acid exfoliant instead of
+  // after it, same category of bug step_order_normalize_v2 fixed for
+  // AHA/BHA/PHA-named toners). v1-v3 already ran under the old rule order
+  // and won't re-fire, so this repeats the normalization under the fix.
+  // Guard: skips any product with inRotationPool set — exfoliant_mask_
+  // rotation_v1 deliberately overrides stepOrder to 40 for its rotation-
+  // pool masks (to align their night with the exfoliant nights they
+  // rotate alongside), and re-classifying those from scratch here would
+  // silently reset them back to the generic mask step (60), undoing that
+  // migration's intentional choice.
+  apply: profile => ({
+    ...profile,
+    products: (profile.products || []).map(p => {
+      if (p.inRotationPool) return p;
       const step = classifyStepOrder(p);
       return step === null ? p : { ...p, stepOrder: step };
     })
@@ -3056,12 +3174,31 @@ const ProductsTab = ({
     });
   };
   const unscheduled = profile.products.filter(p => !p.scheduled);
+  // Auto-Schedule should only sweep in straightforward, non-redundant
+  // products. Bug fix: this used to bulk-schedule EVERY unscheduled
+  // product with zero regard for RANK_DATA — which is exactly how
+  // deliberately-pool-only overlap products (e.g. Ginseng Essence, COSRX
+  // AHA/BHA Toner) ended up live in the PM routine despite being flagged
+  // as redundant/overlapping with something already active. A product
+  // tagged "bad" is always excluded; a "good"-tagged product is excluded
+  // too if its own review reason calls out overlap/redundancy with an
+  // existing routine item — those need a manual, deliberate decision, not
+  // a one-click bulk add.
+  const isBulkSchedulable = p => {
+    const r = getProductRank(p);
+    if (!r) return true;
+    if (r.tag === "bad") return false;
+    if (r.tag === "good" && /overlap|redundan/i.test(r.reason || "")) return false;
+    return true;
+  };
+  const autoSchedulable = unscheduled.filter(isBulkSchedulable);
   const [autoScheduledFlash, setAutoScheduledFlash] = useState(0);
   const autoScheduleAll = () => {
-    if (unscheduled.length === 0) return;
+    if (autoSchedulable.length === 0) return;
     const today = todayStr();
+    const schedulableIds = new Set(autoSchedulable.map(p => p.id));
     const updated = profile.products.map(p => {
-      if (p.scheduled) return p;
+      if (p.scheduled || !schedulableIds.has(p.id)) return p;
       const s = suggestSchedule(p);
       return {
         ...p,
@@ -3075,7 +3212,7 @@ const ProductsTab = ({
     onUpdate({
       products: updated
     });
-    setAutoScheduledFlash(unscheduled.length);
+    setAutoScheduledFlash(autoSchedulable.length);
     setTimeout(() => setAutoScheduledFlash(0), 3000);
   };
   const conflicts = findConflicts(profile.products.filter(p => p.scheduled));
@@ -3124,9 +3261,9 @@ const ProductsTab = ({
       flexShrink: 0,
       alignItems: "center"
     }
-  }, unscheduled.length > 0 && /*#__PURE__*/React.createElement("button", {
+  }, autoSchedulable.length > 0 && /*#__PURE__*/React.createElement("button", {
     onClick: autoScheduleAll,
-    title: "Suggests session, frequency, and order for unscheduled products using skincare-layering rules — no AI. Review each product afterward and adjust as needed.",
+    title: "Suggests session, frequency, and order for unscheduled products using skincare-layering rules — no AI. Skips products flagged as redundant/overlapping with something already in your routine; those need a manual decision. Review each product afterward and adjust as needed.",
     style: {
       padding: "8px 14px",
       borderRadius: 100,
@@ -3138,7 +3275,7 @@ const ProductsTab = ({
       cursor: "pointer",
       fontFamily: "'Inter',sans-serif"
     }
-  }, "✨ Auto-Schedule (", unscheduled.length, ")"), /*#__PURE__*/React.createElement(Btn, {
+  }, "✨ Auto-Schedule (", autoSchedulable.length, ")"), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => setShowAdd(true)
   }, "+ Add")), saved && /*#__PURE__*/React.createElement("span", {
     style: {
