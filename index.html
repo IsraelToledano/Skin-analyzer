@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-29.1";
+const APP_VERSION = "2026-08-30.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -707,6 +707,46 @@ const MIGRATIONS = [{
       };
     }
     return profile;
+  }
+}, {
+  id: "linked_cleanse_pair_v2",
+  // linked_cleanse_pair_v1 only fires once per profile and only links a
+  // gel cleanser that ALREADY EXISTS at the time it runs. If the gel
+  // cleanser product was added to the library afterward (or existed but
+  // wasn't scheduled), v1 already marked itself applied and will never
+  // retroactively pick it up — the oil cleanser then keeps showing alone
+  // with no paired gel-cleanser step. This re-attempts the same pairing
+  // unconditionally, and also makes sure the gel cleanser is actually
+  // scheduled (PM, daily, canonical step 15, synced nextDate) since a
+  // library-only product with scheduled:false would never appear even
+  // once linked. Safe to run on a profile where v1 already succeeded —
+  // the checks below are no-ops if everything already matches.
+  apply: profile => {
+    const isOilCleanser = p => /cleansing oil/i.test(p.genericName || "") || /cleansing oil/i.test(p.brandName || "");
+    const isGelCleanser = p => /gel cleanser/i.test(p.genericName || "") || /gel cleanser/i.test(p.brandName || "");
+    const oil = (profile.products || []).find(isOilCleanser);
+    const gel = (profile.products || []).find(isGelCleanser);
+    if (!oil || !gel || oil.id === gel.id) return profile;
+    const group = `cleanse-pair-${oil.id}-${gel.id}`;
+    const needsLink = oil.linkGroup !== group || gel.linkGroup !== group;
+    const needsSchedule = !gel.scheduled || gel.session !== "pm" || gel.frequency !== "daily" || gel.stepOrder !== 15 || !gel.nextDate;
+    if (!needsLink && !needsSchedule) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => {
+        if (p.id === oil.id) return { ...p, linkGroup: group };
+        if (p.id === gel.id) return {
+          ...p,
+          linkGroup: group,
+          scheduled: true,
+          session: "pm",
+          frequency: "daily",
+          stepOrder: 15,
+          nextDate: gel.nextDate || oil.nextDate || todayStr()
+        };
+        return p;
+      })
+    };
   }
 }, {
   id: "step_order_normalize_v1",
@@ -1319,14 +1359,24 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.served - b.served);
       if (due.length && !conflictsWithToday(due[0].p)) {
         const winner = due[0].p;
-        dayList.push({
-          productId: winner.id,
-          carried: false
+        // If the winner is part of a linked group (e.g. oil cleanser +
+        // gel cleanser), guarantee every not-yet-placed member of that
+        // group too — otherwise only the single category winner gets the
+        // foundational slot and its paired product is left to compete in
+        // the general fill below, where it can lose out on capped nights
+        // and never reliably appear alongside its pair as intended.
+        const winnerGroup = groups.find(g => g.some(p => p.id === winner.id)) || [winner];
+        winnerGroup.forEach(p => {
+          if (placedIds.has(p.id)) return;
+          dayList.push({
+            productId: p.id,
+            carried: false
+          });
+          lastServed[p.id] = ds;
+          servedCount[p.id] = (servedCount[p.id] || 0) + 1;
+          placedIds.add(p.id);
+          registerPlaced(p);
         });
-        lastServed[winner.id] = ds;
-        servedCount[winner.id] = (servedCount[winner.id] || 0) + 1;
-        placedIds.add(winner.id);
-        registerPlaced(winner);
       }
     });
     // 3. Fill remaining budget from the group pool, most-overdue-first.
