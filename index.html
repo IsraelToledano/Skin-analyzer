@@ -71,7 +71,8 @@ const {
   useRef,
   useEffect,
   useCallback,
-  useMemo
+  useMemo,
+  useLayoutEffect
 } = React;
 
 // ─── THEME (matches the Claude.ai / Skin Ritual artifact) ─────────────────────
@@ -104,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-27.9";
+const APP_VERSION = "2026-08-29.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1443,7 +1444,7 @@ const queueFor = (schedule, products, date) => {
 };
 
 // ─── ROUTINE BLOCK ──────────────────────────────────────────────────────────
-// Shared AM/PM checklist block used by both the DaySheet modal and the
+// Shared AM/PM checklist block used by the
 // inline Day view. Each row supports Done (checkbox) and Skip (carries the
 // item over to guarantee it appears again tomorrow).
 // Default collapse state for a session block when it first mounts:
@@ -2136,148 +2137,6 @@ const RoutineBlock = ({
 };
 
 // ─── DAY SHEET ─────────────────────────────────────────────────────────────────
-const DaySheet = ({
-  date,
-  profile,
-  onUpdate,
-  onClose,
-  onNavigate,
-  amSchedule,
-  pmSchedule
-}) => {
-  const ds = dateStr(date);
-  const isToday = date.toDateString() === appToday().toDateString();
-  const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
-  const logs = profile.logs.filter(l => l.date === ds);
-  return /*#__PURE__*/React.createElement("div", {
-    onClick: onClose,
-    style: {
-      position: "fixed",
-      inset: 0,
-      background: "rgba(44,36,32,0.5)",
-      zIndex: 998,
-      display: "flex",
-      alignItems: "flex-end",
-      justifyContent: "center"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    onClick: e => e.stopPropagation(),
-    style: {
-      background: "#fff",
-      borderRadius: "24px 24px 0 0",
-      width: "100%",
-      maxWidth: 580,
-      maxHeight: "90vh",
-      display: "flex",
-      flexDirection: "column",
-      boxShadow: T.shadowMd
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: "12px 20px",
-      borderBottom: `1px solid ${T.border}`,
-      flexShrink: 0
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      width: 40,
-      height: 4,
-      background: T.border,
-      borderRadius: 2,
-      margin: "0 auto 10px"
-    }
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => onNavigate(-1),
-    style: {
-      background: T.faint,
-      border: `1px solid ${T.border}`,
-      borderRadius: 8,
-      padding: "6px 12px",
-      cursor: "pointer",
-      fontSize: 14,
-      color: T.muted
-    }
-  }, "‹"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 700,
-      color: T.text,
-      fontSize: 17,
-      fontFamily: "'Cormorant Garamond',serif"
-    }
-  }, fmtLong(date)), isToday && /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: T.accent,
-      fontSize: 11,
-      fontWeight: 700
-    }
-  }, "TODAY")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => onNavigate(1),
-    style: {
-      background: T.faint,
-      border: `1px solid ${T.border}`,
-      borderRadius: 8,
-      padding: "6px 12px",
-      cursor: "pointer",
-      fontSize: 14,
-      color: T.muted
-    }
-  }, "›")), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: {
-      background: T.faint,
-      border: "none",
-      borderRadius: "50%",
-      width: 32,
-      height: 32,
-      cursor: "pointer",
-      fontSize: 16,
-      color: T.muted
-    }
-  }, "×"))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      overflowY: "auto",
-      padding: "16px 20px 32px",
-      flex: 1
-    }
-  }, /*#__PURE__*/React.createElement(RoutineBlock, {
-    prods: amProds,
-    session: "am",
-    accent: T.accent,
-    label: "Morning Routine",
-    icon: "🌅",
-    ds: ds,
-    date: date,
-    logs: logs,
-    onUpdate: onUpdate,
-    allLogs: profile.logs,
-    profile: profile
-  }), /*#__PURE__*/React.createElement(RoutineBlock, {
-    prods: pmProds,
-    session: "pm",
-    accent: T.blue,
-    label: "Evening Routine",
-    icon: "🌙",
-    ds: ds,
-    date: date,
-    logs: logs,
-    onUpdate: onUpdate,
-    allLogs: profile.logs,
-    profile: profile
-  }))));
-};
-
 // DayAgenda: inline (non-modal) single-day AM/PM routine view, used by the
 // calendar's "day" toggle.
 const DayAgenda = ({
@@ -2319,6 +2178,276 @@ const DayAgenda = ({
 };
 
 // ─── CALENDAR ──────────────────────────────────────────────────────────────────
+// Pure helper (exported for tests via the harness): classifies a single
+// step's read-only status for the list view. Not used by the interactive
+// Day view, which keeps its own done/skipped toggle logic in RoutineBlock.
+const classifyLogStatus = (log, ds, todayDs) => {
+  if (log?.done) return "done";
+  if (log?.skipped) return "skipped";
+  if (ds < todayDs) return "missed";
+  return "upcoming";
+};
+
+const LIST_STATUS_STYLE = {
+  done: { color: T.green, label: "Done", strike: true },
+  skipped: { color: T.muted, label: "Skipped", strike: true },
+  missed: { color: T.red, label: "Missed", strike: false },
+  upcoming: { color: T.muted, label: "", strike: false }
+};
+
+// Read-only compact step row used inside the list view. Mirrors the visual
+// language of RoutineBlock's rows (numbered step, product name, brand,
+// frequency chip) but has no click handlers — editing happens in the Day
+// tab, which already supports navigating to any date via prev/next.
+const ListStepRow = ({ p, i, status, total }) => {
+  const st = LIST_STATUS_STYLE[status];
+  const col = pcolor(p);
+  return /*#__PURE__*/React.createElement("div", {
+    key: p.id,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "7px 0",
+      borderBottom: i < total - 1 ? `1px solid ${T.border}` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 16,
+      height: 16,
+      borderRadius: "50%",
+      border: `2px solid ${status === "upcoming" ? col.border : st.color}`,
+      background: status === "done" ? st.color : "transparent",
+      flexShrink: 0,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, status === "done" && /*#__PURE__*/React.createElement("span", {
+    style: { color: "#fff", fontSize: 8, fontWeight: 700 }
+  }, "\u2713")), /*#__PURE__*/React.createElement("div", {
+    style: { flex: 1, minWidth: 0 }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: st.strike ? T.muted : T.text,
+      fontSize: 13,
+      fontWeight: 600,
+      textDecoration: st.strike ? "line-through" : "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: { color: T.muted, fontSize: 11, marginRight: 6 }
+  }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+    style: { color: T.muted, fontWeight: 400, fontSize: 11 }
+  }, " \u00b7 ", p.brandName))), st.label && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      color: st.color,
+      flexShrink: 0
+    }
+  }, st.label));
+};
+
+// Read-only AM or PM section for one day inside the list view.
+const ListSession = ({ label, icon, accent, prods, logs, session, todayDs, ds }) => {
+  if (prods.length === 0) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 10 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      fontSize: 11,
+      fontWeight: 700,
+      color: accent,
+      textTransform: "uppercase",
+      letterSpacing: 0.4,
+      marginBottom: 4
+    }
+  }, icon, " ", label), prods.map((p, i) => {
+    const log = logs.find(l => l.productId === p.id && l.session === session);
+    const status = classifyLogStatus(log, ds, todayDs);
+    return /*#__PURE__*/React.createElement(ListStepRow, {
+      key: p.id,
+      p: p,
+      i: i,
+      status: status,
+      total: prods.length
+    });
+  }));
+};
+
+// One day's card inside the scrollable list.
+const ListDayCard = ({ date, profile, amSchedule, pmSchedule, todayDs, onOpenDay }) => {
+  const ds = dateStr(date);
+  const isToday = ds === todayDs;
+  const amProds = queueFor(amSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const logs = profile.logs.filter(l => l.date === ds);
+  if (amProds.length === 0 && pmProds.length === 0) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    onClick: () => onOpenDay(date),
+    style: {
+      background: isToday ? T.accentSoft : T.card,
+      border: `1.5px solid ${isToday ? T.accent : T.border}`,
+      borderRadius: 14,
+      padding: "12px 14px",
+      marginBottom: 10,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "baseline",
+      gap: 8,
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      color: T.text,
+      fontSize: 14,
+      fontFamily: "'Cormorant Garamond',serif"
+    }
+  }, fmtLong(date)), isToday && /*#__PURE__*/React.createElement("span", {
+    style: { color: T.accent, fontSize: 10, fontWeight: 700 }
+  }, "TODAY")), /*#__PURE__*/React.createElement(ListSession, {
+    label: "Morning",
+    icon: "\ud83c\udf05",
+    accent: T.accent,
+    prods: amProds,
+    logs: logs,
+    session: "am",
+    todayDs: todayDs,
+    ds: ds
+  }), /*#__PURE__*/React.createElement(ListSession, {
+    label: "Evening",
+    icon: "\ud83c\udf19",
+    accent: T.blue,
+    prods: pmProds,
+    logs: logs,
+    session: "pm",
+    todayDs: todayDs,
+    ds: ds
+  }));
+};
+
+// RoutineListView: scrollable, non-calendar list of every day's AM/PM
+// routine — past and future — with read-only completed/skipped/missed
+// status per step. Infinite-scrolls in both directions via IntersectionObserver
+// sentinels; backward scrolling is floored at the earliest product epoch,
+// since buildSessionSchedule has nothing to compute before that date.
+const LIST_CHUNK_DAYS = 14;
+const RoutineListView = ({ profile, onOpenDay }) => {
+  const today = appToday();
+  const todayDs = dateStr(today);
+  const amEpoch = useMemo(() => computeEpoch(profile.products, "am"), [profile.products]);
+  const pmEpoch = useMemo(() => computeEpoch(profile.products, "pm"), [profile.products]);
+  const floorDs = amEpoch < pmEpoch ? amEpoch : pmEpoch;
+  const floorDate = useMemo(() => parseDate(floorDs), [floorDs]);
+  const initialStart = useMemo(() => {
+    const d = addDays(today, -LIST_CHUNK_DAYS);
+    return d < floorDate ? floorDate : d;
+  }, [todayDs, floorDs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [rangeStart, setRangeStart] = useState(initialStart);
+  const [rangeEnd, setRangeEnd] = useState(() => addDays(today, LIST_CHUNK_DAYS));
+  const atFloor = dateStr(rangeStart) <= floorDs;
+  const toDate = dateStr(addDays(rangeEnd, LIST_CHUNK_DAYS));
+  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins]);
+  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins]);
+  const days = [];
+  for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
+  const containerRef = useRef(null);
+  const topSentinelRef = useRef(null);
+  const bottomSentinelRef = useRef(null);
+  const prependInfo = useRef(null); // { scrollHeight, scrollY } captured just before a backward load
+  const loadMorePast = useCallback(() => {
+    setRangeStart(prev => {
+      if (dateStr(prev) <= floorDs) return prev;
+      prependInfo.current = {
+        scrollHeight: document.documentElement.scrollHeight,
+        scrollY: window.scrollY
+      };
+      const next = addDays(prev, -LIST_CHUNK_DAYS);
+      return next < floorDate ? floorDate : next;
+    });
+  }, [floorDs, floorDate]);
+  const loadMoreFuture = useCallback(() => {
+    setRangeEnd(prev => addDays(prev, LIST_CHUNK_DAYS));
+  }, []);
+  // After a backward load renders, the new (taller) content pushes the
+  // viewport down; compensate so the day the user was looking at stays put.
+  useLayoutEffect(() => {
+    if (!prependInfo.current) return;
+    const { scrollHeight, scrollY } = prependInfo.current;
+    prependInfo.current = null;
+    const delta = document.documentElement.scrollHeight - scrollHeight;
+    if (delta > 0) window.scrollTo(0, scrollY + delta);
+  }, [rangeStart]);
+  useEffect(() => {
+    const topEl = topSentinelRef.current;
+    const bottomEl = bottomSentinelRef.current;
+    if (!topEl && !bottomEl) return;
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        if (entry.target === topEl) loadMorePast();
+        if (entry.target === bottomEl) loadMoreFuture();
+      });
+    }, { rootMargin: "600px 0px 600px 0px" });
+    if (topEl) observer.observe(topEl);
+    if (bottomEl) observer.observe(bottomEl);
+    return () => observer.disconnect();
+  }, [loadMorePast, loadMoreFuture]);
+  const jumpToToday = () => {
+    setRangeStart(initialStart);
+    setRangeEnd(addDays(today, LIST_CHUNK_DAYS));
+    // Wait for the reset range to render, then scroll it into view.
+    requestAnimationFrame(() => {
+      const el = containerRef.current && containerRef.current.querySelector("[data-today-card]");
+      if (el) el.scrollIntoView({ block: "center" });
+    });
+  };
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", justifyContent: "flex-end", marginBottom: 10 }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    onClick: jumpToToday,
+    variant: "ghost",
+    style: { padding: "8px 14px", fontSize: 12 }
+  }, "Jump to Today")), /*#__PURE__*/React.createElement("div", {
+    ref: containerRef
+  }, !atFloor && /*#__PURE__*/React.createElement("div", {
+    ref: topSentinelRef,
+    style: { height: 1 }
+  }), atFloor && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      color: T.muted,
+      fontSize: 11,
+      fontStyle: "italic",
+      padding: "8px 0 12px"
+    }
+  }, "Start of your routine history"), days.map(date => {
+    const ds = dateStr(date);
+    return /*#__PURE__*/React.createElement("div", {
+      key: ds,
+      "data-today-card": ds === todayDs ? "" : undefined
+    }, /*#__PURE__*/React.createElement(ListDayCard, {
+      date: date,
+      profile: profile,
+      amSchedule: amSchedule,
+      pmSchedule: pmSchedule,
+      todayDs: todayDs,
+      onOpenDay: onOpenDay
+    }));
+  }), /*#__PURE__*/React.createElement("div", {
+    ref: bottomSentinelRef,
+    style: { height: 1 }
+  })));
+};
+
+// ─── CALENDAR ──────────────────────────────────────────────────────────────────
 const CalendarTab = ({
   profile,
   onUpdate
@@ -2326,36 +2455,20 @@ const CalendarTab = ({
   const today = appToday();
   const [view, setView] = useState("day");
   const [cursor, setCursor] = useState(new Date(today.getFullYear(), today.getMonth(), today.getDate()));
-  const [selected, setSelected] = useState(null);
-  const prev = () => setCursor(d => view === "day" ? addDays(d, -1) : addDays(d, -7));
-  const next = () => setCursor(d => view === "day" ? addDays(d, 1) : addDays(d, 7));
-  const rangeStart = view === "day" ? cursor : (() => {
-    const d = new Date(cursor);
-    d.setDate(d.getDate() - d.getDay());
-    return d;
-  })();
-  const rangeEnd = view === "day" ? cursor : addDays(rangeStart, 6);
-  const days = [];
-  if (view !== "day") {
-    for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
-  }
+  const prev = () => setCursor(d => addDays(d, -1));
+  const next = () => setCursor(d => addDays(d, 1));
 
-  // Horizon covers the visible range plus a buffer for day-nav clicks in
-  // DaySheet/DayAgenda without needing an immediate recompute.
-  const horizonDate = selected && selected > rangeEnd ? selected : rangeEnd;
-  const toDate = dateStr(addDays(horizonDate, 14));
+  // Horizon covers the Day view's visible date plus a buffer for prev/next
+  // clicks without needing an immediate recompute.
+  const toDate = dateStr(addDays(cursor, 14));
   const amEpoch = useMemo(() => computeEpoch(profile.products, "am"), [profile.products]);
   const pmEpoch = useMemo(() => computeEpoch(profile.products, "pm"), [profile.products]);
   const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins]);
   const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins]);
-  const scheduledProds = useCallback(date => {
-    const am = queueFor(amSchedule, profile.products, date);
-    const pm = queueFor(pmSchedule, profile.products, date);
-    const seen = new Set();
-    return [...am, ...pm].filter(p => seen.has(p.id) ? false : (seen.add(p.id), true));
-  }, [amSchedule, pmSchedule, profile.products]);
-  const nonDailyProds = useCallback(date => scheduledProds(date).filter(p => p.frequency !== "daily"), [scheduledProds]);
-  const title = view === "day" ? fmtLong(cursor) : `${fmtShort(rangeStart)} – ${fmtShort(rangeEnd)}`;
+  const openDay = date => {
+    setCursor(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
+    setView("day");
+  };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -2372,7 +2485,7 @@ const CalendarTab = ({
       padding: 3,
       border: `1px solid ${T.border}`
     }
-  }, ["week", "day"].map(v => /*#__PURE__*/React.createElement("button", {
+  }, ["list", "day"].map(v => /*#__PURE__*/React.createElement("button", {
     key: v,
     onClick: () => setView(v),
     style: {
@@ -2387,7 +2500,7 @@ const CalendarTab = ({
       fontFamily: "'Inter',sans-serif",
       textTransform: "capitalize"
     }
-  }, v))), /*#__PURE__*/React.createElement("button", {
+  }, v))), view === "day" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     onClick: prev,
     style: {
       background: T.faint,
@@ -2398,7 +2511,7 @@ const CalendarTab = ({
       cursor: "pointer",
       fontSize: 14
     }
-  }, "‹"), /*#__PURE__*/React.createElement("div", {
+  }, "\u2039"), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       textAlign: "center",
@@ -2407,7 +2520,7 @@ const CalendarTab = ({
       fontFamily: "'Cormorant Garamond',serif",
       fontSize: 17
     }
-  }, title), /*#__PURE__*/React.createElement("button", {
+  }, fmtLong(cursor)), /*#__PURE__*/React.createElement("button", {
     onClick: next,
     style: {
       background: T.faint,
@@ -2418,141 +2531,22 @@ const CalendarTab = ({
       cursor: "pointer",
       fontSize: 14
     }
-  }, "›"), /*#__PURE__*/React.createElement(Btn, {
+  }, "\u203a"), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => setCursor(new Date(today.getFullYear(), today.getMonth(), today.getDate())),
     variant: "ghost",
     style: {
       padding: "8px 14px",
       fontSize: 12
     }
-  }, "Today")), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
+  }, "Today"))), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
     date: cursor,
     profile: profile,
     onUpdate: onUpdate,
     amSchedule: amSchedule,
     pmSchedule: pmSchedule
-  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(7,1fr)",
-      gap: 3,
-      marginBottom: 3
-    }
-  }, DAYS.map(d => /*#__PURE__*/React.createElement("div", {
-    key: d,
-    style: {
-      textAlign: "center",
-      fontSize: 11,
-      fontWeight: 600,
-      color: T.muted,
-      padding: "4px 0"
-    }
-  }, d))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(7,1fr)",
-      gap: 3
-    }
-  }, days.map((date, i) => {
-    if (!date) return /*#__PURE__*/React.createElement("div", {
-      key: `e${i}`
-    });
-    const ds = dateStr(date);
-    const isToday = date.toDateString() === today.toDateString();
-    const chips = nonDailyProds(date);
-    const allProds = scheduledProds(date);
-    const dayLogs = profile.logs.filter(l => l.date === ds);
-    const amDone = allProds.filter(p => p.session === "am" || p.session === "both").every(p => dayLogs.find(l => l.productId === p.id && l.session === "am")?.done);
-    const pmDone = allProds.filter(p => p.session === "pm" || p.session === "both").every(p => dayLogs.find(l => l.productId === p.id && l.session === "pm")?.done);
-    const hasAm = allProds.some(p => p.session === "am" || p.session === "both");
-    const hasPm = allProds.some(p => p.session === "pm" || p.session === "both");
-    return /*#__PURE__*/React.createElement("div", {
-      key: ds,
-      onClick: () => setSelected(date),
-      style: {
-        background: isToday ? T.accentSoft : T.card,
-        border: `1.5px solid ${isToday ? T.accent : T.border}`,
-        borderRadius: 12,
-        padding: "8px",
-        cursor: "pointer",
-        minHeight: 90,
-        opacity: 1,
-        boxShadow: isToday ? `0 0 0 2px ${T.accent}33` : "none",
-        display: "flex",
-        flexDirection: "column",
-        gap: 2
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: 2
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 12,
-        fontWeight: isToday ? 800 : 500,
-        width: 22,
-        height: 22,
-        borderRadius: "50%",
-        background: isToday ? T.accent : "transparent",
-        color: isToday ? "#fff" : T.text,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center"
-      }
-    }, date.getDate()), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        gap: 2
-      }
-    }, hasAm && /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: 5,
-        height: 5,
-        borderRadius: "50%",
-        background: amDone ? T.green : T.border
-      }
-    }), hasPm && /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: 5,
-        height: 5,
-        borderRadius: "50%",
-        background: pmDone ? T.green : T.border
-      }
-    }))), chips.slice(0, 2).map(p => {
-      const col = pcolor(p);
-      const done = dayLogs.find(l => l.productId === p.id)?.done;
-      return /*#__PURE__*/React.createElement("div", {
-        key: p.id,
-        style: {
-          background: done ? T.greenSoft : col.bg,
-          border: `1px solid ${done ? T.green : col.border}55`,
-          borderRadius: 6,
-          padding: "2px 5px",
-          fontSize: 9,
-          fontWeight: 700,
-          color: done ? T.green : col.text,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap"
-        }
-      }, p.genericName.split(" ").slice(0, 2).join(" "));
-    }), chips.length > 2 && /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 9,
-        color: T.muted
-      }
-    }, "+", chips.length - 2));
-  }))), selected && /*#__PURE__*/React.createElement(DaySheet, {
-    date: selected,
+  }) : /*#__PURE__*/React.createElement(RoutineListView, {
     profile: profile,
-    onUpdate: onUpdate,
-    onNavigate: dir => setSelected(d => addDays(d, dir)),
-    onClose: () => setSelected(null),
-    amSchedule: amSchedule,
-    pmSchedule: pmSchedule
+    onOpenDay: openDay
   }));
 };
 
