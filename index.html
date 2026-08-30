@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.9";
+const APP_VERSION = "2026-08-30.10";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2473,6 +2473,8 @@ const RoutineBlock = ({
     const done = log?.done || false;
     const skipped = log?.skipped && !done;
     const col = pcolor(p);
+    const cat = productCategoryGroup(p);
+    const catColor = CATEGORY_COLORS[cat] || T.muted;
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
       ref: el => {
@@ -2550,9 +2552,27 @@ const RoutineBlock = ({
       style: {
         display: "flex",
         gap: 5,
-        marginTop: 2
+        marginTop: 2,
+        flexWrap: "wrap"
       }
-    }, p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
+      // Category pill (Cleanser/Toner/Exfoliant/Serum/etc.) is shown first
+      // in this chip row on every step, in every session view, so the
+      // routine itself doubles as a visual guide to correct layering
+      // order — not just a category label for its own sake. Reuses the
+      // same productCategoryGroup()/CATEGORY_COLORS pairing as the
+      // Products tab's Categories list so a product's tag is identical
+      // everywhere it appears in the app.
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        fontWeight: 700,
+        background: `${catColor}18`,
+        color: catColor,
+        border: `1px solid ${catColor}44`,
+        borderRadius: 20,
+        padding: "1px 7px"
+      }
+    }, cat), p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
         background: col.bg,
@@ -2753,6 +2773,7 @@ const LIST_STATUS_STYLE = {
 const ListStepRow = ({ p, i, status, total }) => {
   const st = LIST_STATUS_STYLE[status];
   const col = pcolor(p);
+  const catColor = CATEGORY_COLORS[productCategoryGroup(p)] || T.muted;
   return /*#__PURE__*/React.createElement("div", {
     key: p.id,
     style: {
@@ -2787,7 +2808,22 @@ const ListStepRow = ({ p, i, status, total }) => {
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: { color: T.muted, fontSize: 11, marginRight: 6 }
-  }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
+  }, i + 1, "."),
+  // Category color dot — same color mapping as the Products tab and the
+  // Day view's category pill, kept as a plain dot (not a text pill) here
+  // since this row repeats across every day in a scrollable list and a
+  // full text label per row would be too noisy at that density.
+  /*#__PURE__*/React.createElement("span", {
+    title: productCategoryGroup(p),
+    style: {
+      display: "inline-block",
+      width: 6,
+      height: 6,
+      borderRadius: "50%",
+      background: catColor,
+      marginRight: 5
+    }
+  }), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
     style: { color: T.muted, fontWeight: 400, fontSize: 11 }
   }, " \u00b7 ", p.brandName))), st.label && /*#__PURE__*/React.createElement("span", {
     style: {
