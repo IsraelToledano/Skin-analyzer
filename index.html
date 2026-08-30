@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.5";
+const APP_VERSION = "2026-08-30.6";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -888,6 +888,32 @@ const MIGRATIONS = [{
         stepOrder: 50,
         nextDate: p.nextDate || todayStr()
       } : p)
+    };
+  }
+}, {
+  id: "gel_cleanser_am_pm_v1",
+  // Fixes a real gap the app's own product-fit analysis already flagged
+  // but never acted on: the Caudalie Vinopure Purifying Gel Cleanser's
+  // stored rankReason literally says "you don't currently have a
+  // dedicated AM cleanser scheduled" — but earlier migrations
+  // (linked_cleanse_pair_v1/v2, add_gel_cleanser_v1) only ever put it in
+  // the PM session, paired with the oil cleanser for the PM double-
+  // cleanse. That left the AM gap the product was originally recommended
+  // for completely unfilled — confirmed by simulating a full 3-week AM+PM
+  // routine and finding zero cleanser-type products in any AM day.
+  // Switches its session from "pm" to "both": it keeps its existing PM
+  // role (still linked to the oil cleanser, still winning the PM
+  // foundational cleanser slot every night) and additionally becomes
+  // eligible for AM, where — being daily and otherwise uncontested for
+  // the AM cleanser category — it reliably fills that slot. No new
+  // product needed; this just extends how the existing one is scheduled.
+  apply: profile => {
+    const isGelCleanser = p => /purifying gel cleanser/i.test(p.genericName || "") || /purifying gel cleanser/i.test(p.brandName || "");
+    const needsFix = (profile.products || []).some(p => isGelCleanser(p) && p.scheduled && p.session !== "both");
+    if (!needsFix) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => isGelCleanser(p) && p.scheduled ? { ...p, session: "both" } : p)
     };
   }
 }, {
