@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.8";
+const APP_VERSION = "2026-08-30.9";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -926,6 +926,59 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: profile.products.map(p => isGelCleanser(p) && p.scheduled ? { ...p, session: "both" } : p)
+    };
+  }
+}, {
+  id: "step_order_repair_v1",
+  // Replaces an earlier, narrower version of this migration that only
+  // fixed the cleanser-vs-toner symptom. A full audit of live data found
+  // the underlying corruption was broader: SIX products had stepOrder
+  // values that didn't match classifyStepOrder's canonical scale — not
+  // just Purifying Toner (10, should be 20, putting it ahead of the
+  // cleanser), but also the oil cleanser itself (17, should be 10) sitting
+  // ABOVE the gel cleanser (15) it's paired with — meaning on a double-
+  // cleanse night the gel cleanser would render FIRST and the oil cleanser
+  // SECOND, backwards from correct technique (oil first, to dissolve
+  // sunscreen/makeup, then a water-based cleanser second). Also found:
+  // sunscreen at 30 instead of 95 (landing mid-routine instead of last —
+  // meaningful for efficacy, since moisturizer applied on top would sit
+  // over the SPF layer instead of under it), the AM moisturizer and
+  // niacinamide serum both off canonical, and one rotation-pool mask
+  // corrupted to 18 instead of the 40 exfoliant_mask_rotation_v1
+  // deliberately assigned it. All of this traces to the same root cause:
+  // drag-to-reorder had no validation before the guard added alongside
+  // this migration, so any past drag on any day could silently persist an
+  // out-of-scale value for any item shown that day. This migration
+  // re-classifies every scheduled product against the same canonical scale
+  // step_order_normalize_v1-v4 already used — restoring correctness in one
+  // pass rather than patching each symptom individually — while explicitly
+  // preserving the ONE known deliberate deviation from that scale:
+  // rotation-pool masks are intentionally pinned to 40 (aligning mask
+  // nights with exfoliant nights), not the generic mask value of 60.
+  apply: profile => {
+    const products = profile.products || [];
+    let changed = false;
+    const next = products.map(p => {
+      if (!p.scheduled) return p;
+      if (p.inRotationPool && p.rotationRole === "mask") {
+        if (p.stepOrder === 40) return p;
+        changed = true;
+        return { ...p, stepOrder: 40 };
+      }
+      if (p.inRotationPool && p.rotationRole === "exfoliant") {
+        return p; // no deliberate override for this role; classifyStepOrder's own value (40) already applies and was never found corrupted
+      }
+      const step = classifyStepOrder(p);
+      if (step !== null && step !== p.stepOrder) {
+        changed = true;
+        return { ...p, stepOrder: step };
+      }
+      return p;
+    });
+    if (!changed) return profile;
+    return {
+      ...profile,
+      products: next
     };
   }
 }, {
