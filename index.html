@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.7";
+const APP_VERSION = "2026-08-30.8";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2184,6 +2184,29 @@ const RoutineBlock = ({
     const onUp = () => {
       const finalOrder = dragOrderRef.current;
       setDragId(null);
+      // Guard against a correctness-breaking reorder: cleanser-type
+      // products (cleanser/cleanser_oil) always need to run before
+      // anything else in a session — a toner, serum, or moisturizer
+      // applied before cleansing sits on top of dirt/oil/sunscreen
+      // instead of on clean skin and can't do its job. Drag-to-reorder
+      // had no check against this at all; a user could drag a toner
+      // above the cleanser and it would persist with no warning, and
+      // nothing downstream (migrations, the scheduler) would ever
+      // re-validate or correct it afterward. Rather than silently
+      // fighting the user's drag by snapping the cleanser back to the
+      // front, any invalid reorder is simply not committed, and the
+      // list visually snaps back to its last valid order.
+      const isCleanserId = id => {
+        const pr = (profile.products || []).find(x => x.id === id);
+        if (!pr) return false;
+        const t = detectType(pr);
+        return t === "cleanser" || t === "cleanser_oil";
+      };
+      const lastCleanserIdx = finalOrder.reduce((acc, id, idx) => isCleanserId(id) ? idx : acc, -1);
+      const firstNonCleanserIdx = finalOrder.findIndex(id => !isCleanserId(id));
+      if (lastCleanserIdx !== -1 && firstNonCleanserIdx !== -1 && lastCleanserIdx > firstNonCleanserIdx) {
+        return; // invalid order — cleanser landed after something else; don't persist
+      }
       onUpdate({
         products: (profile.products || []).map(pr => {
           const idx = finalOrder.indexOf(pr.id);
