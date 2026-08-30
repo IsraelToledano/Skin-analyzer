@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.6";
+const APP_VERSION = "2026-08-30.7";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -185,6 +185,18 @@ const classifySingletonGroups = p => {
   const type = detectType(p);
   if (LAYER_SINGLETON_TYPES.has(type)) {
     groups.push(`layer:${type}`);
+  } else if (type === "mist") {
+    // A thermal-water/mist spray (detectType checks "thermal|spring
+    // water|mist|spray" BEFORE the plain "toner" keyword match, so a
+    // product like Avène Thermal Spring Water gets its own "mist" type
+    // rather than "toner") does the same non-active hydrate-the-surface
+    // job as a real toner — this surfaced as a real gap: a mist and a
+    // toner were landing on the SAME PM night with nothing stopping it,
+    // since "mist" was never included in LAYER_SINGLETON_TYPES and so
+    // never got the one-per-session exclusivity real toners get. Grouped
+    // under "layer:toner" (not a separate "layer:mist") specifically so
+    // it shares exclusivity WITH toners, not just with other mists.
+    groups.push("layer:toner");
   } else if (type === "serum" && groups.length === 0) {
     const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
     if (HYDRATION_SERUM_KEYWORDS.some(kw => hay.includes(kw))) groups.push("layer:essence");
