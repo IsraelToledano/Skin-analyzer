@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.10";
+const APP_VERSION = "2026-08-30.11";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -359,7 +359,8 @@ const RANK_DATA = [
   { id: 26, match: ["cosrx", "aha/bha"], tag: "bad", reason: "Another exfoliating toner — redundant with the acid toners already active in your routine; no need to add this." },
   { id: 27, match: ["ginseng"], tag: "good", reason: "Gentle hydrating essence-toner, but overlaps in purpose with the COSRX Snail Essence already active." },
   { id: 28, match: ["thermal spring water"], tag: "good", reason: "Soothing, situational — nice for calming or a midday refresh, not essential." },
-  { id: 29, match: ["gel cleanser"], tag: "best", reason: "Would fill a real gap — you don't currently have a dedicated AM cleanser scheduled." }
+  { id: 29, match: ["gel cleanser"], tag: "best", reason: "Would fill a real gap — you don't currently have a dedicated AM cleanser scheduled." },
+  { id: 30, match: ["ordinary", "glycolic"], tag: "good", reason: "Effective glycolic exfoliant for blackheads, pores, and texture — folded into your existing exfoliant rotation (alongside Dermalogica Microfoliant and Some By Mi AHA.BHA.PHA Toner) rather than added as a separate weekly night, so total acid-exfoliant exposure per week doesn't increase." }
 ];
 const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
@@ -1216,6 +1217,46 @@ const MIGRATIONS = [{
         }
         return p;
       })
+    };
+  }
+}, {
+  id: "add_ordinary_glycolic_acid_v1",
+  // Explicit request: add The Ordinary's Glycolic Acid 7% Toning Solution,
+  // ranked, and scheduled. Rather than giving it its own independent
+  // weekly PM slot — which would add a fourth standing acid-exfoliant
+  // night on top of the three already rotating via exfoliant_mask_
+  // rotation_v1 (Dermalogica Microfoliant / Some By Mi AHA.BHA.PHA Toner /
+  // Caudalie Vinopure Salicylic Serum), reintroducing the exact
+  // over-exfoliation risk that rotation was built to prevent — this folds
+  // it into that SAME rotation pool as a fourth "exfoliant" role member.
+  // ROTATION_SLOTS still only offers two exfoliant nights per week, so
+  // adding a fourth competing member doesn't raise weekly acid exposure;
+  // it just means each exfoliant runs somewhat less often on average,
+  // which the pool's servedCount fairness logic already handles with no
+  // further changes needed. No-op if a matching product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isOrdinaryGlycolic = p => hay(p).includes("ordinary") && hay(p).includes("glycolic");
+    const products = profile.products || [];
+    if (products.some(isOrdinaryGlycolic)) return profile;
+    const existingPoolExfoliant = products.find(p => p.inRotationPool && p.rotationRole === "exfoliant" && p.rotationAnchor);
+    const anchor = existingPoolExfoliant ? existingPoolExfoliant.rotationAnchor : todayStr();
+    const newProduct = {
+      id: 30,
+      genericName: "Glycolic Acid 7% Toning Solution",
+      brandName: "The Ordinary",
+      notes: "Added to the existing PM exfoliant rotation (see exfoliant_mask_rotation_v1) rather than as a separate weekly slot.",
+      scheduled: true,
+      session: "pm",
+      frequency: "weekly",
+      stepOrder: 40,
+      inRotationPool: true,
+      rotationRole: "exfoliant",
+      rotationAnchor: anchor
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
     };
   }
 }];
