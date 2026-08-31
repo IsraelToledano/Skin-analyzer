@@ -128,7 +128,19 @@ const FREQ_DAYS = {
   "6-weekly": 42,
   "8-weekly": 56
 };
-const CONFLICT_PAIRS = [["glycolic acid", "retinol"], ["aha", "retinol"], ["bha", "retinol"], ["lactic acid", "retinol"], ["salicylic acid", "retinol"], ["vitamin c", "retinol"], ["ascorbic acid", "retinol"], ["benzoyl peroxide", "retinol"], ["benzoyl peroxide", "vitamin c"], ["glycolic acid", "lactic acid"], ["aha", "bha"], ["niacinamide", "vitamin c"], ["self tan", "retinol"], ["self tan", "glycolic acid"], ["self tan", "aha"], ["self tan", "bha"], ["self tan", "lactic acid"], ["self tan", "salicylic acid"], ["self tan", "mandelic acid"], ["self tan", "vitamin c"], ["self tan", "ascorbic acid"], ["self tan", "benzoyl peroxide"]];
+// RETINOID_SYNONYMS mirrors the "retinol" keyword group used everywhere
+// else in the app (AUTO_SCHEDULE_RULES, ACTIVE_GROUP_RULES) — every pair
+// below that names "retinol" is expanded to all five synonyms, since
+// CONFLICT_PAIRS does plain substring matching against product text and
+// a product literally named "Tretinoin" or "Retinoid Cream" never
+// contains the substring "retinol". Caught during the 30-day schedule
+// simulation for step_order_repair_v2: Ret-Avit (Tretinoin 0.05%) landed
+// the same PM night as the Vinopure Salicylic exfoliant serum because
+// the old single-entry pairs only matched the literal word "retinol",
+// silently missing this user's actual prescription tretinoin.
+const RETINOID_SYNONYMS = ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"];
+const expandRetinoidPairs = pairs => pairs.flatMap(([a, b]) => a === "retinol" || b === "retinol" ? RETINOID_SYNONYMS.map(syn => a === "retinol" ? [syn, b] : [a, syn]) : [[a, b]]);
+const CONFLICT_PAIRS = expandRetinoidPairs([["glycolic acid", "retinol"], ["aha", "retinol"], ["bha", "retinol"], ["lactic acid", "retinol"], ["salicylic acid", "retinol"], ["vitamin c", "retinol"], ["ascorbic acid", "retinol"], ["benzoyl peroxide", "retinol"], ["benzoyl peroxide", "vitamin c"], ["glycolic acid", "lactic acid"], ["aha", "bha"], ["niacinamide", "vitamin c"], ["self tan", "retinol"], ["self tan", "glycolic acid"], ["self tan", "aha"], ["self tan", "bha"], ["self tan", "lactic acid"], ["self tan", "salicylic acid"], ["self tan", "mandelic acid"], ["self tan", "vitamin c"], ["self tan", "ascorbic acid"], ["self tan", "benzoyl peroxide"]]);
 // Same-active exclusivity: unlike CONFLICT_PAIRS (which only warns about
 // DIFFERENT actives clashing), this catches two products that share the
 // SAME active landing in the same session on the same day — e.g. two
@@ -158,7 +170,7 @@ const ACTIVE_GROUP_RULES = [{
   keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "lactic", "salicylic acid", "salicylic", "mandelic acid", "mandelic", "exfoliant", "exfoliating", "exfoliator", "microfoliant", "peeling", "enzyme"]
 }];
 const classifyActiveGroups = p => {
-  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  const text = [p.genericName, p.brandName].filter(Boolean).join(" ");
   return ACTIVE_GROUP_RULES.filter(rule => rule.keywords.some(kw => hasKeyword(text, kw))).map(rule => rule.group);
 };
 // Not every redundancy is a chemical-conflict risk. Two toners or two
@@ -198,7 +210,7 @@ const classifySingletonGroups = p => {
     // it shares exclusivity WITH toners, not just with other mists.
     groups.push("layer:toner");
   } else if (type === "serum" && groups.length === 0) {
-    const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const hay = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
     if (HYDRATION_SERUM_KEYWORDS.some(kw => hay.includes(kw))) groups.push("layer:essence");
   }
   return groups;
@@ -249,6 +261,14 @@ const PRODUCT_COLORS = {
 // Word-boundary keyword match — avoids false positives like "pha" matching
 // inside "Pharma".
 const hasKeyword = (text, kw) => new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(text);
+// Every keyword-matching text builder below deliberately uses ONLY
+// genericName + brandName, NOT p.notes. notes often contains internal
+// migration-tracking prose (e.g. "...exfoliant_mask_rotation_v1...") whose
+// underscore-delimited words satisfy hasKeyword's word-boundary regex just
+// as well as real product-name text — id 30's notes containing "_mask_"
+// was one keystroke away from silently reclassifying an exfoliant as a
+// mask on its next normalize pass. Fixed by step_order_repair_v2's audit;
+// keep notes out of `text` in any new matcher added here.
 
 // ─── PRODUCT CATEGORIES (ported from the Claude.ai version's detectType, so
 // both apps group products the same way) ───────────────────────────────────
@@ -260,7 +280,7 @@ const INGREDIENT_CATEGORIES = {
   benzoyl: ["benzoyl peroxide", "benzoyl"]
 };
 const productCategories = p => {
-  const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+  const hay = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
   const cats = new Set();
   for (const cat in INGREDIENT_CATEGORIES) if (INGREDIENT_CATEGORIES[cat].some(k => hasKeyword(hay, k))) cats.add(cat);
   return cats;
@@ -457,7 +477,7 @@ const RANK_DATA = [
 const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
   if (byId) return byId;
-  const hay = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+  const hay = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
   const matched = RANK_DATA.find(r => r.match.every(kw => hay.includes(kw)));
   if (matched) return matched;
   // Not part of the analyzed roster (e.g. added after the review ran) —
@@ -530,7 +550,7 @@ const AUTO_SCHEDULE_RULES = [
   { keywords: ["moisturizer", "night cream", "cream", "lotion", "barrier", "ceramide"], session: "both", frequency: "daily", step: 75 }
 ];
 const suggestSchedule = p => {
-  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  const text = [p.genericName, p.brandName].filter(Boolean).join(" ");
   for (const rule of AUTO_SCHEDULE_RULES) {
     if (rule.keywords.some(kw => hasKeyword(text, kw))) {
       return {
@@ -553,7 +573,7 @@ const suggestSchedule = p => {
 // Returns null if nothing matches, so callers can choose to leave the
 // existing value untouched rather than clobbering a deliberate custom order.
 const classifyStepOrder = p => {
-  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  const text = [p.genericName, p.brandName].filter(Boolean).join(" ");
   for (const rule of AUTO_SCHEDULE_RULES) {
     if (rule.keywords.some(kw => hasKeyword(text, kw))) return rule.step;
   }
@@ -569,7 +589,7 @@ const recommendStepOrder = p => p.stepOrder || classifyStepOrder(p) || 50;
 // null if unclassified. Shared by the auto-scheduler and the recommendation
 // scorer so "what session/type is this product" is defined in one place.
 const findRule = p => {
-  const text = [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ");
+  const text = [p.genericName, p.brandName].filter(Boolean).join(" ");
   return AUTO_SCHEDULE_RULES.find(rule => rule.keywords.some(kw => hasKeyword(text, kw))) || null;
 };
 
@@ -598,7 +618,7 @@ const scoreCandidate = (product, {
   profile,
   otherActiveProducts = []
 }) => {
-  const text = [product.genericName, product.brandName, product.notes].filter(Boolean).join(" ").toLowerCase();
+  const text = [product.genericName, product.brandName].filter(Boolean).join(" ").toLowerCase();
   const concerns = profile?.concerns || [];
   let score = 0;
 
@@ -629,7 +649,7 @@ const scoreCandidate = (product, {
   // 4. Conflict penalty against what's already active in this session today.
   otherActiveProducts.forEach(other => {
     if (other.id === product.id) return;
-    const otherText = [other.genericName, other.brandName, other.notes].filter(Boolean).join(" ").toLowerCase();
+    const otherText = [other.genericName, other.brandName].filter(Boolean).join(" ").toLowerCase();
     CONFLICT_PAIRS.forEach(([a, b]) => {
       const matchesPair = hasKeyword(text, a) && hasKeyword(otherText, b) || hasKeyword(text, b) && hasKeyword(otherText, a);
       if (matchesPair) score -= 60;
@@ -656,7 +676,7 @@ const pcolor = p => {
   if (g.includes("mask")) return PRODUCT_COLORS.mask;
   return PRODUCT_COLORS.default;
 };
-const productMatches = (p, kw) => [p.genericName, p.brandName, p.notes].some(f => f && f.toLowerCase().includes(kw.toLowerCase()));
+const productMatches = (p, kw) => [p.genericName, p.brandName].some(f => f && f.toLowerCase().includes(kw.toLowerCase()));
 const findConflicts = products => {
   const out = [];
   for (let i = 0; i < products.length; i++) for (let j = i + 1; j < products.length; j++) for (const [a, b] of CONFLICT_PAIRS) if (productMatches(products[i], a) && productMatches(products[j], b) || productMatches(products[i], b) && productMatches(products[j], a)) out.push({
@@ -1310,7 +1330,14 @@ const MIGRATIONS = [{
           return { ...p, inRotationPool: true, rotationRole: "exfoliant", rotationAnchor: anchor };
         }
         if (maskIds.has(p.id)) {
-          return { ...p, inRotationPool: true, rotationRole: "mask", rotationAnchor: anchor, scheduled: true, session: "pm", frequency: "weekly", stepOrder: 40 };
+          // stepOrder: 60 (mask stage) — was hardcoded to 40 (exfoliant
+          // stage) here, a copy-paste bug from the exfoliant branch above.
+          // Never retroactively fixed for already-applied profiles since
+          // this migration only runs once; step_order_repair_v2 corrects
+          // ids 23/24's already-stored values directly. Fixed here so a
+          // brand-new profile (or this migration re-running in a fresh
+          // localStorage) gets the right value from the start.
+          return { ...p, inRotationPool: true, rotationRole: "mask", rotationAnchor: anchor, scheduled: true, session: "pm", frequency: "weekly", stepOrder: 60 };
         }
         return p;
       })
@@ -1370,6 +1397,61 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: profile.products.filter(p => !isEffaclarMat(p))
+    };
+  }
+}, {
+  id: "step_order_repair_v2",
+  // Holistic manual audit (not a scale-lookup normalize pass) of every
+  // scheduled product's stepOrder against the canonical stage order,
+  // triggered by "mask sorting after moisturizer" surfacing in the PM
+  // routine view. step_order_normalize_v1-v4 only ever recompute via
+  // classifyStepOrder(), which — per its own doc comment — refuses to
+  // touch any product with a non-falsy stepOrder already set. These six
+  // products had stale/incorrect literal values from before the current
+  // AUTO_SCHEDULE_RULES canonical scale existed (or, for ids 23/24, from
+  // exfoliant_mask_rotation_v1 hardcoding stepOrder: 40 for masks instead
+  // of 60 — fixed separately below) and were never eligible for
+  // auto-correction. Fixed here as one-off literal corrections instead of
+  // trusting the scale lookup, since two of them (essence, self-tan)
+  // needed judgment calls a keyword scale can't make on its own:
+  //   - id 19 Water Gel Moisturizer: 30 -> 75 (moisturizer stage)
+  //   - id 16 Petitfée Lip Mask: 40 -> 85 (lip stage)
+  //   - id 17 COSRX Snail Essence: 20 -> 50 (essence/serum stage, was
+  //     incorrectly sharing the toner stage's number)
+  //   - id 23 Aztec Secret Clay Mask: 40 -> 60 (mask stage)
+  //   - id 24 BoJ Pore Mask: 40 -> 60 (mask stage)
+  //   - id 11 St. Tropez Self-Tan Serum: 50 -> 75 (moisturizer stage, NOT
+  //     88/self-tan). Manufacturer instructions for this exact product say
+  //     to mix it into your moisturizer (or apply it directly) rather than
+  //     layer it as a separate step after. NOT linked via linkGroup to id
+  //     19 (Water Gel Moisturizer) the way the oil+gel cleanse pair is —
+  //     linkGroup in buildSessionSchedule forces atomic co-scheduling
+  //     (whole group must fit the same day's budget together), which is
+  //     safe for two daily same-session products but would corrupt id 19's
+  //     daily/both-session cadence on the weeks id 11's weekly slot doesn't
+  //     land. Same-numbered stepOrder is enough to co-locate them in the
+  //     step list on nights they do coincide, without coupling scheduling.
+  //     rankReason updated to state the mix-in-moisturizer application.
+  apply: profile => {
+    const fixes = {
+      19: 75,
+      16: 85,
+      17: 50,
+      23: 60,
+      24: 60,
+      11: 75
+    };
+    const products = profile.products || [];
+    return {
+      ...profile,
+      products: products.map(p => {
+        if (!(p.id in fixes)) return p;
+        const next = { ...p, stepOrder: fixes[p.id] };
+        if (p.id === 11) {
+          next.rankReason = "Cosmetic self-tanner — no treatment value for your skin concerns, but not counterproductive either. Manufacturer instructions say to mix a few drops into your moisturizer (or apply directly) rather than layer it as a separate step, so it now shares the moisturizer's step slot instead of running after lip care.";
+        }
+        return next;
+      })
     };
   }
 }];
@@ -1855,7 +1937,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     const registerPlaced = prod => {
       if (!prod) return;
       classifySingletonGroups(prod).forEach(g => placedGroups.add(g));
-      placedTexts.push([prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase());
+      placedTexts.push([prod.genericName, prod.brandName].filter(Boolean).join(" ").toLowerCase());
       // Rest-night tracking: registerPlaced is the one hook every placement
       // path (one-offs, pins, carried skips, the foundational cleanser/
       // moisturizer slot, rotation-pool exfoliant/mask nights, and the
@@ -1866,7 +1948,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     };
     placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
     const conflictsWithToday = prod => {
-      const hay = [prod.genericName, prod.brandName, prod.notes].filter(Boolean).join(" ").toLowerCase();
+      const hay = [prod.genericName, prod.brandName].filter(Boolean).join(" ").toLowerCase();
       return CONFLICT_PAIRS.some(([a, b]) => hay.includes(a) && placedTexts.some(t => t.includes(b)) || hay.includes(b) && placedTexts.some(t => t.includes(a)));
     };
     // 2c. Guaranteed foundational steps: cleanser and moisturizer claim a
