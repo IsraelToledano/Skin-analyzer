@@ -29,7 +29,7 @@ export const PRODUCTS = [
   { id: 'puradorr-vitc', name: '20% Vitamin C', brand: "Pura d'or", time: 'AM', frequency: 'twice-weekly', scheduled: true },
   { id: 'dermalogica-microfoliant', name: 'Daily Microfoliant', brand: 'Dermalogica', time: 'PM', frequency: 'weekly', scheduled: true },
   { id: 'caudalie-vinopure-toner', name: 'Vinopure Purifying Toner', brand: 'Caudalie', time: 'AM', frequency: 'daily', scheduled: true },
-  { id: 'skin1004-cleansing-oil', name: 'Centella Cleansing Oil', brand: 'SKIN1004', time: 'PM', frequency: 'daily', scheduled: true },
+  { id: 'skin1004-cleansing-oil', name: 'Centella Cleansing Oil', brand: 'SKIN1004', time: 'PM', frequency: 'weekly', scheduled: true },
   { id: 'somebymi-ahabhapha-toner', name: 'AHA.BHA.PHA Toner', brand: 'Some By Mi', time: 'PM', frequency: 'weekly', scheduled: true },
   { id: 'caudalie-vinohydra-mask', name: 'VinoHydra Mask', brand: 'Caudalie', time: 'PM', frequency: 'weekly', scheduled: true },
   { id: 'sttropez-self-tan', name: 'Self Tan Serum', brand: 'St.Tropez', time: 'PM', frequency: 'weekly', scheduled: true },
@@ -44,10 +44,19 @@ export const PRODUCTS = [
   { id: 'lrp-effaclar-mat', name: 'Effaclar Mat', brand: 'La Roche-Posay', time: 'PM', frequency: 'daily', scheduled: true },
   { id: 'skin1004-hyalucica-spf50', name: 'Hyalu-Cica Sun Serum SPF50', brand: 'SKIN1004', time: 'AM', frequency: 'daily', scheduled: true },
   { id: 'ordinary-aha30-bha2', name: 'AHA30% + BHA2% Peeling Solution', brand: 'The Ordinary', time: 'PM', frequency: 'monthly', scheduled: true },
-  // Added via SEED_ADDITIONS migration ("caudalie_gel_cleanser_v1") in the
-  // artifact/PWA versions — was missing from this scaffold file. Keeping all
-  // three copies (artifact, PWA seed, this file) in sync going forward.
-  { id: 'caudalie-vinopure-gel-cleanser', name: 'Vinopure Purifying Gel Cleanser', brand: 'Caudalie', time: null, frequency: null, scheduled: false },
+  // Second-cleanse (and standalone AM) gel cleanser. An earlier note here
+  // referenced "caudalie_gel_cleanser_v1" planning to use Caudalie's
+  // Vinopure Purifying Gel Cleanser, but that migration was never actually
+  // written, and checking Caudalie's real ingredient list turned up six
+  // separate essential oils (lavender, peppermint, rosemary, lemongrass,
+  // geranium, melissa) plus isolated fragrance allergens — more fragranced
+  // than the SKIN1004 oil cleanser it would've paired with. Finalized
+  // instead as CeraVe Foaming Facial Cleanser (verified genuinely
+  // fragrance/essential-oil-free) via "gel_cleanser_finalize_v1" in the
+  // PWA version. `time` is 'PM' here since this schema doesn't yet support
+  // an AM+PM ("both") value the way the PWA's session field does — the PWA
+  // additionally runs it AM via "gel_cleanser_am_pm_v1".
+  { id: 'cerave-foaming-gel-cleanser', name: 'Foaming Gel Cleanser', brand: 'CeraVe', time: 'PM', frequency: 'daily', scheduled: true },
 
   // ---- Unscheduled ----
   { id: 'jason-vitamin-e-oil', name: 'Vitamin E Oil', brand: 'Jason', time: null, frequency: null, scheduled: false },
