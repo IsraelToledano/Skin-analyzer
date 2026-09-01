@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.16";
+const APP_VERSION = "2026-08-30.17";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -400,9 +400,9 @@ const RANK_DATA = [
     general: "A salicylic-acid (BHA) toner. BHA is oil-soluble, so it penetrates into pores to clear blackheads and control oil more effectively than a water-soluble AHA would for this skin type.",
     alternatives: [{ name: "Paula's Choice Skin Perfecting 2% BHA Liquid", relation: "as-good", note: "The other commonly-cited gold standard here — comparable, not better." }] },
   { id: 8, match: ["skin1004", "cleansing oil"], tag: "good",
-    reason: "Good first-cleanse texture for combination skin, but it does contain fragrance (bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool) — not disqualifying since it's rinse-off, but worth swapping out given how many actives are already stressing your barrier elsewhere in the routine.",
-    general: "Oil cleansers dissolve sunscreen, sebum, and makeup as the first step of a double cleanse, without stripping skin the way a single harsh wash would. Being rinse-off, fragrance in an oil cleanser carries lower risk than in a leave-on product, but it's still a real, avoidable allergen/irritant exposure if a genuinely fragrance-free option performs just as well.",
-    alternatives: [{ name: "CeraVe Hydrating Foaming Oil Cleanser", relation: "better", note: "Worth being upfront here: most other well-known 'gentle' or 'clean' cleansing oils (Dermalogica PreCleanse, Biossance Squalane + Antioxidant, Then I Met You Living Cleansing Balm) still rely on citrus/lavender/rosemary essential oils for scent — they're not actually fragrance-free despite the marketing. CeraVe's is one of the few oil-based cleansers that's genuinely fragrance- and essential-oil-free, dermatologist-developed, and squalane/ceramide-based — a real formulation upgrade, not just a brand swap, even though it's positioned for drier skin than yours." }] },
+    reason: "Good deep-clean texture for combination skin. It does contain fragrance (bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool) — real, but rinse-off, and now that it's a weekly deep-clean rather than a nightly step (the gel cleanser handles nightly base cleansing), total exposure is low enough that swapping brands is optional rather than a priority.",
+    general: "Oil cleansers dissolve sunscreen, sebum, and makeup as the first step of a double cleanse, without stripping skin the way a single harsh wash would. Being rinse-off, fragrance in an oil cleanser carries lower risk than in a leave-on product, and lower still at weekly instead of nightly frequency.",
+    alternatives: [{ name: "CeraVe Hydrating Foaming Oil Cleanser", relation: "better", note: "Worth being upfront: most other well-known 'gentle'/'clean' cleansing oils (Dermalogica PreCleanse, Biossance Squalane + Antioxidant, Then I Met You Living Cleansing Balm) still rely on essential oils for scent — not actually fragrance-free despite the marketing. This CeraVe is genuinely fragrance- and essential-oil-free, dermatologist-developed, squalane/ceramide-based. A real formulation upgrade if you want to eliminate the fragrance entirely, though at weekly use the current SKIN1004 is a reasonable keep too." }] },
   { id: 9, match: ["some by mi"], tag: "good",
     reason: "Effective exfoliating toner, but one of several acid-exfoliant products in rotation — consider consolidating to reduce over-exfoliation risk.",
     general: "A multi-acid exfoliating toner combining glycolic, salicylic, and gluconolactone (a PHA) for broad but relatively mild exfoliation.",
@@ -476,9 +476,9 @@ const RANK_DATA = [
     general: "A soothing thermal-water mist — mild, situational calming step with essentially no active ingredients beyond mineral content.",
     alternatives: [{ name: "La Roche-Posay Thermal Spring Water", relation: "as-good", note: "Performs identically — it's essentially just spring water." }] },
   { id: 29, match: ["gel cleanser"], tag: "best",
-    reason: "Would fill a real gap — you don't currently have a dedicated AM cleanser scheduled.",
+    reason: "Fills the AM+PM cleanser gap: the nightly water-based second-cleanse step after the (now-weekly) oil cleanse, and the standalone AM cleanser you didn't have.",
     general: "A gentle foaming or gel cleanser is the standard second step of a double cleanse (after oil), or a standalone AM cleanse — removes water-based residue without over-stripping.",
-    alternatives: [{ name: "CeraVe Foaming Facial Cleanser", relation: "as-good", note: "A gentle, non-stripping gel cleanser that fills this gap equally well — pick this or a similar one to replace the placeholder." }] },
+    alternatives: [{ name: "CeraVe Foaming Facial Cleanser", relation: "as-good", note: "Already the one scheduled — genuinely fragrance-free (verified against the full ingredient list, no essential oils), dermatologist-developed, non-comedogenic. Worth flagging: an earlier plan floated Caudalie's Vinopure Purifying Gel Cleanser for this slot instead, but checking its actual ingredients turned up six separate essential oils (lavender, peppermint, rosemary, lemongrass, geranium, melissa) plus isolated allergens — more fragranced than the oil cleanser it would've been paired with, not less. CeraVe stays the pick." }] },
   { id: 30, match: ["ordinary", "glycolic"], tag: "good",
     reason: "Effective glycolic exfoliant for blackheads, pores, and texture — folded into your existing exfoliant rotation (alongside Dermalogica Microfoliant and Some By Mi AHA.BHA.PHA Toner) rather than added as a separate weekly night, so total acid-exfoliant exposure per week doesn't increase.",
     general: "Glycolic acid is the smallest AHA molecule, so it penetrates fastest and exfoliates most aggressively of the common AHAs — effective for texture and blackheads, but the highest irritation potential of the acid family on combination or sensitive-leaning skin.",
@@ -1048,24 +1048,65 @@ const MIGRATIONS = [{
     };
   }
 }, {
+  id: "gel_cleanser_finalize_v1",
+  // add_gel_cleanser_v1 (above) seeded a placeholder — genericName "Gel
+  // Cleanser", brandName "(placeholder — replace with your chosen
+  // product)" — since no specific product existed yet. Explicit decision
+  // once Israel confirmed he wanted the second-cleanse step: CeraVe.
+  // Note for posterity — an earlier plan (referenced in this codebase's
+  // own comments and in vercel-scaffold/src/data/products.js's "caudalie_
+  // gel_cleanser_v1" note) had floated Caudalie's Vinopure Purifying Gel
+  // Cleanser for this slot instead, but that migration was never actually
+  // written, and checking Caudalie's real ingredient list turned up SIX
+  // essential oils (lavender, peppermint, rosemary, lemongrass, geranium,
+  // melissa) plus isolated fragrance allergens — more fragranced than the
+  // SKIN1004 oil cleanser it would've been paired with, which is the exact
+  // problem this whole change was meant to fix. Deliberately NOT using it.
+  // CeraVe Foaming Facial Cleanser is genuinely fragrance/essential-oil-
+  // free (verified against its full ingredient list) and dermatologist-
+  // developed. Named "Foaming Gel Cleanser" (not just "Foaming Facial
+  // Cleanser") so it still satisfies RANK_DATA id 29's ["gel cleanser"]
+  // match and keeps its "best"-tier rank review attached, and so
+  // gel_cleanser_am_pm_v1 below (matched via /gel cleanser/i) still finds
+  // it. Only touches the specific placeholder id ("gel-cleanser-v1") —
+  // never rewrites a real gel cleanser a person set up on their own.
+  apply: profile => {
+    const placeholder = (profile.products || []).find(p => p.id === "gel-cleanser-v1");
+    if (!placeholder) return profile;
+    if (placeholder.brandName && !/placeholder/i.test(placeholder.brandName)) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => p.id === "gel-cleanser-v1" ? {
+        ...p,
+        genericName: "Foaming Gel Cleanser",
+        brandName: "CeraVe",
+        notes: "Second-cleanse step for the double-cleanse routine, and the standalone AM cleanser. Fragrance- and essential-oil-free (verified), dermatologist-developed."
+      } : p)
+    };
+  }
+}, {
   id: "gel_cleanser_am_pm_v1",
   // Fixes a real gap the app's own product-fit analysis already flagged
-  // but never acted on: the Caudalie Vinopure Purifying Gel Cleanser's
-  // stored rankReason literally says "you don't currently have a
-  // dedicated AM cleanser scheduled" — but earlier migrations
-  // (linked_cleanse_pair_v1/v2, add_gel_cleanser_v1) only ever put it in
-  // the PM session, paired with the oil cleanser for the PM double-
-  // cleanse. That left the AM gap the product was originally recommended
-  // for completely unfilled — confirmed by simulating a full 3-week AM+PM
-  // routine and finding zero cleanser-type products in any AM day.
+  // but never acted on: RANK_DATA id 29's stored reason literally says
+  // "you don't currently have a dedicated AM cleanser scheduled" — but
+  // earlier migrations (linked_cleanse_pair_v1/v2, add_gel_cleanser_v1)
+  // only ever put the gel cleanser in the PM session, paired with the oil
+  // cleanser for the PM double-cleanse. That left the AM gap the product
+  // was originally recommended for completely unfilled — confirmed by
+  // simulating a full 3-week AM+PM routine and finding zero cleanser-type
+  // products in any AM day.
   // Switches its session from "pm" to "both": it keeps its existing PM
   // role (still linked to the oil cleanser, still winning the PM
   // foundational cleanser slot every night) and additionally becomes
   // eligible for AM, where — being daily and otherwise uncontested for
   // the AM cleanser category — it reliably fills that slot. No new
   // product needed; this just extends how the existing one is scheduled.
+  // Matched via the same brand-agnostic /gel cleanser/i test add_gel_
+  // cleanser_v1 itself uses (not a brand-specific phrase like "purifying
+  // gel cleanser") so this correctly fires regardless of which specific
+  // gel cleanser product ends up in the slot.
   apply: profile => {
-    const isGelCleanser = p => /purifying gel cleanser/i.test(p.genericName || "") || /purifying gel cleanser/i.test(p.brandName || "");
+    const isGelCleanser = p => /gel cleanser/i.test(p.genericName || "") || /gel cleanser/i.test(p.brandName || "");
     const needsFix = (profile.products || []).some(p => isGelCleanser(p) && p.scheduled && p.session !== "both");
     if (!needsFix) return profile;
     return {
