@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.15";
+const APP_VERSION = "2026-08-30.16";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -399,10 +399,10 @@ const RANK_DATA = [
     reason: "Salicylic-acid toner well matched to oiliness and blackheads.",
     general: "A salicylic-acid (BHA) toner. BHA is oil-soluble, so it penetrates into pores to clear blackheads and control oil more effectively than a water-soluble AHA would for this skin type.",
     alternatives: [{ name: "Paula's Choice Skin Perfecting 2% BHA Liquid", relation: "as-good", note: "The other commonly-cited gold standard here — comparable, not better." }] },
-  { id: 8, match: ["skin1004", "cleansing oil"], tag: "best",
-    reason: "Gentle first-cleanse step, well suited to combination skin.",
-    general: "Oil cleansers dissolve sunscreen, sebum, and makeup as the first step of a double cleanse, without stripping skin the way a single harsh wash would.",
-    alternatives: [{ name: "Banila Co Clean It Zero Cleansing Balm", relation: "as-good", note: "A comparably gentle first-cleanse option — performs comparably, no need to switch." }] },
+  { id: 8, match: ["skin1004", "cleansing oil"], tag: "good",
+    reason: "Good first-cleanse texture for combination skin, but it does contain fragrance (bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool) — not disqualifying since it's rinse-off, but worth swapping out given how many actives are already stressing your barrier elsewhere in the routine.",
+    general: "Oil cleansers dissolve sunscreen, sebum, and makeup as the first step of a double cleanse, without stripping skin the way a single harsh wash would. Being rinse-off, fragrance in an oil cleanser carries lower risk than in a leave-on product, but it's still a real, avoidable allergen/irritant exposure if a genuinely fragrance-free option performs just as well.",
+    alternatives: [{ name: "CeraVe Hydrating Foaming Oil Cleanser", relation: "better", note: "Worth being upfront here: most other well-known 'gentle' or 'clean' cleansing oils (Dermalogica PreCleanse, Biossance Squalane + Antioxidant, Then I Met You Living Cleansing Balm) still rely on citrus/lavender/rosemary essential oils for scent — they're not actually fragrance-free despite the marketing. CeraVe's is one of the few oil-based cleansers that's genuinely fragrance- and essential-oil-free, dermatologist-developed, and squalane/ceramide-based — a real formulation upgrade, not just a brand swap, even though it's positioned for drier skin than yours." }] },
   { id: 9, match: ["some by mi"], tag: "good",
     reason: "Effective exfoliating toner, but one of several acid-exfoliant products in rotation — consider consolidating to reduce over-exfoliation risk.",
     general: "A multi-acid exfoliating toner combining glycolic, salicylic, and gluconolactone (a PHA) for broad but relatively mild exfoliation.",
