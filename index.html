@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.13";
+const APP_VERSION = "2026-08-30.14";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -495,6 +495,15 @@ const RANK_STYLE = {
   good: { color: T.blue, bg: T.blueSoft, label: "Good" },
   bad: { color: T.red, bg: T.redSoft, label: "Bad" }
 };
+// Weight used to bias ROTATION_SLOTS fairness toward higher-ranked
+// products — a "best"-tagged pool member should win roughly twice as many
+// of the shared weekly slots as a "good"-tagged one, not split them evenly.
+// servedCount is divided by this weight before comparison (see
+// buildSessionSchedule step 2d), so a higher weight makes each real serve
+// count for less, letting that product win ties more often. "bad" is
+// included only for completeness — bad-tagged products are auto-
+// unscheduled elsewhere and shouldn't reach the pool at all.
+const RANK_WEIGHT = { best: 2, good: 1, bad: 1 };
 
 
 // ─── RULE-BASED AUTO-SCHEDULER (no AI) ─────────────────────────────────────
@@ -621,6 +630,14 @@ const scoreCandidate = (product, {
   const text = [product.genericName, product.brandName].filter(Boolean).join(" ").toLowerCase();
   const concerns = profile?.concerns || [];
   let score = 0;
+
+  // 0. Quality-rank bonus — a dermatologist-rated "best" product should
+  // outrank an otherwise-similar "good" one, and a "bad" one should sink,
+  // so the picker surfaces the higher-quality option first for a like-for-
+  // like swap. Sized smaller than concern-match/session-fit so rank alone
+  // can't override a genuine session mismatch or missed concern.
+  const rankTag = getProductRank(product).tag;
+  if (rankTag === "best") score += 20;else if (rankTag === "bad") score -= 30;
 
   // 1. Concern match — up to 3 matched concerns counted.
   let concernMatches = 0;
@@ -2037,10 +2054,20 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         const slotDate = addDaysStr(anchor, slot.offsetDays);
         const offset = daysBetween(slotDate, ds);
         if (offset < 0 || offset % 7 !== 0) return;
-        const candidates = poolMembers.filter(p => p.rotationRole === slot.role && !placedIds.has(p.id)).map(p => ({
-          p,
-          served: servedCount[p.id] || 0
-        })).sort((a, b) => a.served - b.served || (a.p.stepOrder || 0) - (b.p.stepOrder || 0) || String(a.p.id).localeCompare(String(b.p.id)));
+        // Weighted fairness: divide each candidate's servedCount by its
+        // RANK_WEIGHT before comparing, so a "best"-tagged member (weight
+        // 2) needs twice as many real serves as a "good"-tagged one
+        // (weight 1) before it stops winning ties — over many cycles this
+        // gives higher-ranked products a higher effective frequency
+        // instead of splitting the slot evenly across all members.
+        const candidates = poolMembers.filter(p => p.rotationRole === slot.role && !placedIds.has(p.id)).map(p => {
+          const weight = RANK_WEIGHT[getProductRank(p).tag] || 1;
+          return {
+            p,
+            served: servedCount[p.id] || 0,
+            weight
+          };
+        }).sort((a, b) => a.served / a.weight - b.served / b.weight || (a.p.stepOrder || 0) - (b.p.stepOrder || 0) || String(a.p.id).localeCompare(String(b.p.id)));
         if (!candidates.length) return;
         const winner = candidates[0].p;
         if (conflictsWithToday(winner)) return;
@@ -2345,6 +2372,7 @@ const SwapPickerModal = ({
   }) => {
     const col = pcolor(p);
     const fit = fitLabel(score);
+    const rank = getProductRank(p);
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
       onClick: () => onSelect(p),
@@ -2380,14 +2408,33 @@ const SwapPickerModal = ({
         fontWeight: 400,
         fontSize: 12
       }
-    }, " · ", p.brandName))), /*#__PURE__*/React.createElement("span", {
+    }, " · ", p.brandName))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        flexShrink: 0
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      // Rank indicator — lets you see at a glance that you're swapping to
+      // a lower-ranked ("Good"/"Bad") product instead of the top pick,
+      // rather than that only surfacing later in the product detail view.
+      style: {
+        fontSize: 9,
+        fontWeight: 700,
+        background: RANK_STYLE[rank.tag].bg,
+        color: RANK_STYLE[rank.tag].color,
+        border: `1px solid ${RANK_STYLE[rank.tag].color}44`,
+        borderRadius: 100,
+        padding: "1px 7px"
+      }
+    }, RANK_STYLE[rank.tag].label), /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
         fontWeight: 700,
-        color: fit.color,
-        flexShrink: 0
+        color: fit.color
       }
-    }, fit.text));
+    }, fit.text)));
   }))));
 };
 const RoutineBlock = ({
