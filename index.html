@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.14";
+const APP_VERSION = "2026-08-30.15";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -360,6 +360,16 @@ const CATEGORY_COLORS = {
 // straight duplicate-role product) and "better" for a genuine upgrade
 // (used for "good"/"bad"-tagged products where a real improvement
 // exists). All three fields feed the product detail view.
+// Quality bar for "better" alternatives: cite genuinely top-tier,
+// dermatologist/clinic-recognized brands (SkinCeuticals, Revision, iS
+// Clinical, PCA Skin, SkinBetter Science) or an already-owned product —
+// not budget/drugstore-tier reformulations (The Ordinary, CeraVe, etc.)
+// dressed up as an "upgrade". Budget brands are fine ONLY as "as-good"
+// lateral comparisons (e.g. citing a comparably-priced, comparably-
+// performing product), never as the "better" pick. See id 5's Vitamin C
+// alternative for the corrected pattern: a "better" alternative should
+// improve BOTH formulation quality and specific fit for Israel's
+// combination/oily/blemish-scarred profile, not just swap brands.
 const RANK_DATA = [
   { id: 1, match: ["jason", "vitamin e"], tag: "bad",
     reason: "Heavy, occlusive, very high-dose vitamin E oil — comedogenic risk for combination/pore-prone skin and works against your blackhead/pore goals.",
@@ -378,9 +388,9 @@ const RANK_DATA = [
     general: "Prescription tretinoin is the gold-standard retinoid: the most clinically validated option for acne, texture, and post-acne marks, but also the strongest and most irritating of the retinoid family.",
     alternatives: [{ name: "Differin Gel (adapalene 0.1%)", relation: "as-good", note: "The only OTC retinoid in a comparable efficacy tier — not an upgrade over what you're already using." }] },
   { id: 5, match: ["pura", "vitamin c"], tag: "good",
-    reason: "Effective for scarring, but 20% is a high, unbuffered concentration that can irritate combination skin — a gentler stabilized formula could work as well with less irritation.",
+    reason: "Effective for scarring, but 20% is a high, unbuffered concentration that can irritate combination skin — a dermatologist-tier formula built for oily/blemish-prone skin specifically would work at least as well with meaningfully less irritation.",
     general: "Unbuffered L-ascorbic acid at 20% is a harsh, high concentration. It's effective for brightening and scarring but oxidizes quickly once opened and commonly irritates sensitive or combination skin.",
-    alternatives: [{ name: "The Ordinary Ascorbyl Glucoside Solution 12%", relation: "better", note: "A gentler, stabilized vitamin C derivative — similar scarring and brightening benefit with meaningfully less irritation, and less risk of oxidizing before you finish the bottle." }] },
+    alternatives: [{ name: "SkinCeuticals Silymarin CF", relation: "better", note: "A genuinely higher tier: 5% L-ascorbic acid (far gentler than Pura d'or's unbuffered 20%) paired with salicylic acid and silymarin — this is SkinCeuticals' vitamin C formulated specifically for oily/blemish-prone skin, so it addresses scarring, oiliness, and blackheads at once instead of just scarring. Clinically-backed, dermatologist-office-tier formulation, not a budget/derivative alternative." }] },
   { id: 6, match: ["dermalogica", "microfoliant"], tag: "best",
     reason: "Gentle enzyme/physical exfoliant well suited to blackheads and pores.",
     general: "A rice-enzyme and salicylic-acid powder activated with water — gentler than a leave-on acid because contact time is short, good for regular pore and texture maintenance.",
@@ -4083,7 +4093,7 @@ const ProductsTab = ({
   }, /*#__PURE__*/React.createElement("div", {
     style: { textAlign: "center", padding: "20px 0", fontSize: 13, color: T.muted }
   }, "No products match \"", search, "\".")), searchedProducts.length > 0 && [/*#__PURE__*/React.createElement(Card, {
-    key: "rank-card"
+    key: "category-card"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -4095,18 +4105,18 @@ const ProductsTab = ({
     style: {
       marginBottom: 0
     }
-  }, "Ranked"), /*#__PURE__*/React.createElement("div", {
+  }, "Categories"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: T.muted
     }
-  }, profile.products.length, " product", profile.products.length !== 1 ? "s" : "", " · ", profile.products.filter(p => p.scheduled).length, " scheduled")), ...renderProductGroups(rankGroups, "category", editId, setEditId, updateSchedule, removeProduct, setDetailId)), /*#__PURE__*/React.createElement(Card, {
-    key: "category-card"
+  }, profile.products.length, " product", profile.products.length !== 1 ? "s" : "", " · ", profile.products.filter(p => p.scheduled).length, " scheduled")), ...renderProductGroups(categoryGroups, "rank", editId, setEditId, updateSchedule, removeProduct, setDetailId)), /*#__PURE__*/React.createElement(Card, {
+    key: "rank-card"
   }, /*#__PURE__*/React.createElement(Lbl, {
     style: {
       marginBottom: 14
     }
-  }, "Categories"), ...renderProductGroups(categoryGroups, "rank", editId, setEditId, updateSchedule, removeProduct, setDetailId))], profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
+  }, "Ranked"), ...renderProductGroups(rankGroups, "category", editId, setEditId, updateSchedule, removeProduct, setDetailId))], profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: 48
