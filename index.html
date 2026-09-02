@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-02.1";
+const APP_VERSION = "2026-09-02.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1445,6 +1445,41 @@ const MIGRATIONS = [{
       inRotationPool: true,
       rotationRole: "exfoliant",
       rotationAnchor: anchor
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "add_caudalie_vinohydra_mask_v1",
+  // Explicit request (photo of the actual tube): add Caudalie VinoHydra
+  // Masque-Créme Hydratant, 75mL. RANK_DATA already carries a "best"-tag
+  // entry keyed to match: ["vinohydra"] (hydrating mask, supports
+  // combination skin's drier patches) — that reasoning was written
+  // assuming the product existed in the roster, but no actual product
+  // entry was ever added, so it's never surfaced or been schedulable.
+  // This adds it as a standalone PM weekly mask at the canonical mask
+  // stepOrder (60) — NOT folded into exfoliant_mask_rotation_v1's rotation
+  // pool, since that pool is specifically the acid-exfoliant nights paired
+  // with Aztec Clay/Pore Mask, and this is a plain hydrating mask with no
+  // actives, so it doesn't carry the over-exfoliation risk that pool
+  // manages. No-op if a matching product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isVinoHydra = p => hay(p).includes("vinohydra");
+    const products = profile.products || [];
+    if (products.some(isVinoHydra)) return profile;
+    const newProduct = {
+      id: 31,
+      genericName: "VinoHydra Masque-Créme Hydratant",
+      brandName: "Caudalie",
+      notes: "75mL hydrating cream mask — Centella + grape polyphenols. Standalone weekly PM mask, not part of the acid-exfoliant rotation pool.",
+      scheduled: true,
+      session: "pm",
+      frequency: "weekly",
+      stepOrder: 60,
+      nextDate: todayStr()
     };
     return {
       ...profile,
