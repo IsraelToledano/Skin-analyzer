@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-08-30.17";
+const APP_VERSION = "2026-09-02.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2306,6 +2306,32 @@ const fitLabel = score => {
     color: T.muted
   };
 };
+// iOS Safari doesn't resize the layout viewport when the keyboard opens —
+// only window.visualViewport shrinks. A `position: fixed; inset: 0` sheet
+// stays full-height and ends up behind the keyboard. This hook tracks the
+// visual viewport so callers can size/position around the keyboard instead.
+const useVisualViewportInsets = () => {
+  const [insets, setInsets] = useState(() => ({
+    height: typeof window !== "undefined" ? window.innerHeight : 0,
+    offsetTop: 0
+  }));
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setInsets({
+      height: vv.height,
+      offsetTop: vv.offsetTop
+    });
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+  return insets;
+};
 const SwapPickerModal = ({
   mode,
   session,
@@ -2317,6 +2343,7 @@ const SwapPickerModal = ({
   onClose
 }) => {
   const [filter, setFilter] = useState("");
+  const { height: vvHeight, offsetTop: vvOffsetTop } = useVisualViewportInsets();
   const activeIds = new Set(activeProducts.map(p => p.id));
   const otherActiveProducts = activeProducts.filter(p => p.id !== excludeProduct?.id);
   const candidates = (profile.products || []).filter(p => p.id !== excludeProduct?.id && !activeIds.has(p.id)).filter(p => !filter || `${p.genericName} ${p.brandName || ""}`.toLowerCase().includes(filter.toLowerCase())).map(p => ({
@@ -2332,7 +2359,10 @@ const SwapPickerModal = ({
     onClick: onClose,
     style: {
       position: "fixed",
-      inset: 0,
+      left: 0,
+      right: 0,
+      top: vvOffsetTop,
+      height: vvHeight,
       background: "rgba(44,36,32,0.5)",
       zIndex: 1000,
       display: "flex",
@@ -2346,7 +2376,7 @@ const SwapPickerModal = ({
       borderRadius: "24px 24px 0 0",
       width: "100%",
       maxWidth: 580,
-      maxHeight: "80vh",
+      maxHeight: `min(80vh, ${vvHeight}px)`,
       display: "flex",
       flexDirection: "column",
       boxShadow: T.shadowMd
