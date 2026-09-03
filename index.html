@@ -604,6 +604,34 @@ const classifyStepOrder = p => {
 // default (matches suggestSchedule's own fallback) so a brand-new product
 // lands in a sensible spot instead of always sorting first/last.
 const recommendStepOrder = p => p.stepOrder || classifyStepOrder(p) || 50;
+// Plain-language "why this step" copy, keyed to the same canonical stage
+// scale as AUTO_SCHEDULE_RULES/classifyStepOrder — explains what the STAGE
+// is for (layering logic), separate from RANK_DATA's per-PRODUCT verdict.
+// Sorted ascending; stepInfoFor() picks the entry whose step is closest to
+// the product's own stepOrder, so a manually-nudged value (e.g. 42 instead
+// of 40) still resolves to the right stage description instead of matching
+// nothing.
+const STEP_INFO = [
+  { step: 10, name: "Oil cleanse", desc: "Dissolves sunscreen, sebum, and makeup first so nothing blocks the water-based cleanser or the actives that follow." },
+  { step: 15, name: "Cleanse", desc: "Removes water-based residue and buildup, leaving a clean base — everything after this step absorbs better on bare skin." },
+  { step: 20, name: "Tone", desc: "Preps and balances skin right after cleansing, before any treatment step goes on." },
+  { step: 35, name: "AM active (vitamin C / niacinamide)", desc: "Antioxidant/brightening actives go on early, on clean dry skin, so they absorb before anything heavier layers on top." },
+  { step: 40, name: "Exfoliant", desc: "Chemical exfoliants need bare, freshly-cleansed skin to work, and go on before richer treatment steps so they aren't diluted or blocked." },
+  { step: 45, name: "Retinoid", desc: "The primary treatment step for texture, pores, and scarring — placed on clean skin, before heavier moisturizing steps that could dilute it." },
+  { step: 50, name: "Serum / essence", desc: "Delivers hydration or targeted actives in a light layer, after treatment actives but before anything occlusive." },
+  { step: 55, name: "Eye cream", desc: "The eye area is thinner and more delicate, so it gets its own light step separate from full-face serums and creams." },
+  { step: 60, name: "Mask", desc: "An occasional intensive step, layered after normal treatment steps for extra targeted benefit." },
+  { step: 65, name: "Face oil", desc: "Oils seal in what's underneath, so they go after water-based serums, not before — otherwise they'd block absorption." },
+  { step: 75, name: "Moisturizer", desc: "Locks in hydration and everything applied before it — one of the last steps so it isn't undone by something layered on top." },
+  { step: 85, name: "Lip", desc: "A separate, low-priority finishing step since lips aren't part of the main face routine." },
+  { step: 88, name: "Self-tan", desc: "Cosmetic DHA stain that reacts unpredictably with actives, so it's kept on its own night, near the end of the routine." },
+  { step: 95, name: "SPF", desc: "Always last in the AM routine — sits on top as the final protective layer so nothing is applied over it that could break the film." }
+];
+const stepInfoFor = p => {
+  const step = p.stepOrder || classifyStepOrder(p);
+  if (step == null) return null;
+  return STEP_INFO.reduce((best, cur) => Math.abs(cur.step - step) < Math.abs(best.step - step) ? cur : best, STEP_INFO[0]);
+};
 // Returns the first matching AUTO_SCHEDULE_RULES entry for a product, or
 // null if unclassified. Shared by the auto-scheduler and the recommendation
 // scorer so "what session/type is this product" is defined in one place.
@@ -2569,6 +2597,7 @@ const RoutineBlock = ({
   const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
   const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || appToday(), allDone));
   const [picker, setPicker] = useState(null); // { mode: "swap"|"add", excludeProduct } | null
+  const [detailProduct, setDetailProduct] = useState(null); // rank badge tap → "why this step" modal
 
   // ── Drag-to-reorder ──────────────────────────────────────────────────
   // Steps are ordered by each product's global stepOrder. Dragging a row
@@ -2874,6 +2903,7 @@ const RoutineBlock = ({
     const col = pcolor(p);
     const cat = productCategoryGroup(p);
     const catColor = CATEGORY_COLORS[cat] || T.muted;
+    const rank = getProductRank(p);
     return /*#__PURE__*/React.createElement("div", {
       key: p.id,
       ref: el => {
@@ -3005,28 +3035,33 @@ const RoutineBlock = ({
         borderRadius: 20,
         padding: "1px 7px"
       }
-    }, "added today"), getProductRank(p).tag === "bad" && /*#__PURE__*/React.createElement("span", {
-      title: getProductRank(p).reason,
+    }, "added today"), /*#__PURE__*/React.createElement("span", {
+      onClick: e => {
+        e.stopPropagation();
+        setDetailProduct(p);
+      },
+      title: "Tap for why",
       style: {
         fontSize: 10,
-        background: RANK_STYLE.bad.bg,
-        color: RANK_STYLE.bad.color,
-        border: `1px solid ${RANK_STYLE.bad.color}44`,
+        background: RANK_STYLE[rank.tag].bg,
+        color: RANK_STYLE[rank.tag].color,
+        border: `1px solid ${RANK_STYLE[rank.tag].color}44`,
         borderRadius: 20,
         padding: "1px 7px",
         fontWeight: 700,
-        cursor: "help"
+        cursor: "pointer"
       }
       // Surfaces the rank verdict right where the routine is actually used
       // day to day, not just in the Products tab where it's easy to never
-      // see again once a product is scheduled. This used to be purely
-      // descriptive text sitting next to the product with no visibility at
-      // the point of daily use — a scheduled "bad"-tagged product could run
-      // for weeks without ever being seen again. This does NOT auto-remove
-      // anything; it's a visible flag, not enforcement, so a product kept
-      // scheduled on purpose (e.g. to finish out a bottle) still shows up
-      // normally — just with an honest label attached.
-    }, "⚠ ", RANK_STYLE.bad.label))), /*#__PURE__*/React.createElement("div", {
+      // see again once a product is scheduled. Shown for every tag now, not
+      // just "bad" — Best/Good context is just as useful at a glance as the
+      // warning, and tapping any badge opens the full "why" (step rationale
+      // + product verdict) via ProductDetailModal instead of relying on a
+      // hover-only title, which doesn't work on mobile touch. This does NOT
+      // auto-remove anything; it's a visible flag, not enforcement, so a
+      // product kept scheduled on purpose (e.g. to finish out a bottle)
+      // still shows up normally — just with an honest label attached.
+    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 5,
@@ -3103,6 +3138,9 @@ const RoutineBlock = ({
     activeProducts: prods,
     onSelect: applySwap,
     onClose: () => setPicker(null)
+  }), detailProduct && /*#__PURE__*/React.createElement(ProductDetailModal, {
+    product: detailProduct,
+    onClose: () => setDetailProduct(null)
   }));
 };
 
@@ -3173,6 +3211,12 @@ const ListStepRow = ({ p, i, status, total }) => {
   const st = LIST_STATUS_STYLE[status];
   const col = pcolor(p);
   const catColor = CATEGORY_COLORS[productCategoryGroup(p)] || T.muted;
+  const rank = getProductRank(p);
+  // Local, per-row detail modal — this component is read-only otherwise
+  // (see comment below), so a tap-to-view "why" is the one interactive
+  // affordance it needs, kept self-contained rather than threading a
+  // callback through ListSession/ListDayCard just for this.
+  const [showDetail, setShowDetail] = useState(false);
   return /*#__PURE__*/React.createElement("div", {
     key: p.id,
     style: {
@@ -3182,7 +3226,10 @@ const ListStepRow = ({ p, i, status, total }) => {
       padding: "7px 0",
       borderBottom: i < total - 1 ? `1px solid ${T.border}` : "none"
     }
-  }, /*#__PURE__*/React.createElement("div", {
+  }, showDetail && /*#__PURE__*/React.createElement(ProductDetailModal, {
+    product: p,
+    onClose: () => setShowDetail(false)
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       width: 16,
       height: 16,
@@ -3224,7 +3271,21 @@ const ListStepRow = ({ p, i, status, total }) => {
     }
   }), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
     style: { color: T.muted, fontWeight: 400, fontSize: 11 }
-  }, " \u00b7 ", p.brandName))), st.label && /*#__PURE__*/React.createElement("span", {
+  }, " \u00b7 ", p.brandName))), /*#__PURE__*/React.createElement("span", {
+    onClick: () => setShowDetail(true),
+    title: "Tap for why",
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      background: RANK_STYLE[rank.tag].bg,
+      color: RANK_STYLE[rank.tag].color,
+      border: `1px solid ${RANK_STYLE[rank.tag].color}44`,
+      borderRadius: 20,
+      padding: "1px 7px",
+      flexShrink: 0,
+      cursor: "pointer"
+    }
+  }, rank.tag === "bad" ? "\u26a0 " : "", RANK_STYLE[rank.tag].label), st.label && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 10,
       fontWeight: 700,
@@ -3843,6 +3904,7 @@ const ProductDetailModal = ({ product, onClose }) => {
   const cat = productCategoryGroup(product);
   const catColor = CATEGORY_COLORS[cat] || T.muted;
   const alternatives = rank.alternatives || [];
+  const stepInfo = stepInfoFor(product);
   return /*#__PURE__*/React.createElement("div", {
     onClick: onClose,
     style: {
@@ -3890,6 +3952,13 @@ const ProductDetailModal = ({ product, onClose }) => {
   }, cat), product.scheduled && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 11, fontWeight: 600, background: T.faint, color: T.muted, borderRadius: 100, padding: "2px 9px" }
   }, product.session === "both" ? "AM+PM" : product.session?.toUpperCase(), " · ", FREQS[product.frequency] || product.frequency)),
+  stepInfo && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 14 }
+    // Explains the STAGE this product sits in (layering logic) — distinct
+    // from the rank sections below, which are about this specific PRODUCT.
+    // Answers "why is this step here" separately from "why this product".
+  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "Why this step \u2014 ", stepInfo.name),
+  /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5 } }, stepInfo.desc)),
   rank.general && /*#__PURE__*/React.createElement("div", {
     style: { marginBottom: 14 }
   }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "In general"),
