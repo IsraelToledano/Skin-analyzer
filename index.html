@@ -728,6 +728,52 @@ const scoreCandidate = (product, {
   return score;
 };
 
+// Pure decision function for "which today-active products need to be
+// bumped (skipped for today only) so the day stays internally consistent
+// once newProduct joins it" — used by RoutineBlock's manual Swap/Add-step
+// flow so a manual addition can't silently violate rules the auto-scheduler
+// already enforces everywhere else (see buildSessionSchedule's placedGroups
+// and CONFLICT_PAIRS checks, and the SESSION_CAP hard cap). Returns an
+// array of product ids to mark skipped-for-today; never mutates anything.
+// Pulled out as a standalone pure function (same pattern as scoreCandidate)
+// specifically so it's independently testable without rendering RoutineBlock.
+const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
+  const {
+    session,
+    ds,
+    profile
+  } = ctx;
+  const bumpIds = new Set();
+  if (mode === "swap" && excludeProduct) {
+    bumpIds.add(excludeProduct.id);
+    return Array.from(bumpIds);
+  }
+  if (mode !== "add") return [];
+  const others = prods.filter(p => p.id !== newProduct.id);
+  const newText = [newProduct.genericName, newProduct.brandName].filter(Boolean).join(" ").toLowerCase();
+  const newGroups = classifySingletonGroups(newProduct);
+  others.forEach(other => {
+    const otherText = [other.genericName, other.brandName].filter(Boolean).join(" ").toLowerCase();
+    const hardConflict = CONFLICT_PAIRS.some(([a, b]) => hasKeyword(newText, a) && hasKeyword(otherText, b) || hasKeyword(newText, b) && hasKeyword(otherText, a));
+    const singletonClash = classifySingletonGroups(other).some(g => newGroups.includes(g));
+    if (hardConflict || singletonClash) bumpIds.add(other.id);
+  });
+  const remaining = others.filter(p => !bumpIds.has(p.id));
+  if (remaining.length + 1 > SESSION_CAP) {
+    const weakest = remaining.map(p => ({
+      p,
+      score: scoreCandidate(p, {
+        session,
+        ds,
+        profile,
+        otherActiveProducts: others
+      })
+    })).sort((a, b) => a.score - b.score)[0];
+    if (weakest) bumpIds.add(weakest.p.id);
+  }
+  return Array.from(bumpIds);
+};
+
 const pcolor = p => {
   const g = (p.genericName || "").toLowerCase();
   if (g.includes("cleanser") || g.includes("wash")) return PRODUCT_COLORS.cleanser;
@@ -2781,7 +2827,24 @@ const RoutineBlock = ({
   }, [dragId]);
   // Swap: pins the chosen product in for today and marks the outgoing
   // product skipped (so its own rotation still carries forward normally).
-  // Add: just pins the chosen product in, no outgoing product involved.
+  // Add: pins the chosen product in AND adjusts the rest of today's list so
+  // it stays internally consistent — same rules buildSessionSchedule
+  // already enforces for the auto-generated routine, applied retroactively
+  // to a manual addition instead of silently letting it violate them:
+  //   1. Hard conflicts (CONFLICT_PAIRS — e.g. retinoid + acid exfoliant)
+  //      against anything already active today bump the conflicting
+  //      product to skipped-for-today (it still carries forward normally).
+  //   2. Singleton-layer clashes (two toners, two moisturizers, two of the
+  //      same active-ingredient group — via classifySingletonGroups, the
+  //      same check the scheduler uses) bump the same way.
+  //   3. If today would still exceed SESSION_CAP after 1-2, the single
+  //      weakest-fit remaining product (lowest scoreCandidate — the same
+  //      scoring the picker itself sorts by) is bumped to make room, so a
+  //      manual add can't silently blow past the cap the rest of the app
+  //      enforces everywhere else.
+  // A bumped product is never removed from the schedule — just skipped for
+  // today, exactly like an explicit Swap-out, so its own rotation timing is
+  // untouched and it reappears on its normal next-due date.
   const applySwap = newProduct => {
     if (!picker) return;
     const {
@@ -2810,20 +2873,29 @@ const RoutineBlock = ({
         stepOrder: recommendStepOrder(pr)
       } : pr);
     }
-    if (mode === "swap" && excludeProduct) {
-      const ex = allLogs.find(l => l.date === ds && l.productId === excludeProduct.id && l.session === session);
-      patch.logs = ex ? allLogs.map(l => l.date === ds && l.productId === excludeProduct.id && l.session === session ? {
-        ...l,
-        skipped: true,
-        done: false
-      } : l) : [...allLogs, {
-        id: Date.now(),
-        date: ds,
-        productId: excludeProduct.id,
-        session,
-        done: false,
-        skipped: true
-      }];
+    const bumpIds = computeAddStepBumps(newProduct, mode, excludeProduct, prods, {
+      session,
+      ds,
+      profile
+    });
+    if (bumpIds.length) {
+      let nextLogs = allLogs.slice();
+      bumpIds.forEach(id => {
+        const ex = allLogs.find(l => l.date === ds && l.productId === id && l.session === session);
+        nextLogs = ex ? nextLogs.map(l => l.date === ds && l.productId === id && l.session === session ? {
+          ...l,
+          skipped: true,
+          done: false
+        } : l) : [...nextLogs, {
+          id: Date.now() + Math.random(),
+          date: ds,
+          productId: id,
+          session,
+          done: false,
+          skipped: true
+        }];
+      });
+      patch.logs = nextLogs;
     }
     onUpdate(patch);
     setPicker(null);
