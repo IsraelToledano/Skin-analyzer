@@ -486,7 +486,11 @@ const RANK_DATA = [
   { id: 31, match: ["caudalie", "instant d"], tag: "best",
     reason: "A purifying clay mask (clay + caffeine + grape) squarely targeting oiliness, blackheads, and enlarged pores — from the same clinical-tier Caudalie line as your Vinopure toner/serum, with no fragrance or essential-oil red flags. Makes Aztec Secret Clay and Beauty of Joseon Pore Mask fully redundant if either is ever reactivated — same purifying-clay-mask role, no need to run more than one.",
     general: "Clay draws out excess oil and impurities by absorption; caffeine adds a mild tightening/de-puffing effect; grape polyphenols contribute antioxidant support. A once-weekly purifying mask like this is a standard, low-irritation way to keep pores and oil under control between actives nights.",
-    alternatives: [{ name: "Kiehl's Rare Earth Deep Pore Cleansing Masque", relation: "as-good", note: "The other commonly-cited benchmark clay mask — comparable, not better." }] }
+    alternatives: [{ name: "Kiehl's Rare Earth Deep Pore Cleansing Masque", relation: "as-good", note: "The other commonly-cited benchmark clay mask — comparable, not better." }] },
+  { id: 32, match: ["melaxin"], tag: "good",
+    reason: "Legitimate K-beauty cosmeceutical brand, not a novelty knockoff — charcoal (35,000ppm) for sebum absorption plus a peptide/tannin complex for pore tightening fits your oiliness/blackheads/pores concerns. Held at \"good\" rather than \"best\" for two reasons: the full INCI list isn't published on any retailer page I could check (brand pages just list headline actives, not the complete ingredient list, so fragrance/EO content can't be verified the way your other products have been), and it's now a FOURTH pore-purifying clay mask in your library alongside Aztec Secret Clay, Beauty of Joseon Pore Mask, and the just-added Caudalie Masque Instant Détox — you only need one in weekly rotation. Added here UNSCHEDULED, same as Aztec/BoJ, rather than displacing Caudalie's slot. Swap it in for Caudalie if you'd rather try it, or verify the ingredient list to move it to \"best.\"",
+    general: "Peptides in a rinse-off mask act briefly at the surface (not left-on/absorbed the way a serum peptide is), so their firming claim is modest at this contact time; the charcoal-for-sebum and tannin-for-pore-tightening mechanisms are the parts doing most of the actual work here.",
+    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "as-good", note: "Same purifying-clay-mask role, already in your weekly rotation with a fully verified ingredient list — no need to run both." }] }
 ];
 const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
@@ -1616,6 +1620,35 @@ const MIGRATIONS = [{
       frequency: "weekly",
       stepOrder: 60,
       nextDate: todayStr()
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "add_dr_melaxin_clay_mask_v1",
+  // Explicit request (photo of the box): add Dr.Melaxin Dubai Peptide Clay
+  // Mask, 100g (RANK_DATA id 32, tagged "good" — see that entry for the
+  // full reasoning). Added to the product LIBRARY only — scheduled: false,
+  // same as Aztec Secret Clay / Beauty of Joseon Pore Mask. This is now the
+  // fourth pore-purifying clay mask in the library; the just-added Caudalie
+  // Masque Instant Détox already fills that weekly PM mask slot at "best"
+  // tier with a fully verified ingredient list, so this one is left
+  // unscheduled rather than displacing it or creating a second competing
+  // mask slot. Reactivate manually (and swap out Caudalie, don't stack
+  // both) if preferred. No-op if a matching product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isMelaxinClayMask = p => hay(p).includes("melaxin");
+    const products = profile.products || [];
+    if (products.some(isMelaxinClayMask)) return profile;
+    const newProduct = {
+      id: 33,
+      genericName: "Dubai Peptide Clay Mask",
+      brandName: "Dr.Melaxin",
+      notes: "100g color-changing clay mask — charcoal (35,000ppm), 4-peptide + tannin complex, pistacia vera seed extract, cocoa extract. Pore tightening & sebum control. Left unscheduled: overlaps with the just-added Caudalie Masque Instant Détox, which already fills the weekly purifying-clay-mask slot with a fully verified ingredient list.",
+      scheduled: false
     };
     return {
       ...profile,
