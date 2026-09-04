@@ -128,58 +128,78 @@ const FREQ_DAYS = {
   "6-weekly": 42,
   "8-weekly": 56
 };
-// RETINOID_SYNONYMS mirrors the "retinol" keyword group used everywhere
-// else in the app (AUTO_SCHEDULE_RULES, ACTIVE_GROUP_RULES) — every pair
-// below that names "retinol" is expanded to all five synonyms, since
-// CONFLICT_PAIRS does plain substring matching against product text and
-// a product literally named "Tretinoin" or "Retinoid Cream" never
-// contains the substring "retinol". Caught during the 30-day schedule
-// simulation for step_order_repair_v2: Ret-Avit (Tretinoin 0.05%) landed
-// the same PM night as the Vinopure Salicylic exfoliant serum because
-// the old single-entry pairs only matched the literal word "retinol",
-// silently missing this user's actual prescription tretinoin.
-const RETINOID_SYNONYMS = ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol"];
-const expandRetinoidPairs = pairs => pairs.flatMap(([a, b]) => a === "retinol" || b === "retinol" ? RETINOID_SYNONYMS.map(syn => a === "retinol" ? [syn, b] : [a, syn]) : [[a, b]]);
-const CONFLICT_PAIRS = expandRetinoidPairs([["glycolic acid", "retinol"], ["aha", "retinol"], ["bha", "retinol"], ["lactic acid", "retinol"], ["salicylic acid", "retinol"], ["vitamin c", "retinol"], ["ascorbic acid", "retinol"], ["benzoyl peroxide", "retinol"], ["benzoyl peroxide", "vitamin c"], ["glycolic acid", "lactic acid"], ["aha", "bha"], ["niacinamide", "vitamin c"], ["self tan", "retinol"], ["self tan", "glycolic acid"], ["self tan", "aha"], ["self tan", "bha"], ["self tan", "lactic acid"], ["self tan", "salicylic acid"], ["self tan", "mandelic acid"], ["self tan", "vitamin c"], ["self tan", "ascorbic acid"], ["self tan", "benzoyl peroxide"]]);
-// Same-active exclusivity: unlike CONFLICT_PAIRS (which only warns about
-// DIFFERENT actives clashing), this catches two products that share the
-// SAME active landing in the same session on the same day — e.g. two
-// separate niacinamide serums, or two retinoids. Text-matched against
-// name/notes, same as AUTO_SCHEDULE_RULES, so a product only gets tagged
-// if its active is actually named somewhere in its genericName, brandName,
-// or notes — a product whose notes don't mention its active won't be
-// caught here.
-const ACTIVE_GROUP_RULES = [{
-  group: "retinoid",
-  keywords: ["retinol", "retinoid", "tretinoin", "adapalene", "bakuchiol", "retinal", "retinyl"]
-}, {
-  group: "vitamin-c",
-  keywords: ["vitamin c", "ascorbic acid"]
-}, {
-  group: "niacinamide",
-  keywords: ["niacinamide"]
-}, {
-  // Renamed in spirit from "acid-exfoliant" — now covers physical/
-  // mechanical exfoliants too (microfoliant, powder exfoliant, enzyme
-  // peels), not just named acids. Layering a physical scrub on top of an
-  // AHA/BHA/salicylic product the same night is the classic
-  // over-exfoliation mistake, and the narrower acid-only list let it
-  // through since a product like "Daily Microfoliant" never mentions any
-  // acid by name.
-  group: "acid-exfoliant",
-  keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "lactic", "salicylic acid", "salicylic", "mandelic acid", "mandelic", "exfoliant", "exfoliating", "exfoliator", "microfoliant", "peeling", "enzyme"]
-}];
-const classifyActiveGroups = p => {
-  const text = [p.genericName, p.brandName].filter(Boolean).join(" ");
-  return ACTIVE_GROUP_RULES.filter(rule => rule.keywords.some(kw => hasKeyword(text, kw))).map(rule => rule.group);
+// ─── CATEGORY-DRIVEN CONFLICT SYSTEM ───────────────────────────────────────
+// Previously, "does this product conflict with a retinoid" was answered by
+// THREE separately-maintained keyword lists (CONFLICT_PAIRS' own literal
+// acid-name pairs, ACTIVE_GROUP_RULES' keyword-per-group list, and
+// productCategories/INGREDIENT_CATEGORIES used for Products-tab display) —
+// and they drifted out of sync with each other. Concretely: ACTIVE_GROUP_
+// RULES' exfoliant group already included "microfoliant" (fixed for a
+// rest-night-cooldown gap), but CONFLICT_PAIRS — the list that actually
+// gates same-night placement — only ever paired retinol against literal
+// acid names ("glycolic acid", "aha", "bha", "lactic acid", "salicylic
+// acid"), never "microfoliant"/"exfoliant"/"peeling"/generic exfoliant
+// terms. Result: Dermalogica Daily Microfoliant (a real, currently-
+// scheduled "best"-tagged exfoliant) could land on the SAME PM night as a
+// retinoid with nothing blocking it, because the one list that actually
+// enforces same-night conflicts never recognized it as an exfoliant at
+// all — this is what the "retinol and exfoliant same night" report traced
+// back to. Same root cause as the earlier "détox" vs "detox" accent bug in
+// RANK_DATA: a hand-maintained keyword list that has to be kept in sync
+// with everything else by hand, and eventually isn't.
+// Fix: ONE canonical per-product-TYPE classifier (productCategories,
+// already used for Products-tab grouping — the most complete list, since
+// it already covers "microfoliant", "a313"/"pommade" as retinoid synonyms,
+// etc.) now drives conflict detection too. Conflicts are declared between
+// CATEGORIES, not per-product keyword pairs, so adding a new product never
+// requires hand-writing a new pair — it only requires that the product's
+// name contains something productCategories already recognizes (and if it
+// doesn't, the fix is adding one keyword in ONE place, not four).
+const CATEGORY_CONFLICT_PAIRS = [["acid-exfoliant", "retinoid"], ["vitamin-c", "retinoid"], ["benzoyl", "retinoid"], ["benzoyl", "vitamin-c"], ["niacinamide", "vitamin-c"]];
+// Self-tan conflicts with anything that speeds cell turnover or otherwise
+// disrupts an even fake-tan finish — every active EXCEPT niacinamide
+// (gentle, doesn't accelerate turnover), preserving the exact coverage the
+// old CONFLICT_PAIRS list had (it paired "self tan" against every acid/
+// retinol/vitamin-c/benzoyl variant it knew about, but never niacinamide).
+const SELFTAN_CONFLICTS_WITH = ["retinoid", "acid-exfoliant", "vitamin-c", "benzoyl"];
+// Same-active exclusivity: unlike a cross-category conflict (different
+// actives clashing), this catches two products that share the SAME active
+// landing in the same session on the same day — e.g. two separate
+// niacinamide serums, or two retinoids. Now derived directly from
+// productCategories (the canonical classifier — see comment above) instead
+// of a separately-maintained keyword list, so it can't drift out of sync
+// with what Products-tab categorization already recognizes.
+const ACTIVE_CATEGORY_GROUP_NAMES = {
+  retinoid: "retinoid",
+  vitaminc: "vitamin-c",
+  niacinamide: "niacinamide",
+  exfoliant: "acid-exfoliant",
+  benzoyl: "benzoyl"
 };
+const classifyActiveGroups = p => Array.from(productCategories(p)).map(cat => ACTIVE_CATEGORY_GROUP_NAMES[cat]).filter(Boolean);
+// Adds the pseudo-group "selftan" (not a productCategories ingredient
+// category — self-tan is a product TYPE, from detectType, not an active
+// ingredient) so a single function can answer "what does this product need
+// checked against a conflict table for" regardless of whether the conflict
+// driver is an active ingredient or a product type like self-tan.
+const conflictGroupsFor = p => {
+  const groups = classifyActiveGroups(p);
+  if (detectType(p) === "selftan") groups.push("selftan");
+  return groups;
+};
+const groupsConflict = (groupsA, groupsB) => {
+  if (groupsA.includes("selftan") && groupsB.some(g => SELFTAN_CONFLICTS_WITH.includes(g))) return true;
+  if (groupsB.includes("selftan") && groupsA.some(g => SELFTAN_CONFLICTS_WITH.includes(g))) return true;
+  return CATEGORY_CONFLICT_PAIRS.some(([a, b]) => groupsA.includes(a) && groupsB.includes(b) || groupsA.includes(b) && groupsB.includes(a));
+};
+const productsConflict = (p1, p2) => groupsConflict(conflictGroupsFor(p1), conflictGroupsFor(p2));
 // Not every redundancy is a chemical-conflict risk. Two toners or two
 // hydrating essences on the same night won't irritate skin the way two
 // retinoids would, but they're still doing the same job twice for no
 // added benefit — layering toner→essence→serum is a normal, intentional
 // routine; TWO toners or TWO essences the same night is just clutter.
 // These "layer" types piggyback on the exact same one-per-day mechanism
-// as ACTIVE_GROUP_RULES via classifySingletonGroups below, rather than
+// as classifyActiveGroups via classifySingletonGroups below, rather than
 // needing a second, separately-maintained enforcement path.
 const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer"]);
 // A "serum" that carries no treatment active of its own — just a
@@ -290,7 +310,7 @@ const detectType = p => {
   if (/spf|sunscreen|sun serum|sun cream/.test(hay)) return "spf";
   if (/self.?tan/.test(hay)) return "selftan";
   if (/lip/.test(hay)) return "lip";
-  if (/mask/.test(hay)) return "mask";
+  if (/mask|masque/.test(hay)) return "mask";
   if (/cleansing oil|cleansing balm/.test(hay)) return "cleanser_oil";
   if (/cleanser|cleansing|face wash|facial wash|soap|foaming/.test(hay)) return "cleanser";
   const cats = productCategories(p);
@@ -712,11 +732,7 @@ const scoreCandidate = (product, {
   // 4. Conflict penalty against what's already active in this session today.
   otherActiveProducts.forEach(other => {
     if (other.id === product.id) return;
-    const otherText = [other.genericName, other.brandName].filter(Boolean).join(" ").toLowerCase();
-    CONFLICT_PAIRS.forEach(([a, b]) => {
-      const matchesPair = hasKeyword(text, a) && hasKeyword(otherText, b) || hasKeyword(text, b) && hasKeyword(otherText, a);
-      if (matchesPair) score -= 60;
-    });
+    if (productsConflict(product, other)) score -= 60;
   });
 
   // 5. Overdue bonus for products already on a schedule — mildly favors
@@ -750,11 +766,9 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
   }
   if (mode !== "add") return [];
   const others = prods.filter(p => p.id !== newProduct.id);
-  const newText = [newProduct.genericName, newProduct.brandName].filter(Boolean).join(" ").toLowerCase();
   const newGroups = classifySingletonGroups(newProduct);
   others.forEach(other => {
-    const otherText = [other.genericName, other.brandName].filter(Boolean).join(" ").toLowerCase();
-    const hardConflict = CONFLICT_PAIRS.some(([a, b]) => hasKeyword(newText, a) && hasKeyword(otherText, b) || hasKeyword(newText, b) && hasKeyword(otherText, a));
+    const hardConflict = productsConflict(newProduct, other);
     const singletonClash = classifySingletonGroups(other).some(g => newGroups.includes(g));
     if (hardConflict || singletonClash) bumpIds.add(other.id);
   });
@@ -782,16 +796,14 @@ const pcolor = p => {
   if (g.includes("serum") || g.includes("vitamin c") || g.includes("niacinamide")) return PRODUCT_COLORS.serum;
   if (g.includes("moisturizer") || g.includes("cream") || g.includes("lotion")) return PRODUCT_COLORS.moisturizer;
   if (g.includes("spf") || g.includes("sunscreen")) return PRODUCT_COLORS.spf;
-  if (g.includes("mask")) return PRODUCT_COLORS.mask;
+  if (g.includes("mask") || g.includes("masque")) return PRODUCT_COLORS.mask;
   return PRODUCT_COLORS.default;
 };
-const productMatches = (p, kw) => [p.genericName, p.brandName].some(f => f && f.toLowerCase().includes(kw.toLowerCase()));
 const findConflicts = products => {
   const out = [];
-  for (let i = 0; i < products.length; i++) for (let j = i + 1; j < products.length; j++) for (const [a, b] of CONFLICT_PAIRS) if (productMatches(products[i], a) && productMatches(products[j], b) || productMatches(products[i], b) && productMatches(products[j], a)) out.push({
+  for (let i = 0; i < products.length; i++) for (let j = i + 1; j < products.length; j++) if (productsConflict(products[i], products[j])) out.push({
     p1: products[i],
-    p2: products[j],
-    pair: [a, b]
+    p2: products[j]
   });
   return out;
 };
@@ -2046,11 +2058,28 @@ const ConcernsSelector = ({
 //      gets scheduled if the FULL group fits in the remaining budget; it is
 //      never split across days.
 const SESSION_CAP = 5;
-// Israel's PM exfoliant/mask rotation (see exfoliant_mask_rotation_v1 and
-// step 2d in buildSessionSchedule below). Three weekly night-slots, each
-// with its own 7-day-recurring anchor date (offsetDays from a shared
-// rotationAnchor set once by the migration): two draw from his three
-// chemical exfoliants, one draws from his two clay masks.
+// Israel's PM exfoliant/mask rotation (see step 2d in buildSessionSchedule
+// below). Three weekly night-slots, each with its own 7-day-recurring
+// anchor date, drawing from whichever of his scheduled products fall into
+// the matching category — two slots for "exfoliant"-category products, one
+// for "mask"-category. ROTATION_CATEGORY_ROLES below is what makes
+// membership automatic: a category listed there pulls in EVERY scheduled
+// product of that type by detectType(p), not by an explicit per-product
+// flag. Previously, membership required the exfoliant_mask_rotation_v1
+// migration to hand-set `inRotationPool`/`rotationRole` on each specific
+// product by name — meaning every new exfoliant or mask needed its own
+// migration just to be wired into the pool it obviously already belongs
+// to by type. Generalizing this is the actual fix for "when I add a new
+// product, make the routine adjust for it": a newly-added scheduled
+// exfoliant or mask now joins the rotation automatically, no migration
+// required. `p.inRotationPool`/`p.rotationRole` are still honored if
+// present (backward compatible with profiles that already have them set
+// from the original migration) but are no longer the only path in.
+const ROTATION_CATEGORY_ROLES = {
+  exfoliant: "exfoliant",
+  mask: "mask"
+};
+const rotationRoleFor = p => p.rotationRole || ROTATION_CATEGORY_ROLES[detectType(p)];
 const ROTATION_SLOTS = [{
   role: "exfoliant",
   offsetDays: 0
@@ -2084,12 +2113,14 @@ const groupRotating = rotating => {
 };
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = []) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
-  // Rotation-pool members (see ROTATION_SLOTS / step 2d below) are
+  // Rotation-pool members (see ROTATION_CATEGORY_ROLES / step 2d below) are
   // scheduled exclusively through the dedicated pool logic — excluding
   // them here stops them from ALSO being picked up by the normal
-  // due-date/group machinery, which would double-schedule them.
-  const poolMembers = sessionProducts.filter(p => p.inRotationPool);
-  const rotating = sessionProducts.filter(p => !p.isOneOff && !p.inRotationPool);
+  // due-date/group machinery, which would double-schedule them. Membership
+  // is now category-derived (rotationRoleFor) rather than requiring an
+  // explicit inRotationPool flag — see ROTATION_CATEGORY_ROLES comment.
+  const poolMembers = sessionProducts.filter(p => rotationRoleFor(p));
+  const rotating = sessionProducts.filter(p => !p.isOneOff && !rotationRoleFor(p));
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
   const groups = groupRotating(rotating);
   const lastServed = {};
@@ -2114,7 +2145,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // barrier skin, independent of same-night stacking.
   let lastActiveDate = null;
   // A product counts toward the rest-night cooldown if it carries a
-  // retinoid or an acid/mechanical exfoliant active (ACTIVE_GROUP_RULES'
+  // retinoid or an acid/mechanical exfoliant active (classifyActiveGroups'
   // "retinoid" and "acid-exfoliant" groups) — clay masks, hydrating
   // essences, toners, and moisturizers don't trigger it, since they're not
   // the barrier-stressing actives the rest night is protecting against.
@@ -2177,15 +2208,17 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     // Active-ingredient / layer-singleton groups already guaranteed for
     // today (one-offs, pins, carried-over skips) — everything below won't
     // stack a same-active or same-layer-type product on top of these.
-    // Also tracks each placed product's own text so CONFLICT_PAIRS
-    // (cross-active clashes like retinol+salicylic-acid, or self-tan+any
-    // active) can be checked against everything placed today.
+    // Also tracks each placed product's own conflict-relevant category
+    // groups (via conflictGroupsFor — see the CATEGORY-DRIVEN CONFLICT
+    // SYSTEM comment near CATEGORY_CONFLICT_PAIRS) so cross-active clashes
+    // like retinoid+exfoliant, or self-tan+any active, can be checked
+    // against everything placed today.
     const placedGroups = new Set();
-    const placedTexts = [];
+    const placedConflictGroups = new Set();
     const registerPlaced = prod => {
       if (!prod) return;
       classifySingletonGroups(prod).forEach(g => placedGroups.add(g));
-      placedTexts.push([prod.genericName, prod.brandName].filter(Boolean).join(" ").toLowerCase());
+      conflictGroupsFor(prod).forEach(g => placedConflictGroups.add(g));
       // Rest-night tracking: registerPlaced is the one hook every placement
       // path (one-offs, pins, carried skips, the foundational cleanser/
       // moisturizer slot, rotation-pool exfoliant/mask nights, and the
@@ -2195,10 +2228,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       if (isActiveIngredient(prod)) lastActiveDate = ds;
     };
     placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
-    const conflictsWithToday = prod => {
-      const hay = [prod.genericName, prod.brandName].filter(Boolean).join(" ").toLowerCase();
-      return CONFLICT_PAIRS.some(([a, b]) => hay.includes(a) && placedTexts.some(t => t.includes(b)) || hay.includes(b) && placedTexts.some(t => t.includes(a)));
-    };
+    const conflictsWithToday = prod => groupsConflict(conflictGroupsFor(prod), Array.from(placedConflictGroups));
     // 2c. Guaranteed foundational steps: cleanser and moisturizer claim a
     // slot whenever something in that category is due, ahead of the
     // general competitive fill below — a routine meant to always run 5
@@ -2262,24 +2292,33 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       }
     });
     // 2d. Rotation pools (currently used for one thing: Israel's PM
-    // exfoliant/mask nights). Members are flagged inRotationPool by the
-    // exfoliant_mask_rotation_v1 migration and are excluded from the
-    // normal `rotating`/`groups` machinery entirely — this is their only
-    // path to being scheduled. Three weekly PM night-slots are defined in
-    // ROTATION_SLOTS, each anchored to its own date (staggered a few days
-    // apart, same spacing the three exfoliants used to have individually)
-    // and recurring every 7 days from that anchor. Two slots draw from the
-    // "exfoliant" role (his three chemical exfoliants) and one draws from
-    // the "mask" role (his two clay masks) — so the routine keeps exactly
-    // the three PM exfoliant/mask nights it always had, but one of them is
-    // now reliably a clay mask instead of a fixed dedicated exfoliant.
+    // exfoliant/mask nights). Membership is category-derived via
+    // rotationRoleFor (see ROTATION_CATEGORY_ROLES comment above) and
+    // members are excluded from the normal `rotating`/`groups` machinery
+    // entirely — this is their only path to being scheduled. Three weekly
+    // PM night-slots are defined in ROTATION_SLOTS, each anchored to its
+    // own date (staggered a few days apart, same spacing the three
+    // exfoliants used to have individually) and recurring every 7 days
+    // from that anchor. Two slots draw from the "exfoliant" role (his
+    // chemical exfoliants) and one draws from the "mask" role (his clay
+    // masks) — so the routine keeps exactly the three PM exfoliant/mask
+    // nights it always had, but one of them is now reliably a clay mask
+    // instead of a fixed dedicated exfoliant.
     // Each slot's winner is whichever eligible member has the LOWEST
     // servedCount so far (ties broken by stepOrder then id) — since
     // servedCount is simulated fresh from epoch every time the schedule is
     // rebuilt, this naturally rotates fairly: no member is ever
     // permanently favored or permanently skipped.
     if (poolMembers.length) {
-      const anchor = poolMembers[0].rotationAnchor;
+      // Anchor continuity: prefer an existing product's rotationAnchor (set
+      // by the original exfoliant_mask_rotation_v1 migration on Israel's
+      // real profile) so newly-auto-joining pool members don't shift which
+      // day-of-week the established rotation lands on. Falls back to epoch
+      // (stable/deterministic for this schedule build, unlike a live
+      // "today" value) only for a profile that's never had that migration
+      // run at all.
+      const anchorSource = poolMembers.find(p => p.rotationAnchor);
+      const anchor = anchorSource ? anchorSource.rotationAnchor : epoch;
       ROTATION_SLOTS.forEach(slot => {
         if (dayList.length >= cap) return; // same deliberate allowance pattern as the cleanser/moisturizer guarantee above — a foundational slot can push slightly past cap, but not compound further once already there
         const slotDate = addDaysStr(anchor, slot.offsetDays);
@@ -2291,7 +2330,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // (weight 1) before it stops winning ties — over many cycles this
         // gives higher-ranked products a higher effective frequency
         // instead of splitting the slot evenly across all members.
-        const candidates = poolMembers.filter(p => p.rotationRole === slot.role && !placedIds.has(p.id)).map(p => {
+        const candidates = poolMembers.filter(p => rotationRoleFor(p) === slot.role && !placedIds.has(p.id)).map(p => {
           const weight = RANK_WEIGHT[getProductRank(p).tag] || 1;
           return {
             p,
