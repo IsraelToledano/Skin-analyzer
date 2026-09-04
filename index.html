@@ -488,9 +488,9 @@ const RANK_DATA = [
     general: "Clay draws out excess oil and impurities by absorption; caffeine adds a mild tightening/de-puffing effect; grape polyphenols contribute antioxidant support. A once-weekly purifying mask like this is a standard, low-irritation way to keep pores and oil under control between actives nights.",
     alternatives: [{ name: "Kiehl's Rare Earth Deep Pore Cleansing Masque", relation: "as-good", note: "The other commonly-cited benchmark clay mask — comparable, not better." }] },
   { id: 32, match: ["melaxin"], tag: "good",
-    reason: "Legitimate K-beauty cosmeceutical brand, not a novelty knockoff — charcoal (35,000ppm) for sebum absorption plus a peptide/tannin complex for pore tightening fits your oiliness/blackheads/pores concerns. Held at \"good\" rather than \"best\" for two reasons: the full INCI list isn't published on any retailer page I could check (brand pages just list headline actives, not the complete ingredient list, so fragrance/EO content can't be verified the way your other products have been), and it's now a FOURTH pore-purifying clay mask in your library alongside Aztec Secret Clay, Beauty of Joseon Pore Mask, and the just-added Caudalie Masque Instant Détox — you only need one in weekly rotation. Added here UNSCHEDULED, same as Aztec/BoJ, rather than displacing Caudalie's slot. Swap it in for Caudalie if you'd rather try it, or verify the ingredient list to move it to \"best.\"",
-    general: "Peptides in a rinse-off mask act briefly at the surface (not left-on/absorbed the way a serum peptide is), so their firming claim is modest at this contact time; the charcoal-for-sebum and tannin-for-pore-tightening mechanisms are the parts doing most of the actual work here.",
-    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "as-good", note: "Same purifying-clay-mask role, already in your weekly rotation with a fully verified ingredient list — no need to run both." }] }
+    reason: "Legitimate K-beauty cosmeceutical brand, not a novelty knockoff — charcoal (35,000ppm) for sebum absorption fits your oiliness/blackheads/pores concerns. Held at \"good\" rather than \"best\" now that the full INCI is confirmed (from the brand's own official site, not a retailer listing): it contains added Fragrance and Lavender Flower Extract — the same EO-derived-content pattern already flagged and avoided in Caudalie's gel cleanser. Rinse-off contact time limits the exposure, but it's a real mark against it, not a hypothetical one. It's also the FOURTH pore-purifying clay mask in your library alongside Aztec Secret Clay, Beauty of Joseon Pore Mask, and the just-added Caudalie Masque Instant Détox (fragrance-free) — you only need one in weekly rotation. Added here UNSCHEDULED, same as Aztec/BoJ, rather than displacing Caudalie's slot.",
+    general: "The \"4 types of peptides\" headline claim checks out on paper (sh-Oligopeptide-1, sh-Polypeptide-1, sh-Oligopeptide-2, sh-Polypeptide-22 all appear in the INCI) but each is dosed at 0.3ppb — parts per billion, a trace/marketing-level amount with no realistic firming effect at that concentration. The charcoal-for-sebum and clay/tannin-for-pore-tightening mechanisms are what's actually doing the work here; the peptide claim is decorative.",
+    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Same purifying-clay-mask role, already in your weekly rotation, and confirmed fragrance/EO-free — no reason to run this one alongside or instead of it." }] }
 ];
 const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
@@ -1631,13 +1631,14 @@ const MIGRATIONS = [{
   // Explicit request (photo of the box): add Dr.Melaxin Dubai Peptide Clay
   // Mask, 100g (RANK_DATA id 32, tagged "good" — see that entry for the
   // full reasoning). Added to the product LIBRARY only — scheduled: false,
-  // same as Aztec Secret Clay / Beauty of Joseon Pore Mask. This is now the
-  // fourth pore-purifying clay mask in the library; the just-added Caudalie
-  // Masque Instant Détox already fills that weekly PM mask slot at "best"
-  // tier with a fully verified ingredient list, so this one is left
-  // unscheduled rather than displacing it or creating a second competing
-  // mask slot. Reactivate manually (and swap out Caudalie, don't stack
-  // both) if preferred. No-op if a matching product already exists.
+  // same as Aztec Secret Clay / Beauty of Joseon Pore Mask. Full INCI
+  // (pulled from the brand's own site) confirmed it contains Fragrance +
+  // Lavender Flower Extract, and its "4 peptides" are dosed at 0.3ppb each
+  // (marketing-level, not functionally meaningful) — so this stays
+  // unscheduled behind the just-added Caudalie Masque Instant Détox, which
+  // fills the same weekly PM mask slot and is confirmed fragrance/EO-free.
+  // Reactivate manually if preferred, but don't stack both. No-op if a
+  // matching product already exists.
   apply: profile => {
     const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
     const isMelaxinClayMask = p => hay(p).includes("melaxin");
@@ -1647,7 +1648,7 @@ const MIGRATIONS = [{
       id: 33,
       genericName: "Dubai Peptide Clay Mask",
       brandName: "Dr.Melaxin",
-      notes: "100g color-changing clay mask — charcoal (35,000ppm), 4-peptide + tannin complex, pistacia vera seed extract, cocoa extract. Pore tightening & sebum control. Left unscheduled: overlaps with the just-added Caudalie Masque Instant Détox, which already fills the weekly purifying-clay-mask slot with a fully verified ingredient list.",
+      notes: "100g color-changing clay mask — charcoal (35,000ppm), tannin complex, pistacia vera seed extract, cocoa extract. Pore tightening & sebum control. Contains added Fragrance + Lavender Flower Extract (confirmed via brand's full INCI); the 4 peptides are dosed at 0.3ppb each, a marketing-level trace amount. Left unscheduled: Caudalie Masque Instant Détox already fills the weekly purifying-clay-mask slot, fragrance/EO-free.",
       scheduled: false
     };
     return {
