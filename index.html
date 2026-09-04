@@ -2058,37 +2058,68 @@ const ConcernsSelector = ({
 //      gets scheduled if the FULL group fits in the remaining budget; it is
 //      never split across days.
 const SESSION_CAP = 5;
-// Israel's PM exfoliant/mask rotation (see step 2d in buildSessionSchedule
-// below). Three weekly night-slots, each with its own 7-day-recurring
-// anchor date, drawing from whichever of his scheduled products fall into
-// the matching category — two slots for "exfoliant"-category products, one
-// for "mask"-category. ROTATION_CATEGORY_ROLES below is what makes
-// membership automatic: a category listed there pulls in EVERY scheduled
-// product of that type by detectType(p), not by an explicit per-product
-// flag. Previously, membership required the exfoliant_mask_rotation_v1
-// migration to hand-set `inRotationPool`/`rotationRole` on each specific
-// product by name — meaning every new exfoliant or mask needed its own
-// migration just to be wired into the pool it obviously already belongs
-// to by type. Generalizing this is the actual fix for "when I add a new
-// product, make the routine adjust for it": a newly-added scheduled
-// exfoliant or mask now joins the rotation automatically, no migration
-// required. `p.inRotationPool`/`p.rotationRole` are still honored if
-// present (backward compatible with profiles that already have them set
-// from the original migration) but are no longer the only path in.
+// Israel's PM exfoliant/mask/retinoid rotation (see step 2d in
+// buildSessionSchedule below). Weekly night-slots, each with its own
+// 7-day-recurring anchor date, drawing from whichever of his scheduled
+// products fall into the matching category. ROTATION_CATEGORY_ROLES below
+// is what makes membership automatic: a category listed there pulls in
+// EVERY scheduled product of that type by detectType(p), not by an
+// explicit per-product flag. Previously, membership required the
+// exfoliant_mask_rotation_v1 migration to hand-set `inRotationPool`/
+// `rotationRole` on each specific product by name — meaning every new
+// exfoliant or mask needed its own migration just to be wired into the
+// pool it obviously already belongs to by type. Generalizing this is the
+// actual fix for "when I add a new product, make the routine adjust for
+// it": a newly-added scheduled exfoliant, mask, or retinoid now joins the
+// rotation automatically, no migration required. `p.inRotationPool`/
+// `p.rotationRole` are still honored if present (backward compatible with
+// profiles that already have them set from the original migration) but
+// are no longer the only path in.
+// Retinoid was added to the pool (previously each retinoid product just
+// had its own individual frequency field) at only 2 slots/week, not 3 —
+// exfoliant(2) + mask(1) already use 3 slots, and a derm-holistic audit
+// once found actives landing on ~5 of 7 PM nights with too few genuine
+// rest nights; capping retinoid at 2 keeps the total at 5 active-capable
+// slots/week rather than pushing it to 6.
 const ROTATION_CATEGORY_ROLES = {
   exfoliant: "exfoliant",
-  mask: "mask"
+  mask: "mask",
+  retinoid: "retinoid"
 };
 const rotationRoleFor = p => p.rotationRole || ROTATION_CATEGORY_ROLES[detectType(p)];
+// Within-tier priority override: RANK_WEIGHT only varies by RANK_DATA tag
+// (best/good/bad), but Israel has an explicit, locked-in preference for
+// prescription tretinoin over OTC retinol even though both are tagged
+// "best" — the tag alone can't express that finer distinction. Checked by
+// keyword (not product id) so it isn't tied to one specific row, and
+// stated as a small, visible override table rather than folded silently
+// into RANK_WEIGHT itself, so it's obvious this is a deliberate exception,
+// not a general rule about tretinoin vs retinol.
+const POOL_PRIORITY_MULTIPLIERS = [{
+  keyword: "tretinoin",
+  multiplier: 2
+}];
+const poolWeightFor = p => {
+  const weight = RANK_WEIGHT[getProductRank(p).tag] || 1;
+  const text = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+  const override = POOL_PRIORITY_MULTIPLIERS.find(o => hasKeyword(text, o.keyword));
+  return override ? weight * override.multiplier : weight;
+};
 const ROTATION_SLOTS = [{
   role: "exfoliant",
   offsetDays: 0
+}, {
+  role: "retinoid",
+  offsetDays: 1
 }, {
   role: "exfoliant",
   offsetDays: 2
 }, {
   role: "mask",
   offsetDays: 4
+}, {
+  role: "retinoid",
+  offsetDays: 5
 }];
 const daysBetween = (aStr, bStr) => {
   const a = parseDate(aStr),
@@ -2325,13 +2356,13 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         const offset = daysBetween(slotDate, ds);
         if (offset < 0 || offset % 7 !== 0) return;
         // Weighted fairness: divide each candidate's servedCount by its
-        // RANK_WEIGHT before comparing, so a "best"-tagged member (weight
-        // 2) needs twice as many real serves as a "good"-tagged one
-        // (weight 1) before it stops winning ties — over many cycles this
-        // gives higher-ranked products a higher effective frequency
-        // instead of splitting the slot evenly across all members.
+        // pool weight before comparing (RANK_WEIGHT, plus any
+        // POOL_PRIORITY_MULTIPLIERS override — see poolWeightFor) so a
+        // higher-weighted member needs proportionally more real serves
+        // before it stops winning ties — over many cycles this gives it a
+        // higher effective frequency instead of splitting the slot evenly.
         const candidates = poolMembers.filter(p => rotationRoleFor(p) === slot.role && !placedIds.has(p.id)).map(p => {
-          const weight = RANK_WEIGHT[getProductRank(p).tag] || 1;
+          const weight = poolWeightFor(p);
           return {
             p,
             served: servedCount[p.id] || 0,
