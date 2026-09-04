@@ -482,7 +482,11 @@ const RANK_DATA = [
   { id: 30, match: ["ordinary", "glycolic"], tag: "good",
     reason: "Effective glycolic exfoliant for blackheads, pores, and texture — folded into your existing exfoliant rotation (alongside Dermalogica Microfoliant and Some By Mi AHA.BHA.PHA Toner) rather than added as a separate weekly night, so total acid-exfoliant exposure per week doesn't increase.",
     general: "Glycolic acid is the smallest AHA molecule, so it penetrates fastest and exfoliates most aggressively of the common AHAs — effective for texture and blackheads, but the highest irritation potential of the acid family on combination or sensitive-leaning skin.",
-    alternatives: [{ name: "Some By Mi AHA.BHA.PHA Toner (already in your routine)", relation: "as-good", note: "No swap needed — already folded into your rotation. If irritation shows up, this gentler PHA-inclusive blend is the fallback within the same rotation pool." }] }
+    alternatives: [{ name: "Some By Mi AHA.BHA.PHA Toner (already in your routine)", relation: "as-good", note: "No swap needed — already folded into your rotation. If irritation shows up, this gentler PHA-inclusive blend is the fallback within the same rotation pool." }] },
+  { id: 31, match: ["caudalie", "instant d"], tag: "best",
+    reason: "A purifying clay mask (clay + caffeine + grape) squarely targeting oiliness, blackheads, and enlarged pores — from the same clinical-tier Caudalie line as your Vinopure toner/serum, with no fragrance or essential-oil red flags. Makes Aztec Secret Clay and Beauty of Joseon Pore Mask fully redundant if either is ever reactivated — same purifying-clay-mask role, no need to run more than one.",
+    general: "Clay draws out excess oil and impurities by absorption; caffeine adds a mild tightening/de-puffing effect; grape polyphenols contribute antioxidant support. A once-weekly purifying mask like this is a standard, low-irritation way to keep pores and oil under control between actives nights.",
+    alternatives: [{ name: "Kiehl's Rare Earth Deep Pore Cleansing Masque", relation: "as-good", note: "The other commonly-cited benchmark clay mask — comparable, not better." }] }
 ];
 const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
@@ -1583,6 +1587,39 @@ const MIGRATIONS = [{
         }
         return next;
       })
+    };
+  }
+}, {
+  id: "add_caudalie_detox_mask_v1",
+  // Explicit request (photo of the actual tube): add Caudalie Masque
+  // Instant Détox, 75mL — purifying clay/coffee/grape mask (RANK_DATA id
+  // 31, tagged "best"). Same pattern as add_caudalie_vinohydra_mask_v1:
+  // standalone PM weekly mask at the canonical mask stepOrder (60), NOT
+  // folded into exfoliant_mask_rotation_v1's rotation pool — that pool is
+  // specifically the acid-exfoliant nights paired with Aztec Clay/Pore
+  // Mask, and while this is also a clay mask, Israel already has a
+  // standalone (non-pooled) mask precedent with VinoHydra, so this follows
+  // that same simpler standalone slot rather than reopening the rotation
+  // pool's membership. No-op if a matching product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isDetoxMask = p => hay(p).includes("caudalie") && hay(p).includes("instant d");
+    const products = profile.products || [];
+    if (products.some(isDetoxMask)) return profile;
+    const newProduct = {
+      id: 32,
+      genericName: "Masque Instant Détox",
+      brandName: "Caudalie",
+      notes: "75mL purifying clay mask — clay, coffee, grape. Standalone weekly PM mask, not part of the acid-exfoliant rotation pool. Tightens pores, absorbs sebum.",
+      scheduled: true,
+      session: "pm",
+      frequency: "weekly",
+      stepOrder: 60,
+      nextDate: todayStr()
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
     };
   }
 }];
