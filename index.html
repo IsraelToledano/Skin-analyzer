@@ -280,7 +280,20 @@ const PRODUCT_COLORS = {
 };
 // Word-boundary keyword match — avoids false positives like "pha" matching
 // inside "Pharma".
-const hasKeyword = (text, kw) => new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`, "i").test(text);
+// Trailing boundary is deliberately looser than the leading one: a digit
+// right after a keyword ("spf50", "aha30", "bha2", "niacinamide10%") is
+// still a real, distinct ingredient mention, not a false-positive
+// continuation into a longer unrelated word the way a trailing LETTER
+// would be ("aha" inside "ahead", "pha" inside "phase") — so only a
+// following letter blocks the match; a following digit doesn't. Confirmed
+// live gaps from the stricter version: "SPF50" never matched "spf" (so an
+// SPF product got zero anti-aging concern-score credit and could
+// misclassify via findRule's generic serum/essence rule instead of the
+// dedicated SPF rule), and "AHA30+BHA2" never matched "aha"/"bha" via
+// productCategories (masked only because "peeling" happened to also be in
+// that particular product's name — a same-family product without that
+// extra word would've gone completely uncategorized).
+const hasKeyword = (text, kw) => new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z]|$)`, "i").test(text);
 // Every keyword-matching text builder below deliberately uses ONLY
 // genericName + brandName, NOT p.notes. notes often contains internal
 // migration-tracking prose (e.g. "...exfoliant_mask_rotation_v1...") whose
@@ -678,7 +691,16 @@ const CONCERN_KEYWORDS = {
   "Oiliness": ["niacinamide", "salicylic", "bha", "clay", "tea tree", "charcoal", "mattif", "sebum", "witch hazel"],
   "Blackheads / Whiteheads": ["salicylic", "bha", "clay", "charcoal", "retinol", "retinoid", "tretinoin", "adapalene"],
   "Enlarged pores": ["niacinamide", "salicylic", "bha", "clay", "retinol", "retinoid", "tretinoin"],
-  "Scarring": ["vitamin c", "ascorbic acid", "retinol", "retinoid", "tretinoin", "niacinamide", "rosehip", "centella", "snail", "azelaic"]
+  "Scarring": ["vitamin c", "ascorbic acid", "retinol", "retinoid", "tretinoin", "niacinamide", "rosehip", "centella", "snail", "azelaic"],
+  // Added alongside the existing four per Israel's explicit request — his
+  // stated main concerns are enlarged pores AND anti-aging, but anti-aging
+  // wasn't tracked anywhere before this, so products actually chosen for
+  // that purpose (retinoids, vitamin C, peptides, SPF) were never getting
+  // scored for it. SPF included deliberately: daily sun protection is the
+  // single highest-leverage anti-aging intervention there is, more so than
+  // any treatment serum, and it deserves credit here even though it's not
+  // an "active" in the retinoid/vitamin-C sense.
+  "Anti-aging": ["retinol", "retinoid", "tretinoin", "adapalene", "vitamin c", "ascorbic acid", "peptide", "collagen", "antioxidant", "spf", "sunscreen", "niacinamide"]
 };
 // Heavy occlusives: comedogenic-leaning, mineral-oil-style bases. Nightly
 // full-face use fights an oily/pore-prone routine rather than helping it.
@@ -893,7 +915,7 @@ const EMPTY_PROFILE = {
   id: 1,
   name: "My Profile",
   type: "Combination",
-  concerns: ["Oiliness", "Blackheads / Whiteheads", "Enlarged pores", "Scarring"],
+  concerns: ["Oiliness", "Blackheads / Whiteheads", "Enlarged pores", "Scarring", "Anti-aging"],
   notes: "",
   products: [],
   analysisText: "",
@@ -1745,6 +1767,25 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "add_antiaging_concern_v1",
+  // Explicit request: Israel's stated main concerns are enlarged pores AND
+  // anti-aging, but the profile's concerns list (used by scoreCandidate's
+  // concern-match scoring, see CONCERN_KEYWORDS) only ever tracked
+  // Oiliness/Blackheads/Enlarged pores/Scarring — anti-aging was never in
+  // there, so retinoids/vitamin C/SPF were never getting scored credit for
+  // the concern they're actually chosen for. Appends "Anti-aging" to
+  // whatever concerns list already exists rather than overwriting it, so
+  // any concern he's added or removed via the Profile tab since this
+  // migration was written is preserved. No-op if already present.
+  apply: profile => {
+    const concerns = profile.concerns || [];
+    if (concerns.includes("Anti-aging")) return profile;
+    return {
+      ...profile,
+      concerns: [...concerns, "Anti-aging"]
     };
   }
 }];
