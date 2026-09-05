@@ -834,6 +834,83 @@ const findConflicts = products => {
   return out;
 };
 
+// ─── BREAKOUT TRIGGER ANALYSIS ──────────────────────────────────────────────
+// Pure, testable function: given a breakout date, looks back through what
+// was actually LOGGED DONE (not the theoretical schedule — a skipped step
+// was never on the skin) and ranks which recently-used products are the
+// most plausible triggers. Exists because "what caused this?" kept getting
+// answered by guessing from the schedule/recent conversation instead of
+// checking the real usage log — this makes that check mechanical and
+// repeatable instead of a one-off manual review each time it comes up.
+// Scoring is deliberately simple and legible (each factor maps to one
+// plain-language reason string) rather than a black-box weighted formula —
+// the point is to give Israel a short, explainable list of "here's what
+// stands out," not a definitive diagnosis; skin reactions have real causes
+// this app has zero visibility into (diet, hormones, sweat, touching your
+// face, pillowcases, weather), and the reasons list makes that legibility
+// visible rather than presenting a score as certainty.
+const BREAKOUT_LOOKBACK_DAYS = 10;
+const analyzeBreakoutTriggers = (breakoutDate, profile) => {
+  const products = profile.products || [];
+  const logs = profile.logs || [];
+  const productById = new Map(products.map(p => [p.id, p]));
+
+  // First-ever-done date per product, from the FULL log history (not just
+  // the lookback window below) — a product used for months isn't "new"
+  // just because the lookback window happens to start after its first use.
+  const firstUseDate = {};
+  logs.filter(l => l.done).forEach(l => {
+    if (!firstUseDate[l.productId] || l.date < firstUseDate[l.productId]) {
+      firstUseDate[l.productId] = l.date;
+    }
+  });
+  const candidates = new Map(); // productId -> best-scoring occurrence in the window
+  logs.filter(l => l.done).forEach(l => {
+    const daysBefore = daysBetween(l.date, breakoutDate);
+    if (daysBefore < 0 || daysBefore > BREAKOUT_LOOKBACK_DAYS) return;
+    const product = productById.get(l.productId);
+    if (!product) return; // deleted/renamed product no longer in the library
+    const category = detectType(product);
+    const isFirstEverUse = firstUseDate[l.productId] === l.date;
+    const rank = getProductRank(product);
+    const isStrongActive = category === "exfoliant" || category === "retinoid";
+    const isPeelTier = product.frequency === "monthly" || hasKeyword([product.genericName, product.brandName].filter(Boolean).join(" "), "peel");
+    const reasons = [];
+    let score = 0;
+    // Recency: irritation/breakouts from a trigger typically show up 1-3
+    // days later, not instantly and not only after a week — so the curve
+    // peaks slightly before "same day" rather than favoring same-day use.
+    score += Math.max(0, 6 - Math.abs(daysBefore - 1.5));
+    reasons.push(daysBefore === 0 ? "Used the same day" : `Used ${daysBefore} day${daysBefore === 1 ? "" : "s"} before`);
+    if (isFirstEverUse) {
+      score += 15;
+      reasons.push("First time this product was used");
+    }
+    if (isStrongActive) {
+      score += 10;
+      reasons.push(category === "exfoliant" ? "Exfoliant — raises irritation/purging risk" : "Retinoid — raises irritation/purging risk");
+    }
+    if (isPeelTier) {
+      score += 8;
+      reasons.push("Peel-strength / intensive-treatment product");
+    }
+    if (rank.tag === "bad") {
+      score += 5;
+      reasons.push("Already flagged \u201cbad\u201d in this app \u2014 redundant or higher-irritation option");
+    }
+    const existing = candidates.get(l.productId);
+    if (!existing || score > existing.score) {
+      candidates.set(l.productId, {
+        product,
+        score,
+        reasons,
+        daysBefore
+      });
+    }
+  });
+  return Array.from(candidates.values()).sort((a, b) => b.score - a.score).slice(0, 5);
+};
+
 // ─── DATE HELPERS ──────────────────────────────────────────────────────────────
 // Local-component based (NOT toISOString/UTC) so the date string always
 // matches the device's own calendar day, regardless of timezone offset or
@@ -922,7 +999,8 @@ const EMPTY_PROFILE = {
   analysisGaps: [],
   logs: [],
   skinImgs: [],
-  pins: [] // manual per-day swap/add overrides — see buildSessionSchedule step 1b
+  pins: [], // manual per-day swap/add overrides — see buildSessionSchedule step 1b
+  breakouts: [] // { id, date, locations, severity, notes } — see analyzeBreakoutTriggers
 };
 
 // ─── STORAGE (real localStorage — persists properly on this device) ───────────
@@ -2103,6 +2181,209 @@ const ConcernsSelector = ({
       }
     }, on ? "✓ " : "", c);
   })))));
+};
+
+// ─── BREAKOUT LOG ───────────────────────────────────────────────────────────
+// Log a breakout with a date/location/severity, and see a computed,
+// legible "likely triggers" list per entry (via analyzeBreakoutTriggers)
+// pulled from what was actually logged done in the days before — instead
+// of that question only ever getting answered ad hoc by reconstructing
+// recent usage from memory/conversation each time it comes up.
+const SEVERITY_OPTIONS = ["Mild", "Moderate", "Severe"];
+const BreakoutLogCard = ({
+  profile,
+  onUpdate
+}) => {
+  const [showForm, setShowForm] = useState(false);
+  const [date, setDate] = useState(() => dateStr(appToday()));
+  const [locations, setLocations] = useState("");
+  const [severity, setSeverity] = useState("Mild");
+  const [notes, setNotes] = useState("");
+  const breakouts = (profile.breakouts || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+  const addBreakout = () => {
+    if (!locations.trim()) return;
+    const entry = {
+      id: Date.now() + Math.random(),
+      date,
+      locations: locations.trim(),
+      severity,
+      notes: notes.trim()
+    };
+    onUpdate({
+      breakouts: [...(profile.breakouts || []), entry]
+    });
+    setLocations("");
+    setNotes("");
+    setSeverity("Mild");
+    setShowForm(false);
+  };
+  const removeBreakout = id => {
+    onUpdate({
+      breakouts: (profile.breakouts || []).filter(b => b.id !== id)
+    });
+  };
+  return /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: "'Cormorant Garamond',serif",
+      fontSize: 20,
+      fontWeight: 700,
+      color: T.text
+    }
+  }, "Breakout Log"), /*#__PURE__*/React.createElement(Btn, {
+    variant: "soft",
+    onClick: () => setShowForm(s => !s),
+    style: {
+      padding: "6px 14px",
+      fontSize: 12
+    }
+  }, showForm ? "Cancel" : "+ Log a breakout")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: T.muted,
+      marginBottom: showForm || breakouts.length ? 14 : 0
+    }
+  }, "Log where and when, and I can check what was actually applied in the days before."), showForm && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: T.faint,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 14,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+    style: {
+      marginBottom: 4
+    }
+  }, "Date"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: date,
+    onChange: e => setDate(e.target.value),
+    style: selSty
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+    style: {
+      marginBottom: 4
+    }
+  }, "Severity"), /*#__PURE__*/React.createElement("select", {
+    value: severity,
+    onChange: e => setSeverity(e.target.value),
+    style: selSty
+  }, SEVERITY_OPTIONS.map(s => /*#__PURE__*/React.createElement("option", {
+    key: s
+  }, s))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+    style: {
+      marginBottom: 4
+    }
+  }, "Where"), /*#__PURE__*/React.createElement(TxtIn, {
+    value: locations,
+    onChange: setLocations,
+    placeholder: "e.g. left cheek, chin"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
+    style: {
+      marginBottom: 4
+    }
+  }, "Notes (optional)"), /*#__PURE__*/React.createElement(TxtIn, {
+    value: notes,
+    onChange: setNotes,
+    placeholder: "Anything else worth noting"
+  })), /*#__PURE__*/React.createElement(Btn, {
+    onClick: addBreakout,
+    disabled: !locations.trim(),
+    style: {
+      alignSelf: "flex-start"
+    }
+  }, "Save")), breakouts.map(b => {
+    const triggers = analyzeBreakoutTriggers(b.date, profile);
+    const headerLeft = /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 700,
+        fontSize: 14,
+        color: T.text
+      }
+    }, b.date, " \u2014 ", b.locations), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.muted,
+        marginTop: 2
+      }
+    }, b.severity, b.notes ? ` \u00b7 ${b.notes}` : ""));
+    const headerRow = /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-start"
+      }
+    }, headerLeft, /*#__PURE__*/React.createElement("button", {
+      onClick: () => removeBreakout(b.id),
+      style: {
+        background: "none",
+        border: "none",
+        color: T.muted,
+        cursor: "pointer",
+        fontSize: 16,
+        padding: 4
+      }
+    }, "\u2715"));
+    const triggerLabel = /*#__PURE__*/React.createElement(Lbl, {
+      style: {
+        fontSize: 10,
+        marginBottom: 4
+      }
+    }, "Likely triggers, from what was actually logged done");
+    const triggerList = triggers.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.muted,
+        fontStyle: "italic"
+      }
+    }, "Nothing in the 10 days before stands out \u2014 could be unrelated to the routine (diet, hormones, environment).") : triggers.map((t, i) => {
+      const nameSpan = /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontWeight: 700
+        }
+      }, i + 1, ". ", t.product.brandName, " ", t.product.genericName);
+      const reasonSpan = /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: T.muted
+        }
+      }, " \u2014 ", t.reasons.join("; "));
+      return /*#__PURE__*/React.createElement("div", {
+        key: t.product.id,
+        style: {
+          fontSize: 12,
+          color: T.text,
+          marginBottom: 4
+        }
+      }, nameSpan, reasonSpan);
+    });
+    const triggerBlock = /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 8
+      }
+    }, triggerLabel, triggerList);
+    return /*#__PURE__*/React.createElement("div", {
+      key: b.id,
+      style: {
+        borderTop: `1px solid ${T.border}`,
+        paddingTop: 12,
+        marginTop: 12
+      }
+    }, headerRow, triggerBlock);
+  }));
 };
 
 // ─── ROTATING SESSION SCHEDULER ────────────────────────────────────────────
@@ -4824,7 +5105,10 @@ function App() {
           onChange: c => update({
             concerns: c
           })
-        })), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+        })), /*#__PURE__*/React.createElement(BreakoutLogCard, {
+          profile: profile,
+          onUpdate: update
+        }), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
           style: {
             fontFamily: "'Cormorant Garamond',serif",
             fontSize: 20,
