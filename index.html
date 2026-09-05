@@ -439,7 +439,7 @@ const RANK_DATA = [
     reason: "A second niacinamide product alongside Yeouth Niacinamide Serum — redundant, and the app's own conflict checker already flags niacinamide+niacinamide as duplicated actives.",
     general: "Saffron-extract serums are marketed on antioxidant/anti-inflammatory claims from safranal and crocin. The evidence base is thinner than for niacinamide, and commercial formulas like this one are often paired with niacinamide anyway.",
     alternatives: [{ name: "Yeouth Niacinamide Serum (already in your routine)", relation: "better", note: "Already covers the niacinamide role. If you want extra antioxidant support instead, a plain vitamin C or green tea extract serum would add something Yeouth doesn't already cover, rather than duplicating it." }] },
-  { id: 13, match: ["yeouth"], tag: "best",
+  { id: 13, match: ["yeouth", "niacinamide"], tag: "best",
     reason: "Clean, dedicated niacinamide serum well matched to oiliness and enlarged pores.",
     general: "Niacinamide reduces oil production, refines the look of pores, and calms inflammation and redness — one of the best-evidenced ingredients for oily, pore-prone, blemish-scarred skin.",
     alternatives: [{ name: "The Ordinary Niacinamide 10% + Zinc 1%", relation: "as-good", note: "The other commonly-cited benchmark for niacinamide — comparable, not better." }] },
@@ -510,7 +510,11 @@ const RANK_DATA = [
   { id: 32, match: ["melaxin"], tag: "good",
     reason: "Legitimate K-beauty cosmeceutical brand, not a novelty knockoff — charcoal (35,000ppm) for sebum absorption fits your oiliness/blackheads/pores concerns. Held at \"good\" rather than \"best\" now that the full INCI is confirmed (from the brand's own official site, not a retailer listing): it contains added Fragrance and Lavender Flower Extract — the same EO-derived-content pattern already flagged and avoided in Caudalie's gel cleanser. Rinse-off contact time limits the exposure, but it's a real mark against it, not a hypothetical one. It's also the FOURTH pore-purifying clay mask in your library alongside Aztec Secret Clay, Beauty of Joseon Pore Mask, and the just-added Caudalie Masque Instant Détox (fragrance-free) — you only need one in weekly rotation. Added here UNSCHEDULED, same as Aztec/BoJ, rather than displacing Caudalie's slot.",
     general: "The \"4 types of peptides\" headline claim checks out on paper (sh-Oligopeptide-1, sh-Polypeptide-1, sh-Oligopeptide-2, sh-Polypeptide-22 all appear in the INCI) but each is dosed at 0.3ppb — parts per billion, a trace/marketing-level amount with no realistic firming effect at that concentration. The charcoal-for-sebum and clay/tannin-for-pore-tightening mechanisms are what's actually doing the work here; the peptide claim is decorative.",
-    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Same purifying-clay-mask role, already in your weekly rotation, and confirmed fragrance/EO-free — no reason to run this one alongside or instead of it." }] }
+    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Same purifying-clay-mask role, already in your weekly rotation, and confirmed fragrance/EO-free — no reason to run this one alongside or instead of it." }] },
+  { id: 33, match: ["yeouth", "glycolic acid 30"], tag: "good",
+    reason: "A legitimate 30% glycolic peel — full INCI (water, glycolic acid, octoxynol-10, phenoxyethanol, hydroxyethylcellulose, propylene glycol, glycerin, retinyl palmitate, cucumber/chamomile/green tea/comfrey extracts) has no fragrance and no red flags. Held at \"good\" rather than \"best\" for two reasons: it's functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — both are occasional, professional-strength intensive peels, and you only need one — and this one quietly adds retinyl palmitate (a weak vitamin-A ester) on top of the glycolic acid, meaning it straddles both your exfoliant and retinoid categories at once, something the app's category system tracks as \"exfoliant\" only (glycolic acid is the dominant, first-listed active), leaving the minor retinoid contribution unaccounted for by the dedicated tretinoin/retinol slots. Added to the library UNSCHEDULED — you already have this exact role filled.",
+    general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Scheduling this weekly, the way your gentler exfoliants run, would be a real over-exfoliation risk; if used at all, it belongs at the same monthly-or-less cadence as your existing Ordinary peel, not the 2x/week gentle-exfoliant pool. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
+    alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "as-good", note: "Same occasional-intensive-peel role, already in your routine at the appropriate low cadence — no need to add a second one." }] }
 ];
 const getProductRank = p => {
   const byId = RANK_DATA.find(r => r.id === p.id);
@@ -1707,6 +1711,35 @@ const MIGRATIONS = [{
       genericName: "Dubai Peptide Clay Mask",
       brandName: "Dr.Melaxin",
       notes: "100g color-changing clay mask — charcoal (35,000ppm), tannin complex, pistacia vera seed extract, cocoa extract. Pore tightening & sebum control. Contains added Fragrance + Lavender Flower Extract (confirmed via brand's full INCI); the 4 peptides are dosed at 0.3ppb each, a marketing-level trace amount. Left unscheduled: Caudalie Masque Instant Détox already fills the weekly purifying-clay-mask slot, fragrance/EO-free.",
+      scheduled: false
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "add_yeouth_glycolic_peel_v1",
+  // Explicit request (iHerb product page screenshot): add Yeouth Glycolic
+  // Acid 30% Gel Peel, 2 fl oz (RANK_DATA id 33, tagged "good" — see that
+  // entry for full reasoning). Added to the product LIBRARY only —
+  // scheduled: false. Redundant with The Ordinary AHA30+BHA2 Peeling
+  // Solution already scheduled at the appropriate occasional cadence for a
+  // peel this strong; also quietly contains retinyl palmitate alongside
+  // the glycolic acid, which the app's single-category system would file
+  // under "exfoliant" only, leaving that minor retinoid contribution
+  // untracked by the dedicated tretinoin/retinol pool slots. No-op if a
+  // matching product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isYeouthGlycolicPeel = p => hay(p).includes("yeouth") && hay(p).includes("glycolic acid 30");
+    const products = profile.products || [];
+    if (products.some(isYeouthGlycolicPeel)) return profile;
+    const newProduct = {
+      id: 34,
+      genericName: "Glycolic Acid 30% Gel Peel",
+      brandName: "Yeouth",
+      notes: "2 fl oz (60ml) glycolic acid peel with retinyl palmitate, green tea. Peel-strength (30%), timed application + rinse, not a leave-on product. Redundant with The Ordinary AHA30+BHA2 Peeling Solution (already scheduled) — same occasional-intensive-peel role. Left unscheduled.",
       scheduled: false
     };
     return {
