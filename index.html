@@ -2075,24 +2075,20 @@ const SESSION_CAP = 5;
 // `p.rotationRole` are still honored if present (backward compatible with
 // profiles that already have them set from the original migration) but
 // are no longer the only path in.
-// Retinoid (specifically tretinoin) was added to the pool at 3 dedicated
-// slots/week — Israel's explicit ask: tretinoin should reliably run 3
-// nights/week, a firm number, not "3 slots shared by weight with OTC
-// retinol" (that version converged to ~2.4/week for tretinoin once
-// retinol's share of the pool was netted out). So tretinoin gets its own
-// pool role ("tretinoin", not the generic "retinoid" detectType category)
-// with all 3 slots to itself — retinol is deliberately NOT a pool member;
-// it keeps its own individual `frequency` field and competes through the
-// normal general-fill path instead. This still can't land on the same
-// night as tretinoin (classifySingletonGroups' "retinoid" active-group
-// still covers both, so the general fill won't stack a second retinoid
-// product on a night the pool already placed one) or on an exfoliant
-// night (CATEGORY_CONFLICT_PAIRS still applies regardless of pool
-// membership) — it just fills in on retinoid-free, exfoliant-free nights
-// on its own schedule instead of drawing from tretinoin's dedicated slots.
-// Combined with exfoliant(2) + mask(1), the pool is now 6 active-capable
-// slots/week; the earlier "keep it at 5 for genuine rest nights" reasoning
-// is superseded by this explicit ask.
+// Retinoid gets two dedicated pool roles, per Israel's explicit numbers:
+// tretinoin at 2 slots/week, OTC retinol at 1 slot/week — each with its
+// own reserved slots rather than competing by weight (a weighted-
+// competition version was tried first and converged to the wrong absolute
+// numbers once rest-night deferrals and the two products' relative share
+// were netted out; dedicated slots per role give each an exact,
+// deterministic weekly count instead). "tretinoin" role = any retinoid-
+// category product whose name mentions tretinoin; "retinol" role = any
+// other retinoid-category product (i.e. OTC retinol). The two still can't
+// land on the same night as each other (classifySingletonGroups' shared
+// "retinoid" active-group blocks that) or on an exfoliant night
+// (CATEGORY_CONFLICT_PAIRS applies regardless of pool membership).
+// Combined with exfoliant(2) + mask(1) + tretinoin(2) + retinol(1), the
+// pool is 6 active-capable slots/week, leaving one rest night.
 const ROTATION_CATEGORY_ROLES = {
   exfoliant: "exfoliant",
   mask: "mask"
@@ -2100,7 +2096,9 @@ const ROTATION_CATEGORY_ROLES = {
 const rotationRoleFor = p => {
   if (p.rotationRole) return p.rotationRole;
   const type = detectType(p);
-  if (type === "retinoid" && hasKeyword([p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase(), "tretinoin")) return "tretinoin";
+  if (type === "retinoid") {
+    return hasKeyword([p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase(), "tretinoin") ? "tretinoin" : "retinol";
+  }
   return ROTATION_CATEGORY_ROLES[type];
 };
 const poolWeightFor = p => RANK_WEIGHT[getProductRank(p).tag] || 1;
@@ -2114,7 +2112,7 @@ const ROTATION_SLOTS = [{
   role: "exfoliant",
   offsetDays: 2
 }, {
-  role: "tretinoin",
+  role: "retinol",
   offsetDays: 3
 }, {
   role: "mask",
