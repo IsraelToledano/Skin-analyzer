@@ -2075,50 +2075,52 @@ const SESSION_CAP = 5;
 // `p.rotationRole` are still honored if present (backward compatible with
 // profiles that already have them set from the original migration) but
 // are no longer the only path in.
-// Retinoid was added to the pool (previously each retinoid product just
-// had its own individual frequency field) at only 2 slots/week, not 3 —
-// exfoliant(2) + mask(1) already use 3 slots, and a derm-holistic audit
-// once found actives landing on ~5 of 7 PM nights with too few genuine
-// rest nights; capping retinoid at 2 keeps the total at 5 active-capable
-// slots/week rather than pushing it to 6.
+// Retinoid (specifically tretinoin) was added to the pool at 3 dedicated
+// slots/week — Israel's explicit ask: tretinoin should reliably run 3
+// nights/week, a firm number, not "3 slots shared by weight with OTC
+// retinol" (that version converged to ~2.4/week for tretinoin once
+// retinol's share of the pool was netted out). So tretinoin gets its own
+// pool role ("tretinoin", not the generic "retinoid" detectType category)
+// with all 3 slots to itself — retinol is deliberately NOT a pool member;
+// it keeps its own individual `frequency` field and competes through the
+// normal general-fill path instead. This still can't land on the same
+// night as tretinoin (classifySingletonGroups' "retinoid" active-group
+// still covers both, so the general fill won't stack a second retinoid
+// product on a night the pool already placed one) or on an exfoliant
+// night (CATEGORY_CONFLICT_PAIRS still applies regardless of pool
+// membership) — it just fills in on retinoid-free, exfoliant-free nights
+// on its own schedule instead of drawing from tretinoin's dedicated slots.
+// Combined with exfoliant(2) + mask(1), the pool is now 6 active-capable
+// slots/week; the earlier "keep it at 5 for genuine rest nights" reasoning
+// is superseded by this explicit ask.
 const ROTATION_CATEGORY_ROLES = {
   exfoliant: "exfoliant",
-  mask: "mask",
-  retinoid: "retinoid"
+  mask: "mask"
 };
-const rotationRoleFor = p => p.rotationRole || ROTATION_CATEGORY_ROLES[detectType(p)];
-// Within-tier priority override: RANK_WEIGHT only varies by RANK_DATA tag
-// (best/good/bad), but Israel has an explicit, locked-in preference for
-// prescription tretinoin over OTC retinol even though both are tagged
-// "best" — the tag alone can't express that finer distinction. Checked by
-// keyword (not product id) so it isn't tied to one specific row, and
-// stated as a small, visible override table rather than folded silently
-// into RANK_WEIGHT itself, so it's obvious this is a deliberate exception,
-// not a general rule about tretinoin vs retinol.
-const POOL_PRIORITY_MULTIPLIERS = [{
-  keyword: "tretinoin",
-  multiplier: 2
-}];
-const poolWeightFor = p => {
-  const weight = RANK_WEIGHT[getProductRank(p).tag] || 1;
-  const text = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
-  const override = POOL_PRIORITY_MULTIPLIERS.find(o => hasKeyword(text, o.keyword));
-  return override ? weight * override.multiplier : weight;
+const rotationRoleFor = p => {
+  if (p.rotationRole) return p.rotationRole;
+  const type = detectType(p);
+  if (type === "retinoid" && hasKeyword([p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase(), "tretinoin")) return "tretinoin";
+  return ROTATION_CATEGORY_ROLES[type];
 };
+const poolWeightFor = p => RANK_WEIGHT[getProductRank(p).tag] || 1;
 const ROTATION_SLOTS = [{
   role: "exfoliant",
   offsetDays: 0
 }, {
-  role: "retinoid",
+  role: "tretinoin",
   offsetDays: 1
 }, {
   role: "exfoliant",
   offsetDays: 2
 }, {
+  role: "tretinoin",
+  offsetDays: 3
+}, {
   role: "mask",
   offsetDays: 4
 }, {
-  role: "retinoid",
+  role: "tretinoin",
   offsetDays: 5
 }];
 const daysBetween = (aStr, bStr) => {
@@ -2356,11 +2358,14 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         const offset = daysBetween(slotDate, ds);
         if (offset < 0 || offset % 7 !== 0) return;
         // Weighted fairness: divide each candidate's servedCount by its
-        // pool weight before comparing (RANK_WEIGHT, plus any
-        // POOL_PRIORITY_MULTIPLIERS override — see poolWeightFor) so a
-        // higher-weighted member needs proportionally more real serves
-        // before it stops winning ties — over many cycles this gives it a
-        // higher effective frequency instead of splitting the slot evenly.
+        // RANK_WEIGHT (poolWeightFor) before comparing, so a higher-ranked
+        // member needs proportionally more real serves before it stops
+        // winning ties — over many cycles this gives it a higher effective
+        // frequency instead of splitting the slot evenly. Only matters
+        // when a role has more than one eligible member (e.g. the
+        // "exfoliant" role, split across three products) — "tretinoin" and
+        // "mask" currently have one scheduled member each, so this is a
+        // no-op for them until that changes.
         const candidates = poolMembers.filter(p => rotationRoleFor(p) === slot.role && !placedIds.has(p.id)).map(p => {
           const weight = poolWeightFor(p);
           return {
@@ -2372,13 +2377,19 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         if (!candidates.length) return;
         const winner = candidates[0].p;
         if (conflictsWithToday(winner)) return;
-        // Rest-night cooldown: if the winner carries an active ingredient
-        // and an active was already placed YESTERDAY, defer this slot
-        // rather than stacking two active nights back to back. Deferring
-        // (not skipping servedCount) means the slot's own weekly cadence
-        // just shifts by a day next time it's due, rather than being
-        // silently dropped for a whole cycle.
-        if (isActiveIngredient(winner) && lastActiveDate && daysBetween(lastActiveDate, ds) === 1) return;
+        // No rest-night cooldown here (unlike the general fill below) —
+        // ROTATION_SLOTS' offsetDays ARE the deliberate spacing design.
+        // With retinoid now at 3 slots/week alongside exfoliant(2) +
+        // mask(1) = 6 active-capable slots in a 7-day week, a strict
+        // "never back-to-back" rule mathematically cannot fit more than 4
+        // non-adjacent nights in 7 days — applying it here silently
+        // starved tretinoin down to ~1 night/week net of deferrals, well
+        // short of the 3/week Israel explicitly asked for. The
+        // conflictsWithToday check above still blocks a genuine same-day
+        // stack (e.g. retinoid + exfoliant both landing today); running
+        // actives on adjacent CALENDAR days is a real but much smaller
+        // concern, and one Israel is now making deliberately by asking for
+        // this density rather than hitting it by accident.
         dayList.push({
           productId: winner.id,
           carried: false
