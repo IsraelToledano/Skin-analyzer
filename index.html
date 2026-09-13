@@ -405,133 +405,177 @@ const CATEGORY_COLORS = {
 // combination/oily/blemish-scarred profile, not just swap brands.
 const RANK_DATA = [
   { id: 1, match: ["jason", "vitamin e"], tag: "bad",
-    reason: "Heavy, occlusive, very high-dose vitamin E oil — comedogenic risk for combination/pore-prone skin and works against your blackhead/pore goals.",
+    pros: ["Vitamin E is a genuine antioxidant that supports scar/stretch-mark healing in principle"],
+    cons: ["Very heavy, occlusive oil — real comedogenic risk on combination/pore-prone skin", "Works against your blackhead/pore goals rather than for them", "Redundant with Bio-Oil, which already covers this exact role in a lighter formula"],
     general: "Pure vitamin E oil is a very heavy, occlusive antioxidant oil. It's often used for scar or stretch-mark massage, but its thickness makes it comedogenic on oilier, pore-prone skin.",
     alternatives: [{ name: "Bio-Oil (already in your routine)", relation: "better", note: "Same 'oil for scarring' role in a lighter, less occlusive blend — you already have it scheduled twice-weekly, so this one is unnecessary." }] },
   { id: 2, match: ["la roche-posay", "retinol"], tag: "best",
-    reason: "Well-suited retinol for blackheads, pores, and scarring at an appropriate weekly frequency.",
+    pros: ["Well-suited retinol for blackheads, pores, and scarring", "Appropriate weekly frequency for an OTC retinol", "Speeds cell turnover and evens texture/scarring with consistent use"],
+    cons: [],
     general: "Over-the-counter retinol (a vitamin A derivative) speeds cell turnover, unclogs pores, and evens texture and scarring over months of consistent use. It needs gradual introduction and daily SPF to avoid irritation and sun sensitivity.",
     alternatives: [{ name: "Differin Gel (adapalene 0.1%)", relation: "as-good", note: "Same mechanism and strength tier, widely available OTC — switching to it wouldn't change your results." }] },
   { id: 3, match: ["a313"], tag: "bad",
-    reason: "A third retinoid product alongside your existing retinol and tretinoin — redundant and raises irritation risk without added benefit.",
+    pros: ["A genuine retinoid-family ingredient (vitamin A palmitate) with real efficacy for scarring/keratosis on its own"],
+    cons: ["A third retinoid product on top of your existing retinol AND tretinoin — pure redundancy", "Raises irritation risk without adding any benefit over what you already have"],
     general: "A313 is a high-dose retinol-ester ointment (vitamin A palmitate), originally formulated for scarring and keratosis. It's a genuine retinoid in its own right, not a mild adjunct.",
     alternatives: [{ name: "Ret-Avit Tretinoin (already in your routine)", relation: "better", note: "Your prescription tretinoin already covers this exact mechanism more effectively; a third retinoid on top only adds irritation risk." }] },
   { id: 4, match: ["ret-avit"], tag: "best",
-    reason: "Prescription-strength tretinoin — the most clinically effective active for blackheads, pores, and scarring.",
+    pros: ["Prescription-strength tretinoin — the gold-standard, most clinically validated retinoid", "The single most effective active you have for blackheads, pores, and scarring"],
+    cons: ["The strongest and most irritating retinoid in your routine — needs careful frequency management (already handled by its dedicated 2x/week slot)"],
     general: "Prescription tretinoin is the gold-standard retinoid: the most clinically validated option for acne, texture, and post-acne marks, but also the strongest and most irritating of the retinoid family.",
     alternatives: [{ name: "Differin Gel (adapalene 0.1%)", relation: "as-good", note: "The only OTC retinoid in a comparable efficacy tier — not an upgrade over what you're already using." }] },
   { id: 5, match: ["pura", "vitamin c"], tag: "good",
-    reason: "Effective for scarring, but 20% is a high, unbuffered concentration that can irritate combination skin — a dermatologist-tier formula built for oily/blemish-prone skin specifically would work at least as well with meaningfully less irritation.",
+    pros: ["Effective for scarring and brightening"],
+    cons: ["20% unbuffered L-ascorbic acid is a harsh, high concentration", "Oxidizes quickly once opened", "Commonly irritates combination/sensitive skin", "Only addresses scarring — doesn't help oiliness or blackheads the way a formula built for oily skin would"],
     general: "Unbuffered L-ascorbic acid at 20% is a harsh, high concentration. It's effective for brightening and scarring but oxidizes quickly once opened and commonly irritates sensitive or combination skin.",
-    alternatives: [{ name: "SkinCeuticals Silymarin CF", relation: "better", note: "A genuinely higher tier: 5% L-ascorbic acid (far gentler than Pura d'or's unbuffered 20%) paired with salicylic acid and silymarin — this is SkinCeuticals' vitamin C formulated specifically for oily/blemish-prone skin, so it addresses scarring, oiliness, and blackheads at once instead of just scarring. Clinically-backed, dermatologist-office-tier formulation, not a budget/derivative alternative." }] },
+    alternatives: [{ name: "SkinCeuticals Silymarin CF", relation: "better", note: "A genuinely higher tier: 5% L-ascorbic acid (far gentler than Pura d'or's unbuffered 20%) paired with salicylic acid and silymarin — SkinCeuticals' vitamin C formulated specifically for oily/blemish-prone skin, so it addresses scarring, oiliness, and blackheads at once instead of just scarring. Clinically-backed, dermatologist-office-tier formulation, not a budget/derivative alternative." }] },
   { id: 6, match: ["dermalogica", "microfoliant"], tag: "best",
-    reason: "Gentle enzyme/physical exfoliant well suited to blackheads and pores.",
+    pros: ["Gentle enzyme/physical exfoliant well suited to blackheads and pores", "Short contact time (rinse-off, activated with water) limits irritation compared to a leave-on acid"],
+    cons: [],
     general: "A rice-enzyme and salicylic-acid powder activated with water — gentler than a leave-on acid because contact time is short, good for regular pore and texture maintenance.",
     alternatives: [{ name: "Kate Somerville ExfoliKate Cleanser", relation: "as-good", note: "A comparable enzyme exfoliant — works similarly to this one, not worth switching." }] },
   { id: 7, match: ["caudalie", "purifying toner"], tag: "best",
-    reason: "Salicylic-acid toner well matched to oiliness and blackheads.",
+    pros: ["Salicylic acid (BHA) — oil-soluble, so it actually penetrates into pores rather than just working on the surface", "Well matched to oiliness and blackheads specifically"],
+    cons: [],
     general: "A salicylic-acid (BHA) toner. BHA is oil-soluble, so it penetrates into pores to clear blackheads and control oil more effectively than a water-soluble AHA would for this skin type.",
     alternatives: [{ name: "Paula's Choice Skin Perfecting 2% BHA Liquid", relation: "as-good", note: "The other commonly-cited gold standard here — comparable, not better." }] },
   { id: 8, match: ["skin1004", "cleansing oil"], tag: "good",
-    reason: "Good deep-clean texture for combination skin. It does contain fragrance (bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool) — real, but rinse-off, and now that it's a weekly deep-clean rather than a nightly step (the gel cleanser handles nightly base cleansing), total exposure is low enough that swapping brands is optional rather than a priority.",
+    pros: ["Good deep-clean texture for combination skin", "Rinse-off and weekly (not nightly) use meaningfully lowers fragrance-exposure risk"],
+    cons: ["Contains fragrance: bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool"],
     general: "Oil cleansers dissolve sunscreen, sebum, and makeup as the first step of a double cleanse, without stripping skin the way a single harsh wash would. Being rinse-off, fragrance in an oil cleanser carries lower risk than in a leave-on product, and lower still at weekly instead of nightly frequency.",
     alternatives: [{ name: "CeraVe Hydrating Foaming Oil Cleanser", relation: "better", note: "Worth being upfront: most other well-known 'gentle'/'clean' cleansing oils (Dermalogica PreCleanse, Biossance Squalane + Antioxidant, Then I Met You Living Cleansing Balm) still rely on essential oils for scent — not actually fragrance-free despite the marketing. This CeraVe is genuinely fragrance- and essential-oil-free, dermatologist-developed, squalane/ceramide-based. A real formulation upgrade if you want to eliminate the fragrance entirely, though at weekly use the current SKIN1004 is a reasonable keep too." }] },
   { id: 9, match: ["some by mi"], tag: "good",
-    reason: "Effective exfoliating toner, but one of several acid-exfoliant products in rotation — consider consolidating to reduce over-exfoliation risk.",
+    pros: ["Effective multi-acid (glycolic/salicylic/PHA) exfoliating toner", "Broad but relatively mild exfoliation"],
+    cons: ["One of four acid-exfoliant products in your rotation — cumulative exposure across several different acids raises barrier-irritation risk without a proportional benefit over relying on 1–2 used consistently"],
     general: "A multi-acid exfoliating toner combining glycolic, salicylic, and gluconolactone (a PHA) for broad but relatively mild exfoliation.",
-    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "better", note: "A more targeted BHA already in your rotation. You have four acid exfoliants rotating in total; cumulative acid exposure across several different acids raises barrier-irritation risk without a proportional benefit over relying on 1–2 used consistently." }] },
+    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "better", note: "A more targeted BHA already in your rotation, and one fewer acid product to keep buying — consolidating to 1–2 consistent acids reduces overlap without losing efficacy." }] },
   { id: 10, match: ["vinohydra"], tag: "best",
-    reason: "Hydrating mask that supports combination skin's drier patches.",
+    pros: ["Hydrating mask that supports combination skin's drier patches", "A supportive, non-active step — no irritation risk"],
+    cons: [],
     general: "A hydrating cream mask meant to replenish moisture rather than treat blemishes — a supportive, non-active step.",
     alternatives: [{ name: "Laneige Water Sleeping Mask", relation: "as-good", note: "A comparable ceramide/hyaluronic hydrating mask — functionally interchangeable with this one." }] },
   { id: 11, match: ["st. tropez"], tag: "good",
-    reason: "Cosmetic self-tanner — no treatment value for your skin concerns, but not counterproductive either.",
+    pros: ["No treatment value for your skin concerns, but not counterproductive either — purely cosmetic with no real downside"],
+    cons: ["DHA can react unpredictably if layered with active ingredients the same night (already handled by the app's conflict rules)"],
     general: "Self-tanners use DHA to stain the skin's surface layer — purely cosmetic. DHA can react unpredictably if layered with active ingredients the same night, which is why it's already flagged in the app's conflict list.",
-    alternatives: [{ name: "Isle of Paradise Self-Tanning Drops", relation: "as-good", note: "A comparable gradual-tan DHA product — purely a cosmetic choice. Keep it on its own night away from actives, as the app already enforces." }] },
+    alternatives: [{ name: "Isle of Paradise Self-Tanning Drops", relation: "no-better-option", note: "A comparable gradual-tan DHA product. Cosmetic self-tanners don't have a clinical-efficacy hierarchy the way active ingredients do — there's no verified 'better for your skin' version of this, just alternate scent/finish preferences." }] },
   { id: 12, match: ["mars", "safranal"], tag: "bad",
-    reason: "A second niacinamide product alongside Yeouth Niacinamide Serum — redundant, and the app's own conflict checker already flags niacinamide+niacinamide as duplicated actives.",
+    pros: ["Saffron extract has some antioxidant/anti-inflammatory marketing backing, though the evidence base is thinner than niacinamide's"],
+    cons: ["A second niacinamide product duplicating Yeouth Niacinamide Serum", "Redundant — the app's own conflict checker already flags niacinamide+niacinamide as duplicated actives"],
     general: "Saffron-extract serums are marketed on antioxidant/anti-inflammatory claims from safranal and crocin. The evidence base is thinner than for niacinamide, and commercial formulas like this one are often paired with niacinamide anyway.",
     alternatives: [{ name: "Yeouth Niacinamide Serum (already in your routine)", relation: "better", note: "Already covers the niacinamide role. If you want extra antioxidant support instead, a plain vitamin C or green tea extract serum would add something Yeouth doesn't already cover, rather than duplicating it." }] },
   { id: 13, match: ["yeouth", "niacinamide"], tag: "best",
-    reason: "Clean, dedicated niacinamide serum well matched to oiliness and enlarged pores.",
+    pros: ["Clean, dedicated niacinamide serum", "One of the best-evidenced ingredients for oily, pore-prone, blemish-scarred skin", "Well matched to oiliness and enlarged pores specifically"],
+    cons: [],
     general: "Niacinamide reduces oil production, refines the look of pores, and calms inflammation and redness — one of the best-evidenced ingredients for oily, pore-prone, blemish-scarred skin.",
     alternatives: [{ name: "The Ordinary Niacinamide 10% + Zinc 1%", relation: "as-good", note: "The other commonly-cited benchmark for niacinamide — comparable, not better." }] },
   { id: 14, match: ["vinopure", "salicylic"], tag: "good",
-    reason: "Effective for blackheads and pores, but one of several acid-exfoliant products in rotation — worth reviewing for redundancy.",
+    pros: ["Effective for blackheads and pores", "Concentrated, targeted salicylic-acid format"],
+    cons: ["One of four acid-exfoliant products in your rotation — same cumulative-exposure concern as Some By Mi", "Overlaps with your own Purifying Toner (same active family, just a stronger concentration)"],
     general: "A concentrated salicylic-acid leave-on serum — same active family as the Purifying Toner, just a stronger, more targeted format.",
-    alternatives: [{ name: "Caudalie Vinopure Purifying Toner (already in your routine)", relation: "better", note: "Same active family at a lower, toner-level concentration. Same redundancy note as Some By Mi: you have four acid exfoliants rotating — consolidating to 2–3 consistent ones reduces overlap without losing efficacy." }] },
+    alternatives: [{ name: "Caudalie Vinopure Purifying Toner (already in your routine)", relation: "better", note: "Same active family at a lower, toner-level concentration and one fewer product to manage. Same redundancy note as Some By Mi: you have four acid exfoliants rotating — consolidating to 2–3 consistent ones reduces overlap without losing efficacy." }] },
   { id: 16, match: ["lip mask"], tag: "best",
-    reason: "Lip-specific overnight treatment, no conflict with facial actives.",
+    pros: ["Lip-specific overnight hydration and barrier repair", "No conflict with facial actives"],
+    cons: [],
     general: "An overnight lip treatment for hydration and barrier repair — a cosmetic/comfort step that doesn't interact with facial actives.",
     alternatives: [{ name: "Laneige Lip Sleeping Mask", relation: "as-good", note: "The other commonly-cited benchmark for an overnight lip treatment — comparable." }] },
   { id: 17, match: ["cosrx", "snail"], tag: "best",
-    reason: "Barrier-supporting hydration well suited to scarring and combination skin.",
+    pros: ["Barrier-supporting hydration well suited to scarring and combination skin", "Well-tolerated, doesn't clog pores", "Actively supports healing — directly relevant to your scarring concern"],
+    cons: [],
     general: "Snail mucin is a humectant and barrier-repair ingredient rich in glycoproteins and hyaluronic acid — well-tolerated hydration that supports healing (relevant to scarring) without clogging pores.",
     alternatives: [{ name: "Benton Snail Bee High Content Essence", relation: "as-good", note: "A comparable snail-mucin essence — this is already one of the most established options, though." }] },
   { id: 18, match: ["marine hyaluronics"], tag: "good",
-    reason: "Effective hydrator, but functionally overlaps with the COSRX Snail Essence already in your PM routine.",
+    pros: ["Effective, lightweight hydrator"],
+    cons: ["Functionally overlaps with the COSRX Snail Essence already in your PM routine", "No treatment-specific benefit beyond general hydration — the snail essence does the same hydrating job plus barrier/healing support this doesn't"],
     general: "A lightweight hyaluronic-acid-based hydrator using marine extracts — a straightforward humectant with no treatment-specific benefit beyond general hydration.",
-    alternatives: [{ name: "COSRX Snail 96 Essence (already in your routine)", relation: "better", note: "Both fill the same hydrating-essence slot (they already alternate via the app's rotation) — you likely don't need to keep buying both once this bottle runs out." }] },
+    alternatives: [{ name: "COSRX Snail 96 Essence (already in your routine)", relation: "better", note: "Covers the same hydrating-essence role plus barrier-repair/healing support this doesn't — a genuine step up, not just a lateral swap. You likely don't need to repurchase this one once the bottle runs out." }] },
   { id: 19, match: ["red bean water gel"], tag: "best",
-    reason: "Lightweight, non-comedogenic moisturizer well suited to combination/oily skin.",
+    pros: ["Lightweight, non-comedogenic moisturizer", "Good hydration without heaviness — well suited to combination/oily skin"],
+    cons: [],
     general: "A lightweight gel moisturizer formulated for oil control — good hydration without heaviness for oily or combination skin.",
     alternatives: [{ name: "COSRX Oil-Free Ultra-Moisturizing Lotion", relation: "as-good", note: "A comparable oil-free gel moisturizer — performs comparably to this one." }] },
   { id: 21, match: ["hyalu-cica", "sun serum"], tag: "best",
-    reason: "Broad-spectrum SPF in a gentle, centella-based formula — essential for preventing post-inflammatory scarring.",
+    pros: ["Broad-spectrum SPF in a gentle, centella-based formula", "Daily SPF is arguably the single most impactful step for preventing post-inflammatory marks — more impactful than any treatment serum"],
+    cons: [],
     general: "Broad-spectrum sunscreen with centella extract. Daily SPF is arguably the single most impactful step for preventing post-inflammatory marks from getting worse — more impactful than any treatment serum.",
     alternatives: [{ name: "EltaMD UV Clear Broad-Spectrum SPF46", relation: "as-good", note: "A widely dermatologist-recommended comparable SPF — consistency matters more than brand here, though." }] },
   { id: 22, match: ["aha 30"], tag: "good",
-    reason: "Effective as an occasional intensive treatment, but you already have several other exfoliating products in weekly rotation — monitor cumulative irritation.",
+    pros: ["Effective as an occasional intensive treatment", "One of the strongest OTC peels available — real efficacy for texture/pores at the right (low) frequency"],
+    cons: ["You already have several other exfoliating products in weekly rotation — cumulative irritation worth monitoring"],
     general: "A high-strength, short-contact-time peel meant for occasional (not weekly) intensive exfoliation — one of the strongest OTC peels available.",
     alternatives: [{ name: "Dr. Dennis Gross Alpha Beta Universal Daily Peel", relation: "better", note: "A milder, lower-irritation peel pad if you want something gentler for frequent use. At monthly frequency alongside 3–4 other standing weekly acid exfoliants, cumulative irritation is worth watching either way." }] },
   { id: 23, match: ["aztec"], tag: "good",
-    reason: "Good clay mask for oiliness and blackheads if reactivated, but overlaps with the other pore/clay masks in your unscheduled list.",
+    pros: ["Good clay mask for oiliness and blackheads if reactivated", "Effective via absorption for oily T-zones"],
+    cons: ["Overlaps with the other pore/clay masks in your unscheduled list — no reason to run more than one", "Drying with regular use"],
     general: "Bentonite clay masks draw out oil and impurities via absorption — effective for blackheads and oily T-zones used occasionally, since they're drying with regular use.",
-    alternatives: [{ name: "Beauty of Joseon Pore Mask (already on your unscheduled list)", relation: "as-good", note: "Same clay-mask role — pick whichever texture you prefer and drop the other rather than running both." }] },
+    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Already active in your weekly rotation, confirmed fragrance/EO-free, and rated Best — a genuine upgrade over reactivating this one rather than a lateral swap." }] },
   { id: 24, match: ["beauty of joseon", "pore mask"], tag: "good",
-    reason: "Good pore-refining mask if reactivated, but overlaps with Aztec Secret Clay for the same purpose.",
+    pros: ["Good pore-refining mask if reactivated", "Clay-based, functionally solid for oil/debris absorption"],
+    cons: ["Overlaps with Aztec Secret Clay for the same purpose — no reason to run both"],
     general: "A clay-based pore-refining mask, functionally similar to other bentonite/kaolin clay masks — draws out oil and debris with occasional use.",
-    alternatives: [{ name: "Aztec Secret Clay (already on your unscheduled list)", relation: "as-good", note: "Same role as this one — consolidate to whichever you prefer." }] },
+    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Already active in your weekly rotation, confirmed fragrance/EO-free, and rated Best — a genuine upgrade over reactivating this one rather than a lateral swap." }] },
   { id: 25, match: ["anua"], tag: "best",
-    reason: "Gentle, soothing toner that would genuinely complement an actives-heavy routine if reactivated.",
+    pros: ["Gentle, soothing, anti-inflammatory botanical (heartleaf)", "Would genuinely complement an actives-heavy routine as a calming buffer, if reactivated"],
+    cons: [],
     general: "Heartleaf (houttuynia cordata) is a soothing, anti-inflammatory botanical extract — good for calming redness and irritation, especially useful as a buffer on nights with strong actives.",
     alternatives: [{ name: "Klairs Supple Preparation Toner", relation: "as-good", note: "The other commonly-cited benchmark for this soothing-toner role — comparable." }] },
   { id: 26, match: ["cosrx", "aha/bha"], tag: "bad",
-    reason: "Another exfoliating toner — redundant with the acid toners already active in your routine; no need to add this.",
+    pros: ["A legitimate multi-acid exfoliating toner in isolation"],
+    cons: ["Redundant with the acid toners already active in your routine (Some By Mi, Vinopure Salicylic)", "Adds no new capability, only more cumulative acid exposure"],
     general: "Another multi-acid exfoliating toner, functionally similar to Some By Mi's AHA.BHA.PHA Toner.",
     alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "better", note: "You already have multiple standing acid exfoliants; relying on this one instead wouldn't leave you covering anything less than adding a new product would." }] },
   { id: 27, match: ["ginseng"], tag: "good",
-    reason: "Gentle hydrating essence-toner, but overlaps in purpose with the COSRX Snail Essence already active.",
+    pros: ["Gentle hydrating essence-toner", "Antioxidant/anti-aging marketing claims layered onto a basic hydrating base"],
+    cons: ["Overlaps in purpose with the COSRX Snail Essence already active — ginseng essence adds nothing beyond hydration that snail mucin doesn't already cover"],
     general: "A ginseng-based hydrating essence-toner, marketed on antioxidant and anti-aging claims layered onto a basic hydrating base.",
-    alternatives: [{ name: "COSRX Snail 96 Essence (already in your routine)", relation: "as-good", note: "Same hydrating-essence role — no need to add a second one." }] },
+    alternatives: [{ name: "COSRX Snail 96 Essence (already in your routine)", relation: "better", note: "Already covers hydration and adds barrier-repair/healing support this doesn't — a genuine step up, not just a lateral swap." }] },
   { id: 28, match: ["thermal spring water"], tag: "good",
-    reason: "Soothing, situational — nice for calming or a midday refresh, not essential.",
+    pros: ["Soothing, nice for calming or a midday refresh"],
+    cons: ["Essentially no active ingredients beyond mineral content — not essential"],
     general: "A soothing thermal-water mist — mild, situational calming step with essentially no active ingredients beyond mineral content.",
-    alternatives: [{ name: "La Roche-Posay Thermal Spring Water", relation: "as-good", note: "Performs identically — it's essentially just spring water." }] },
-  { id: 29, match: ["gel cleanser"], tag: "best",
-    reason: "Fills the AM+PM cleanser gap: the nightly water-based second-cleanse step after the (now-weekly) oil cleanse, and the standalone AM cleanser you didn't have.",
+    alternatives: [{ name: "La Roche-Posay Thermal Spring Water", relation: "no-better-option", note: "Performs identically — it's essentially just spring water, so there's no meaningful 'better' version to point to." }] },
+  { id: 29, match: ["gel cleanser"], tag: "good",
+    pros: ["Fills the AM+PM cleanser gap you didn't have covered", "Effective gel-cleanser texture, standard second-cleanse/standalone-AM step"],
+    cons: ["Contains six separate essential oils (lavender, peppermint, rosemary, lemongrass, geranium, melissa) plus isolated allergens — meaningful given this runs twice daily, not just weekly like your oil cleanser"],
     general: "A gentle foaming or gel cleanser is the standard second step of a double cleanse (after oil), or a standalone AM cleanse — removes water-based residue without over-stripping.",
-    alternatives: [{ name: "CeraVe Foaming Facial Cleanser", relation: "as-good", note: "Already the one scheduled — genuinely fragrance-free (verified against the full ingredient list, no essential oils), dermatologist-developed, non-comedogenic. Worth flagging: an earlier plan floated Caudalie's Vinopure Purifying Gel Cleanser for this slot instead, but checking its actual ingredients turned up six separate essential oils (lavender, peppermint, rosemary, lemongrass, geranium, melissa) plus isolated allergens — more fragranced than the oil cleanser it would've been paired with, not less. CeraVe stays the pick." }] },
+    alternatives: [{ name: "CeraVe Foaming Facial Cleanser", relation: "better", note: "Genuinely fragrance-free (verified against the full ingredient list, no essential oils), dermatologist-developed, non-comedogenic — the real upgrade path if you want to cut fragrance from a step you're doing twice a day, every day." }] },
   { id: 30, match: ["ordinary", "glycolic"], tag: "good",
-    reason: "Effective glycolic exfoliant for blackheads, pores, and texture — folded into your existing exfoliant rotation (alongside Dermalogica Microfoliant and Some By Mi AHA.BHA.PHA Toner) rather than added as a separate weekly night, so total acid-exfoliant exposure per week doesn't increase.",
+    pros: ["Effective glycolic exfoliant for blackheads, pores, and texture", "Folded into your existing exfoliant rotation rather than adding extra weekly exposure"],
+    cons: ["Glycolic is the smallest, fastest-penetrating AHA — the highest irritation potential of the acid family on combination or sensitive-leaning skin"],
     general: "Glycolic acid is the smallest AHA molecule, so it penetrates fastest and exfoliates most aggressively of the common AHAs — effective for texture and blackheads, but the highest irritation potential of the acid family on combination or sensitive-leaning skin.",
-    alternatives: [{ name: "Some By Mi AHA.BHA.PHA Toner (already in your routine)", relation: "as-good", note: "No swap needed — already folded into your rotation. If irritation shows up, this gentler PHA-inclusive blend is the fallback within the same rotation pool." }] },
+    alternatives: [{ name: "Some By Mi AHA.BHA.PHA Toner (already in your rotation)", relation: "no-better-option", note: "Both share the same exfoliant rotation pool by design — there's no 'upgrade' between rotation-mates, just rotation. If irritation shows up, this gentler PHA-inclusive blend is the fallback within the same pool." }] },
   { id: 31, match: ["caudalie", "instant d"], tag: "best",
-    reason: "A purifying clay mask (clay + caffeine + grape) squarely targeting oiliness, blackheads, and enlarged pores — from the same clinical-tier Caudalie line as your Vinopure toner/serum, with no fragrance or essential-oil red flags. Makes Aztec Secret Clay and Beauty of Joseon Pore Mask fully redundant if either is ever reactivated — same purifying-clay-mask role, no need to run more than one.",
+    pros: ["A purifying clay mask (clay + caffeine + grape) squarely targeting oiliness, blackheads, and enlarged pores", "Same clinical-tier Caudalie line as your Vinopure toner/serum, with no fragrance or essential-oil red flags", "Makes Aztec Secret Clay and Beauty of Joseon Pore Mask fully redundant if either is ever reactivated"],
+    cons: [],
     general: "Clay draws out excess oil and impurities by absorption; caffeine adds a mild tightening/de-puffing effect; grape polyphenols contribute antioxidant support. A once-weekly purifying mask like this is a standard, low-irritation way to keep pores and oil under control between actives nights.",
     alternatives: [{ name: "Kiehl's Rare Earth Deep Pore Cleansing Masque", relation: "as-good", note: "The other commonly-cited benchmark clay mask — comparable, not better." }] },
   { id: 32, match: ["melaxin"], tag: "good",
-    reason: "Legitimate K-beauty cosmeceutical brand, not a novelty knockoff — charcoal (35,000ppm) for sebum absorption fits your oiliness/blackheads/pores concerns. Held at \"good\" rather than \"best\" now that the full INCI is confirmed (from the brand's own official site, not a retailer listing): it contains added Fragrance and Lavender Flower Extract — the same EO-derived-content pattern already flagged and avoided in Caudalie's gel cleanser. Rinse-off contact time limits the exposure, but it's a real mark against it, not a hypothetical one. It's also the FOURTH pore-purifying clay mask in your library alongside Aztec Secret Clay, Beauty of Joseon Pore Mask, and the just-added Caudalie Masque Instant Détox (fragrance-free) — you only need one in weekly rotation. Added here UNSCHEDULED, same as Aztec/BoJ, rather than displacing Caudalie's slot.",
-    general: "The \"4 types of peptides\" headline claim checks out on paper (sh-Oligopeptide-1, sh-Polypeptide-1, sh-Oligopeptide-2, sh-Polypeptide-22 all appear in the INCI) but each is dosed at 0.3ppb — parts per billion, a trace/marketing-level amount with no realistic firming effect at that concentration. The charcoal-for-sebum and clay/tannin-for-pore-tightening mechanisms are what's actually doing the work here; the peptide claim is decorative.",
-    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Same purifying-clay-mask role, already in your weekly rotation, and confirmed fragrance/EO-free — no reason to run this one alongside or instead of it." }] },
+    pros: ["Legitimate K-beauty cosmeceutical brand, not a novelty knockoff", "Charcoal (35,000ppm) for sebum absorption fits your oiliness/blackheads/pores concerns"],
+    cons: ["Contains added Fragrance and Lavender Flower Extract (confirmed via the brand's own full INCI, not a retailer listing) — the same EO-derived-content pattern already flagged in Caudalie's gel cleanser", "The '4 types of peptides' are dosed at 0.3ppb each — parts per billion, a trace/marketing-level amount with no realistic firming effect", "The fourth pore-purifying clay mask in your library — you only need one in weekly rotation"],
+    general: "The charcoal-for-sebum and clay/tannin-for-pore-tightening mechanisms are what's actually doing the work here; the peptide claim is decorative at this concentration.",
+    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Same purifying-clay-mask role, already in your weekly rotation, and confirmed fragrance/EO-free — a genuine upgrade, not a lateral swap." }] },
   { id: 33, match: ["yeouth", "glycolic acid 30"], tag: "good",
-    reason: "A legitimate 30% glycolic peel — full INCI (water, glycolic acid, octoxynol-10, phenoxyethanol, hydroxyethylcellulose, propylene glycol, glycerin, retinyl palmitate, cucumber/chamomile/green tea/comfrey extracts) has no fragrance and no red flags. Held at \"good\" rather than \"best\" for two reasons: it's functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — both are occasional, professional-strength intensive peels, and you only need one — and this one quietly adds retinyl palmitate (a weak vitamin-A ester) on top of the glycolic acid, meaning it straddles both your exfoliant and retinoid categories at once, something the app's category system tracks as \"exfoliant\" only (glycolic acid is the dominant, first-listed active), leaving the minor retinoid contribution unaccounted for by the dedicated tretinoin/retinol slots. Added to the library UNSCHEDULED — you already have this exact role filled.",
-    general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Scheduling this weekly, the way your gentler exfoliants run, would be a real over-exfoliation risk; if used at all, it belongs at the same monthly-or-less cadence as your existing Ordinary peel, not the 2x/week gentle-exfoliant pool. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
-    alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "as-good", note: "Same occasional-intensive-peel role, already in your routine at the appropriate low cadence — no need to add a second one." }] }
+    pros: ["A legitimate 30% glycolic peel with a clean, no-fragrance ingredient list", "Real efficacy at peel-strength concentration"],
+    cons: ["Functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — same occasional-intensive-peel role", "Quietly adds retinyl palmitate on top of the glycolic acid, straddling your exfoliant and retinoid categories at once — a contribution the app's dedicated tretinoin/retinol slots don't track", "30% is peel-strength — must not run at the weekly cadence your gentler exfoliants use; monthly-or-less only if used at all"],
+    general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
+    alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "better", note: "Already in your routine at the correct occasional cadence — one less peel to manage, and you're not missing any capability by skipping this one." }] }
 ];
 const getProductRank = p => {
-  const byId = RANK_DATA.find(r => r.id === p.id);
-  if (byId) return byId;
+  // RANK_DATA's own "id" field and product ids are two entirely
+  // independent, uncoordinated sequences that happen to both be small
+  // incrementing integers — they were never meant to reference each
+  // other. A byId("r.id === p.id") fast-path here used to run before the
+  // keyword match below, and once both sequences independently grew past
+  // the low 30s they collided for real: Dr.Melaxin's Dubai Peptide Clay
+  // Mask (product id 33) started silently showing RANK_DATA id 33's
+  // content — which is actually the unrelated Yeouth Glycolic Acid 30%
+  // Gel Peel entry — good/bad text, alternatives, everything, all for the
+  // wrong product. The keyword match below is the only thing that was
+  // ever actually reliable here (every entry has match keywords, and
+  // they're specific enough not to cross-match different products), so
+  // the byId shortcut is removed rather than just renumbered — it added
+  // no real capability, only a recurring collision risk as both id
+  // sequences keep growing.
   const hay = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
   const matched = RANK_DATA.find(r => r.match.every(kw => hay.includes(kw)));
   if (matched) return matched;
@@ -1397,7 +1441,7 @@ const MIGRATIONS = [{
     products: (profile.products || []).map(p => {
       const r = getProductRank(p);
       if (!r) return p;
-      const ranked = { ...p, rank: r.tag, rankReason: r.reason };
+      const ranked = { ...p, rank: r.tag, rankReason: (r.cons || [])[0] || (r.pros || [])[0] || "" };
       if (r.tag === "bad" && ranked.scheduled) {
         return { ...ranked, scheduled: false, session: "", frequency: "", nextDate: "", stepOrder: 0 };
       }
@@ -4247,7 +4291,7 @@ const ProductRow = ({
       fontSize: 12
     }
   }, " · ", p.brandName)), tagMode === "rank" && rank && /*#__PURE__*/React.createElement("span", {
-    title: rank.reason,
+    title: (rank.cons && rank.cons[0]) || (rank.pros && rank.pros[0]) || "",
     style: {
       display: "inline-flex",
       alignItems: "center",
@@ -4481,7 +4525,100 @@ const ProductDetailModal = ({ product, onClose }) => {
   const cat = productCategoryGroup(product);
   const catColor = CATEGORY_COLORS[cat] || T.muted;
   const alternatives = rank.alternatives || [];
+  const pros = rank.pros || [];
+  const cons = rank.cons || [];
   const stepInfo = stepInfoFor(product);
+  const REL_STYLE = {
+    "better": { color: T.green, label: "Better" },
+    "as-good": { color: T.blue, label: "As good" },
+    "no-better-option": { color: T.muted, label: "No better option" }
+  };
+
+  const header = /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: { fontWeight: 700, fontSize: 16, color: T.text }
+  }, product.genericName), product.brandName && /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 13, color: T.muted, marginTop: 1 }
+  }, product.brandName)), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: { background: "none", border: "none", cursor: "pointer", color: T.muted, fontSize: 22, lineHeight: 1, padding: 4 }
+  }, "×"));
+
+  const badges = /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11, fontWeight: 700, background: RANK_STYLE[rank.tag].bg, color: RANK_STYLE[rank.tag].color,
+      border: `1px solid ${RANK_STYLE[rank.tag].color}44`, borderRadius: 100, padding: "2px 9px"
+    }
+  }, RANK_STYLE[rank.tag].label), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11, fontWeight: 700, background: `${catColor}18`, color: catColor,
+      border: `1px solid ${catColor}44`, borderRadius: 100, padding: "2px 9px"
+    }
+  }, cat), product.scheduled && /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 11, fontWeight: 600, background: T.faint, color: T.muted, borderRadius: 100, padding: "2px 9px" }
+  }, product.session === "both" ? "AM+PM" : product.session?.toUpperCase(), " · ", FREQS[product.frequency] || product.frequency));
+
+  const stepSection = stepInfo && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 14 }
+    // Explains the STAGE this product sits in (layering logic) — distinct
+    // from the pros/cons below, which are about this specific PRODUCT.
+    // Answers "why is this step here" separately from "why this product".
+  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "Why this step \u2014 ", stepInfo.name),
+  /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5 } }, stepInfo.desc));
+
+  const generalSection = rank.general && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 14 }
+  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "In general"),
+  /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5 } }, rank.general));
+
+  // Explicit, separated good/bad — replaces a single blended "for you"
+  // paragraph that mixed praise and caveats together in prose. Always show
+  // what's good (every product has SOMETHING going for it, even a "bad"
+  // one); only show what's not if there's an actual con — a "best"-tagged
+  // product with no real caveat shouldn't have a manufactured downside
+  // forced into existence just to fill the section.
+  const prosSection = pros.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 10 }
+  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4, color: T.green } }, "What's good"),
+  pros.map((p, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: { fontSize: 13, color: T.text, lineHeight: 1.5, marginBottom: i === pros.length - 1 ? 0 : 3 }
+  }, "\u2022 ", p)));
+
+  const consSection = cons.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: alternatives.length ? 14 : 0 }
+  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4, color: T.red || "#C0392B" } }, "What's not"),
+  cons.map((c, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: { fontSize: 13, color: T.text, lineHeight: 1.5, marginBottom: i === cons.length - 1 ? 0 : 3 }
+  }, "\u2022 ", c)));
+
+  const altCards = alternatives.map((alt, i) => {
+    const style = REL_STYLE[alt.relation] || REL_STYLE["as-good"];
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        background: T.faint, border: `1px solid ${T.border}`, borderRadius: 10,
+        padding: 10, marginBottom: i === alternatives.length - 1 ? 0 : 8
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: style.color }
+    }, style.label), /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 13, fontWeight: 600, color: T.text }
+    }, alt.name)), alt.note && /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: T.muted, lineHeight: 1.4 }
+    }, alt.note));
+  });
+
+  const altSection = alternatives.length > 0 && /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 6 } }, "Alternatives"),
+    altCards);
+
   return /*#__PURE__*/React.createElement("div", {
     onClick: onClose,
     style: {
@@ -4505,65 +4642,7 @@ const ProductDetailModal = ({ product, onClose }) => {
       overflowY: "auto",
       boxShadow: T.shadowMd
     }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: { fontWeight: 700, fontSize: 16, color: T.text }
-  }, product.genericName), product.brandName && /*#__PURE__*/React.createElement("div", {
-    style: { fontSize: 13, color: T.muted, marginTop: 1 }
-  }, product.brandName)), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: { background: "none", border: "none", cursor: "pointer", color: T.muted, fontSize: 22, lineHeight: 1, padding: 4 }
-  }, "×")), /*#__PURE__*/React.createElement("div", {
-    style: { display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11, fontWeight: 700, background: RANK_STYLE[rank.tag].bg, color: RANK_STYLE[rank.tag].color,
-      border: `1px solid ${RANK_STYLE[rank.tag].color}44`, borderRadius: 100, padding: "2px 9px"
-    }
-  }, RANK_STYLE[rank.tag].label), /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 11, fontWeight: 700, background: `${catColor}18`, color: catColor,
-      border: `1px solid ${catColor}44`, borderRadius: 100, padding: "2px 9px"
-    }
-  }, cat), product.scheduled && /*#__PURE__*/React.createElement("span", {
-    style: { fontSize: 11, fontWeight: 600, background: T.faint, color: T.muted, borderRadius: 100, padding: "2px 9px" }
-  }, product.session === "both" ? "AM+PM" : product.session?.toUpperCase(), " · ", FREQS[product.frequency] || product.frequency)),
-  stepInfo && /*#__PURE__*/React.createElement("div", {
-    style: { marginBottom: 14 }
-    // Explains the STAGE this product sits in (layering logic) — distinct
-    // from the rank sections below, which are about this specific PRODUCT.
-    // Answers "why is this step here" separately from "why this product".
-  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "Why this step \u2014 ", stepInfo.name),
-  /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5 } }, stepInfo.desc)),
-  rank.general && /*#__PURE__*/React.createElement("div", {
-    style: { marginBottom: 14 }
-  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "In general"),
-  /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5 } }, rank.general)),
-  rank.reason && /*#__PURE__*/React.createElement("div", {
-    style: { marginBottom: alternatives.length ? 14 : 0 }
-  }, /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 4 } }, "For you"),
-  /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5 } }, rank.reason)),
-  alternatives.length > 0 && /*#__PURE__*/React.createElement("div", null,
-    /*#__PURE__*/React.createElement(Lbl, { style: { fontSize: 10, marginBottom: 6 } }, "Alternatives"),
-    alternatives.map((alt, i) => /*#__PURE__*/React.createElement("div", {
-      key: i,
-      style: {
-        background: T.faint, border: `1px solid ${T.border}`, borderRadius: 10,
-        padding: 10, marginBottom: i === alternatives.length - 1 ? 0 : 8
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
-        color: alt.relation === "better" ? T.green : T.blue
-      }
-    }, alt.relation === "better" ? "Better" : "As good"), /*#__PURE__*/React.createElement("span", {
-      style: { fontSize: 13, fontWeight: 600, color: T.text }
-    }, alt.name)), alt.note && /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 12, color: T.muted, lineHeight: 1.4 }
-    }, alt.note))))));
+  }, header, badges, stepSection, generalSection, prosSection, consSection, altSection));
 };
 
 // ─── PRODUCTS TAB (no AI — manual scheduling instead of "Build Routine") ──────
@@ -4647,7 +4726,7 @@ const ProductsTab = ({
     const r = getProductRank(p);
     if (!r) return true;
     if (r.tag === "bad") return false;
-    if (r.tag === "good" && /overlap|redundan/i.test(r.reason || "")) return false;
+    if (r.tag === "good" && (r.cons || []).some(c => /overlap|redundan/i.test(c))) return false;
     return true;
   };
   const autoSchedulable = unscheduled.filter(isBulkSchedulable);
