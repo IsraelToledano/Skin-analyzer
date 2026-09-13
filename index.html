@@ -858,6 +858,100 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
   return Array.from(bumpIds);
 };
 
+// ─── DAY ROUTINE HEALTH CHECK ────────────────────────────────────────────
+// Pure, testable function: given the actual list of active products for a
+// session on a given day, flags anything worth a second look. Runs the
+// same checks the scheduler already enforces automatically (category
+// conflicts, singleton-group clashes, session cap) plus a check the
+// scheduler doesn't do — any currently-active "bad"-tagged product — so a
+// manual Swap/Skip/Add doesn't quietly leave the day in a state nobody
+// actually looked at. Designed to be called fresh on every render rather
+// than triggered manually: it's cheap, and `prods` already reflects the
+// latest swap/skip/add the moment it happens, so the result is always
+// current without a separate "Analyze" action to remember to press.
+const analyzeDayRoutine = prods => {
+  const issues = [];
+  for (let i = 0; i < prods.length; i++) {
+    for (let j = i + 1; j < prods.length; j++) {
+      if (productsConflict(prods[i], prods[j])) {
+        issues.push({
+          type: "conflict",
+          severity: "high",
+          message: `${prods[i].genericName} and ${prods[j].genericName} shouldn't be used the same session together`
+        });
+      }
+    }
+  }
+  // Singleton-group clashes (two of the same active/layer type) — skip
+  // pairs that are deliberately linked (e.g. an oil+gel double-cleanse
+  // pair sharing a linkGroup), since that's an intentional 2-step combo,
+  // not an accidental duplicate.
+  const groupMap = new Map();
+  prods.forEach(p => {
+    classifySingletonGroups(p).forEach(g => {
+      if (!groupMap.has(g)) groupMap.set(g, []);
+      groupMap.get(g).push(p);
+    });
+  });
+  groupMap.forEach((members, group) => {
+    if (members.length < 2) return;
+    const allLinked = members.every(m => m.linkGroup && m.linkGroup === members[0].linkGroup);
+    if (allLinked) return;
+    const displayGroup = group.replace(/^layer:/, "").replace(/^acid-exfoliant$/, "exfoliant").replace(/^vitamin-c$/, "vitamin C");
+    issues.push({
+      type: "duplicate",
+      severity: "medium",
+      message: `More than one ${displayGroup} product today \u2014 ${members.map(m => m.genericName).join(", ")}`
+    });
+  });
+  if (prods.length > SESSION_CAP) {
+    issues.push({
+      type: "cap",
+      severity: "medium",
+      message: `${prods.length} steps today, above the usual ${SESSION_CAP}-step cap`
+    });
+  }
+  prods.forEach(p => {
+    const rank = getProductRank(p);
+    if (rank.tag === "bad") {
+      const detail = (rank.cons || [])[0];
+      issues.push({
+        type: "bad-rank",
+        severity: "low",
+        message: `${p.genericName} is flagged Bad${detail ? " \u2014 " + detail : ""}`
+      });
+    }
+  });
+  return issues;
+};
+const HEALTH_SEVERITY_STYLE = {
+  high: { color: "#D95F5F", icon: "\u26a0" },
+  medium: { color: "#C98A3E", icon: "\u26a0" },
+  low: { color: "#8A8580", icon: "\u2022" }
+};
+// Compact, always-visible summary for a session's product list. Collapses
+// to a single calm line when there's nothing to flag; expands to a short
+// itemized list otherwise. Deliberately lightweight (no modal, no
+// separate action) since it's meant to be glanced at after every Swap/
+// Skip/Add, not sought out.
+const RoutineHealthCheck = ({ prods }) => {
+  const issues = analyzeDayRoutine(prods);
+  if (issues.length === 0) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: T.muted, padding: "8px 4px", display: "flex", alignItems: "center", gap: 5 }
+    }, /*#__PURE__*/React.createElement("span", { style: { color: "#5BAA82" } }, "\u2713"), "No conflicts or flags in today's list");
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: { padding: "8px 4px" }
+  }, issues.map((issue, i) => {
+    const style = HEALTH_SEVERITY_STYLE[issue.severity] || HEALTH_SEVERITY_STYLE.low;
+    return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: { fontSize: 12, color: T.text, display: "flex", gap: 6, marginBottom: i === issues.length - 1 ? 0 : 4, lineHeight: 1.4 }
+    }, /*#__PURE__*/React.createElement("span", { style: { color: style.color, flexShrink: 0 } }, style.icon), issue.message);
+  }));
+};
+
 const pcolor = p => {
   const g = (p.genericName || "").toLowerCase();
   if (g.includes("cleanser") || g.includes("wash")) return PRODUCT_COLORS.cleanser;
@@ -3731,6 +3825,11 @@ const RoutineBlock = ({
         fontFamily: "'Inter',sans-serif"
       }
     }, skipped ? "Skipped" : "Skip")));
+  }), /*#__PURE__*/React.createElement(RoutineHealthCheck, {
+    prods: prods.filter(p => {
+      const log = logs.find(l => l.productId === p.id && l.session === session);
+      return !(log?.skipped && !log?.done);
+    })
   }), /*#__PURE__*/React.createElement("button", {
     onClick: () => setPicker({
       mode: "add",
