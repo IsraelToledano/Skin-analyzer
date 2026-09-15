@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-13.1";
+const APP_VERSION = "2026-09-13.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -558,7 +558,12 @@ const RANK_DATA = [
     pros: ["A legitimate 30% glycolic peel with a clean, no-fragrance ingredient list", "Real efficacy at peel-strength concentration"],
     cons: ["Functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — same occasional-intensive-peel role", "Quietly adds retinyl palmitate on top of the glycolic acid, straddling your exfoliant and retinoid categories at once — a contribution the app's dedicated tretinoin/retinol slots don't track", "30% is peel-strength — must not run at the weekly cadence your gentler exfoliants use; monthly-or-less only if used at all"],
     general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
-    alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "better", note: "Already in your routine at the correct occasional cadence — one less peel to manage, and you're not missing any capability by skipping this one." }] }
+    alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "better", note: "Already in your routine at the correct occasional cadence — one less peel to manage, and you're not missing any capability by skipping this one." }] },
+  { id: 34, match: ["paula", "skin perfecting"], tag: "good",
+    pros: ["Genuinely fragrance-free 2% salicylic acid (BHA) — minimal 8-ingredient formula, no parabens/sulfates/silicones, widely regarded as one of the gold-standard BHA exfoliants", "Oil-soluble BHA penetrates into pores rather than just working on the surface — well matched to blackheads and enlarged pores"],
+    cons: ["A third salicylic-acid product alongside Caudalie Vinopure Purifying Toner and Vinopure Salicylic Serum — same active, different concentrations, real overlap", "Now a fifth candidate sharing your 2x/week exfoliant rotation slot, meaning each individual exfoliant gets served less often — the category's total exfoliation frequency doesn't change, but any one product's turn comes up less"],
+    general: "Salicylic acid (BHA) is oil-soluble, so unlike a water-soluble AHA it can actually penetrate into the pore itself — effective for blackheads and oil control, and gentler on the surface than a glycolic acid at comparable strength.",
+    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "no-better-option", note: "Same active at a comparable concentration — this isn't an upgrade over what you already have, just another well-formulated option in the same lane. Worth considering whether you need three salicylic-acid products rather than which one is best." }] }
 ];
 const getProductRank = p => {
   // RANK_DATA's own "id" field and product ids are two entirely
@@ -1979,6 +1984,39 @@ const MIGRATIONS = [{
       brandName: "Yeouth",
       notes: "2 fl oz (60ml) glycolic acid peel with retinyl palmitate, green tea. Peel-strength (30%), timed application + rinse, not a leave-on product. Redundant with The Ordinary AHA30+BHA2 Peeling Solution (already scheduled) — same occasional-intensive-peel role. Left unscheduled.",
       scheduled: false
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "add_paulaschoice_bha_v1",
+  // Explicit request: add Paula's Choice Skin Perfecting 2% BHA Liquid
+  // Exfoliant AND schedule it (RANK_DATA id 34, tagged "good" — see that
+  // entry). Unlike the unscheduled-redundant-additions pattern used for
+  // Dr.Melaxin/Yeouth peel, this one was explicitly asked to go into the
+  // routine, not just the library — so scheduled: true, PM, matching the
+  // exfoliant category. It auto-joins the exfoliant rotation pool by
+  // category (see ROTATION_CATEGORY_ROLES) alongside the four exfoliants
+  // already there; the pool's total weekly exfoliation frequency (2x/wk)
+  // doesn't change, it's just spread across one more candidate. No-op if
+  // a matching product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isPaulasChoiceBHA = p => hay(p).includes("paula") && hay(p).includes("skin perfecting");
+    const products = profile.products || [];
+    if (products.some(isPaulasChoiceBHA)) return profile;
+    const newProduct = {
+      id: 35,
+      genericName: "Skin Perfecting 2% BHA Liquid Exfoliant",
+      brandName: "Paula's Choice",
+      notes: "Fragrance-free 2% salicylic acid liquid exfoliant, minimal 8-ingredient formula. A third salicylic-acid product alongside Vinopure Purifying Toner and Vinopure Salicylic Serum — real overlap. Auto-joins the PM exfoliant rotation pool by category.",
+      scheduled: true,
+      session: "pm",
+      frequency: "weekly",
+      stepOrder: 40,
+      nextDate: todayStr()
     };
     return {
       ...profile,
