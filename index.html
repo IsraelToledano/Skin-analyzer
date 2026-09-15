@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-13.2";
+const APP_VERSION = "2026-09-13.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -4373,12 +4373,38 @@ const ProductRow = ({
   setEditId,
   updateSchedule,
   removeProduct,
-  onSelect
+  onSelect,
+  allProducts
 }) => {
   const isEditing = editId === rowKey;
   const rank = getProductRank(p);
   const cat = productCategoryGroup(p);
   const catColor = CATEGORY_COLORS[cat] || T.muted;
+  // Live pre-save check: as soon as session+frequency are picked (even
+  // before hitting Save Schedule), compare against every other product
+  // already scheduled in the same session — the same category-conflict
+  // and singleton-group checks the day-view health check runs, surfaced
+  // here at the moment the addition is actually being made, not after the
+  // fact. Only runs once both fields are chosen, since a conflict check
+  // against an incomplete schedule (no session yet) isn't meaningful.
+  const liveCheck = isEditing && p.session && p.frequency ? (() => {
+    const others = (allProducts || []).filter(o => o.id !== p.id && o.scheduled && (o.session === p.session || o.session === "both" || p.session === "both"));
+    const issues = [];
+    others.forEach(o => {
+      if (productsConflict(p, o)) {
+        issues.push(`Conflicts with ${o.genericName} \u2014 shouldn't be used the same session`);
+      }
+    });
+    const pGroups = classifySingletonGroups(p);
+    others.forEach(o => {
+      if (o.linkGroup && o.linkGroup === p.linkGroup) return;
+      const shared = classifySingletonGroups(o).filter(g => pGroups.includes(g));
+      if (shared.length) {
+        issues.push(`Duplicates ${o.genericName} \u2014 same ${shared[0].replace(/^layer:/, "")} role already scheduled`);
+      }
+    });
+    return issues;
+  })() : null;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "11px 0",
@@ -4588,7 +4614,33 @@ const ProductRow = ({
       stepOrder: parseInt(e.target.value) || 1
     }),
     style: selSty
-  }))), /*#__PURE__*/React.createElement(Btn, {
+  }))), liveCheck && liveCheck.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#D95F5F12",
+      border: "1px solid #D95F5F33",
+      borderRadius: 8,
+      padding: 8
+    }
+  }, liveCheck.map((msg, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      fontSize: 11,
+      color: T.text,
+      display: "flex",
+      gap: 5,
+      marginBottom: i === liveCheck.length - 1 ? 0 : 3
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: { color: "#D95F5F", flexShrink: 0 }
+  }, "\u26a0"), msg))), liveCheck && liveCheck.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "#5BAA82",
+      display: "flex",
+      alignItems: "center",
+      gap: 5
+    }
+  }, "\u2713 No conflicts with the rest of your ", p.session === "both" ? "AM or PM" : p.session.toUpperCase(), " routine"), /*#__PURE__*/React.createElement(Btn, {
     onClick: () => {
       const ready = p.session && p.frequency;
       updateSchedule(p.id, {
@@ -4625,7 +4677,7 @@ const ProductRow = ({
 // Renders a flat array of [header, row, row, ..., header, row, ...] for a
 // list of {label, items} groups — shared by the Ranked list and the
 // Categories list so the grouping/heading logic isn't duplicated.
-const renderProductGroups = (groups, tagMode, editId, setEditId, updateSchedule, removeProduct, onSelect) => groups.flatMap((g, gi) => [/*#__PURE__*/React.createElement("div", {
+const renderProductGroups = (groups, tagMode, editId, setEditId, updateSchedule, removeProduct, onSelect, allProducts) => groups.flatMap((g, gi) => [/*#__PURE__*/React.createElement("div", {
   key: `grp-${tagMode}-${gi}`,
   style: {
     fontSize: 10,
@@ -4646,7 +4698,8 @@ const renderProductGroups = (groups, tagMode, editId, setEditId, updateSchedule,
   setEditId: setEditId,
   updateSchedule: updateSchedule,
   removeProduct: removeProduct,
-  onSelect: onSelect
+  onSelect: onSelect,
+  allProducts: allProducts
 }))]);
 
 // ─── PRODUCT DETAIL MODAL ───────────────────────────────────────────────
@@ -5078,13 +5131,13 @@ const ProductsTab = ({
       fontSize: 12,
       color: T.muted
     }
-  }, profile.products.length, " product", profile.products.length !== 1 ? "s" : "", " · ", profile.products.filter(p => p.scheduled).length, " scheduled")), ...renderProductGroups(categoryGroups, "rank", editId, setEditId, updateSchedule, removeProduct, setDetailId)), /*#__PURE__*/React.createElement(Card, {
+  }, profile.products.length, " product", profile.products.length !== 1 ? "s" : "", " · ", profile.products.filter(p => p.scheduled).length, " scheduled")), ...renderProductGroups(categoryGroups, "rank", editId, setEditId, updateSchedule, removeProduct, setDetailId, profile.products)), /*#__PURE__*/React.createElement(Card, {
     key: "rank-card"
   }, /*#__PURE__*/React.createElement(Lbl, {
     style: {
       marginBottom: 14
     }
-  }, "Ranked"), ...renderProductGroups(rankGroups, "category", editId, setEditId, updateSchedule, removeProduct, setDetailId))], profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
+  }, "Ranked"), ...renderProductGroups(rankGroups, "category", editId, setEditId, updateSchedule, removeProduct, setDetailId, profile.products))], profile.products.length === 0 && !showAdd && /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: 48
