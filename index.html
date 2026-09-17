@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-17.1";
+const APP_VERSION = "2026-09-17.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -354,6 +354,70 @@ const CATEGORY_GROUP_MAP = {
 };
 const CATEGORY_DISPLAY_ORDER = ["Cleansers", "Toners", "Essences", "Vitamin C", "Niacinamide", "Exfoliants", "Retinoids", "Serums", "Eye Care", "Masks", "Face Oils", "Moisturizers", "Lip Care", "Self-Tan", "SPF", "Other"];
 const productCategoryGroup = p => CATEGORY_GROUP_MAP[detectType(p)] || "Other";
+// ─── CANONICAL STEP ORDER (single source of truth) ─────────────────────────
+// Israel's diagnosis of a bug that kept coming back (serum rendering AFTER
+// moisturizer, cleanser after toner, sunscreen mid-routine): the root cause
+// was that each product carried its OWN stored `stepOrder`, and that stored
+// value WON over the canonical scale (the old `p.stepOrder ||
+// classifyStepOrder(p)`). Drag-to-reorder then wrote a flat 10/20/30…
+// renumbering onto every product in the dragged day — permanently, globally,
+// across every other day — so one drag could silently put a serum above a
+// moisturizer forever. Each occurrence needed its own one-shot repair
+// migration (step_order_repair_v1/v2, step_order_normalize_v1-v4), and since
+// migrations only run once, the very next drag re-broke it.
+// The fix is structural, not another repair pass: order within a session is
+// now DERIVED from the product's category every time it's rendered, and is
+// not storable on the product at all. A category's position is fixed here;
+// a product cannot hold a number that contradicts it. That makes this entire
+// bug class unrepresentable rather than merely corrected-for-now.
+// Values match the AUTO_SCHEDULE_RULES scale exactly, so nothing about the
+// intended layering changes — only where the number comes from. Intra-
+// category ordering that genuinely matters is encoded as distinct
+// categories: cleanser_oil (10) deliberately sorts before cleanser (15), so
+// a double cleanse runs oil-first, water-based-second.
+const CATEGORY_STEP_ORDER = {
+  cleanser_oil: 10,
+  cleanser: 15,
+  toner: 20,
+  mist: 20,
+  vitc: 35,
+  niacinamide: 35,
+  exfoliant: 40,
+  retinoid: 45,
+  essence: 50,
+  serum: 50,
+  eye: 55,
+  mask: 60,
+  faceoil: 65,
+  moisturizer: 75,
+  lip: 85,
+  selftan: 88,
+  spf: 95,
+  other: 50
+};
+// The canonical position for a product, derived purely from its category.
+// Deliberately ignores p.stepOrder — see CATEGORY_STEP_ORDER above.
+const canonicalStepOrder = p => CATEGORY_STEP_ORDER[detectType(p)] ?? 50;
+// Per-day, per-session manual order set by dragging a row in that day's
+// list. Stored on the profile keyed by "YYYY-MM-DD:session" and scoped to
+// that ONE day — it never touches the product, so it cannot leak into any
+// other day or into the canonical scale. Products not named in an override
+// keep their canonical position relative to each other, sorted after the
+// explicitly-ordered ones.
+const dayOrderKey = (ds, session) => `${ds}:${session}`;
+const dayOrderFor = (profile, ds, session) => (profile?.dayOrder || {})[dayOrderKey(ds, session)] || null;
+// Sorts a day's products: an explicit per-day drag order first (if one
+// exists for this exact day+session), otherwise the canonical category
+// order. Ties inside a category fall back to product id so the result is
+// stable rather than dependent on array order.
+const sortForDay = (prods, profile, ds, session) => {
+  const override = dayOrderFor(profile, ds, session);
+  const idx = id => {
+    const i = override ? override.indexOf(id) : -1;
+    return i === -1 ? Infinity : i;
+  };
+  return [...prods].sort((a, b) => idx(a.id) - idx(b.id) || canonicalStepOrder(a) - canonicalStepOrder(b) || String(a.id).localeCompare(String(b.id)));
+};
 // One distinct color per category, used for the category tag pill and the
 // row's leading dot. Kept separate from RANK_STYLE's palette (green/blue/
 // red) so category color never gets confused with a Best/Good/Bad rank.
@@ -3382,6 +3446,7 @@ const RoutineBlock = ({
   const prodIds = prods.map(p => p.id).join(",");
   const [dragOrder, setDragOrder] = useState(() => prods.map(p => p.id));
   const [dragId, setDragId] = useState(null);
+  const [dragWarning, setDragWarning] = useState(null);
   const rowRefs = useRef({});
   const dragOrderRef = useRef(dragOrder);
   const dragIdRef = useRef(dragId);
@@ -3458,17 +3523,44 @@ const RoutineBlock = ({
       const lastCleanserIdx = finalOrder.reduce((acc, id, idx) => isCleanserId(id) ? idx : acc, -1);
       const firstNonCleanserIdx = finalOrder.findIndex(id => !isCleanserId(id));
       if (lastCleanserIdx !== -1 && firstNonCleanserIdx !== -1 && lastCleanserIdx > firstNonCleanserIdx) {
+        setDragWarning("Cleansing has to come first — that order wasn't saved.");
+        setDragOrder(prods.map(p => p.id));
         return; // invalid order — cleanser landed after something else; don't persist
       }
-      onUpdate({
-        products: (profile.products || []).map(pr => {
-          const idx = finalOrder.indexOf(pr.id);
-          return idx === -1 ? pr : {
-            ...pr,
-            stepOrder: (idx + 1) * 10
-          };
-        })
-      });
+      // Persist as a PER-DAY override only (see CATEGORY_STEP_ORDER /
+      // dayOrderFor). Previously this wrote `stepOrder: (idx + 1) * 10`
+      // onto every product in the list — a global, permanent renumbering
+      // that overwrote the canonical scale and was the actual source of
+      // the recurring "serum after moisturizer" / "cleanser after toner"
+      // corruption. A drag is a one-day decision, so it's stored as one:
+      // this day, this session, nothing else.
+      const canonical = [...prods].sort((a, b) => canonicalStepOrder(a) - canonicalStepOrder(b) || String(a.id).localeCompare(String(b.id))).map(p => p.id);
+      const matchesCanonical = finalOrder.length === canonical.length && finalOrder.every((id, i) => id === canonical[i]);
+      const nextDayOrder = { ...(profile.dayOrder || {}) };
+      if (matchesCanonical) {
+        // Dragged back to the standard order — drop the override entirely
+        // rather than storing a redundant copy of it.
+        delete nextDayOrder[dayOrderKey(ds, session)];
+      } else {
+        nextDayOrder[dayOrderKey(ds, session)] = finalOrder;
+        // Warn (but still allow — it's scoped to today) when the manual
+        // order departs from correct layering. Israel's call: the drag is
+        // a deliberate one-off, so it shouldn't be silently blocked, but
+        // it also shouldn't pass unremarked.
+        const outOfOrder = finalOrder.some((id, i) => {
+          if (i === 0) return false;
+          const prev = (profile.products || []).find(x => x.id === finalOrder[i - 1]);
+          const cur = (profile.products || []).find(x => x.id === id);
+          if (!prev || !cur) return false;
+          return canonicalStepOrder(prev) > canonicalStepOrder(cur);
+        });
+        if (outOfOrder) {
+          setDragWarning("Saved for today only — this differs from the standard layering order.");
+        } else {
+          setDragWarning(null);
+        }
+      }
+      onUpdate({ dayOrder: nextDayOrder });
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -3913,7 +4005,20 @@ const RoutineBlock = ({
       const log = logs.find(l => l.productId === p.id && l.session === session);
       return !(log?.skipped && !log?.done);
     })
-  }), /*#__PURE__*/React.createElement("button", {
+  }), dragWarning && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setDragWarning(null),
+    style: {
+      marginTop: 6,
+      padding: "8px 10px",
+      borderRadius: 8,
+      background: T.accentSoft,
+      color: T.accent,
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, dragWarning), /*#__PURE__*/React.createElement("button", {
     onClick: () => setPicker({
       mode: "add",
       excludeProduct: null
@@ -3958,8 +4063,8 @@ const DayAgenda = ({
   pmSchedule
 }) => {
   const ds = dateStr(date);
-  const amProds = queueFor(amSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
-  const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const amProds = sortForDay(queueFor(amSchedule, profile.products, date), profile, ds, "am");
+  const pmProds = sortForDay(queueFor(pmSchedule, profile.products, date), profile, ds, "pm");
   const logs = profile.logs.filter(l => l.date === ds);
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: amProds,
@@ -4132,8 +4237,8 @@ const ListSession = ({ label, icon, accent, prods, logs, session, todayDs, ds })
 const ListDayCard = ({ date, profile, amSchedule, pmSchedule, todayDs, onOpenDay }) => {
   const ds = dateStr(date);
   const isToday = ds === todayDs;
-  const amProds = queueFor(amSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
-  const pmProds = queueFor(pmSchedule, profile.products, date).sort((a, b) => (a.stepOrder || 0) - (b.stepOrder || 0));
+  const amProds = sortForDay(queueFor(amSchedule, profile.products, date), profile, ds, "am");
+  const pmProds = sortForDay(queueFor(pmSchedule, profile.products, date), profile, ds, "pm");
   const logs = profile.logs.filter(l => l.date === ds);
   if (amProds.length === 0 && pmProds.length === 0) return null;
   return /*#__PURE__*/React.createElement("div", {
