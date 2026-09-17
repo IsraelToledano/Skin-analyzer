@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-13.3";
+const APP_VERSION = "2026-09-17.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2040,6 +2040,51 @@ const MIGRATIONS = [{
     return {
       ...profile,
       concerns: [...concerns, "Anti-aging"]
+    };
+  }
+}, {
+  id: "add_sr_cosmetics_one_step_peel_v1",
+  // Explicit request: Israel already owns SR Cosmetics One Step Peel and
+  // wants it folded into the same PM exfoliant rotation as the existing
+  // members (Dermalogica Microfoliant / Some By Mi AHA.BHA.PHA Toner /
+  // Caudalie Vinopure Salicylic Serum / The Ordinary Glycolic Acid 7% /
+  // Paula's Choice 2% BHA — six total after this). Per the discussion
+  // before this migration: assuming the Israeli product matches the US
+  // listing's stated formula (glycolic + lactic acid, niacinamide,
+  // arbutin, tranexamic acid, acetyl hexapeptide-8) — the niacinamide is
+  // fully redundant with Yeouth Niacinamide Serum, and the acid portion is
+  // itself redundant with the five exfoliants already rotating; the only
+  // genuinely non-duplicated value is the arbutin + tranexamic acid
+  // pigmentation angle (two separate anti-hyperpigmentation mechanisms
+  // nothing else in the routine covers), relevant given Israel's
+  // scarring/post-acne-marks concern. The manufacturer's twice-daily
+  // leave-on instruction is deliberately NOT followed — genericName
+  // ("One Step Peel") auto-classifies as the exfoliant category via
+  // detectType/productCategories ("peel" keyword), so it auto-joins the
+  // shared PM exfoliant rotation pool (ROTATION_CATEGORY_ROLES) at the
+  // pool's existing 2x/week cadence rather than running independently
+  // twice a day, which would blow past the app's deliberate cumulative-
+  // acid-exposure cap for combination/oily skin. No-op if a matching
+  // product already exists.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const isSrOneStepPeel = p => hay(p).includes("sr cosmetics") && hay(p).includes("one step peel");
+    const products = profile.products || [];
+    if (products.some(isSrOneStepPeel)) return profile;
+    const newProduct = {
+      id: 36,
+      genericName: "One Step Peel",
+      brandName: "SR Cosmetics",
+      notes: "Multi-acid peel (glycolic, lactic) + niacinamide, arbutin, tranexamic acid, acetyl hexapeptide-8 — assuming the Israeli product matches the US listing's stated formula (unverified INCI on the Israeli packaging). Niacinamide is redundant with Yeouth Niacinamide Serum; the acid portion joins the existing PM exfoliant rotation rather than running as the label's separate twice-daily leave-on. Arbutin + tranexamic acid are the one non-redundant addition — two distinct anti-hyperpigmentation mechanisms for post-acne marks/scarring.",
+      scheduled: true,
+      session: "pm",
+      frequency: "weekly",
+      stepOrder: 40,
+      nextDate: todayStr()
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
     };
   }
 }];
