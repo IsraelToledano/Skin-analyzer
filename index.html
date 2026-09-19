@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-17.2";
+const APP_VERSION = "2026-09-19.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -405,6 +405,51 @@ const canonicalStepOrder = p => CATEGORY_STEP_ORDER[detectType(p)] ?? 50;
 // keep their canonical position relative to each other, sorted after the
 // explicitly-ordered ones.
 const dayOrderKey = (ds, session) => `${ds}:${session}`;
+// ─── PM TREATMENTS (procedures) ────────────────────────────────────────────
+// User-logged PM treatments that aren't products: microneedling and red /
+// near-infrared LED. Deliberately NOT auto-suggested or auto-scheduled —
+// Israel adds one on the night he actually did it, and the routine adapts
+// around it. They are stored as dated events on the profile
+// (profile.procedures) rather than as products, because they have no place
+// in the layering order and no due-date/rotation behaviour; what they have
+// is a recovery window.
+// The two are deliberately treated DIFFERENTLY, not lumped together as
+// "treatments":
+//   • microneedling physically breaches the barrier, so retinoids and acid
+//     exfoliants are blocked the same night AND the following night
+//     (blockNights: 2, counting the night of the treatment) — at-home
+//     0.25-0.5mm depth, per Israel's stated use.
+//   • red/near-infrared LED is non-ablative: it doesn't disrupt the barrier
+//     and has no recovery window, so it blocks nothing (blockNights: 0).
+//     Blocking actives around it would cost active nights for no clinical
+//     reason. It's tracked only, so "when did I last do it" is answerable.
+const PROCEDURE_TYPES = {
+  microneedling: {
+    label: "Microneedling",
+    icon: "🪡",
+    blockNights: 2,
+    note: "At-home derma-stamp/roller (0.25–0.5mm). Blocks retinoids and acid exfoliants tonight and tomorrow night."
+  },
+  redlight: {
+    label: "Red / Infrared LED",
+    icon: "🔆",
+    blockNights: 0,
+    note: "Non-ablative — no recovery window, so it doesn't hold back actives. Tracked only."
+  }
+};
+const proceduresOn = (profile, ds) => (profile?.procedures || []).filter(x => x.date === ds);
+// True if an active (retinoid / acid exfoliant) must be held back on `ds`
+// because of a procedure's recovery window. A procedure with blockNights: n
+// covers its own night plus the following n-1 nights.
+const activesBlockedOn = (profile, ds) => (profile?.procedures || []).some(x => {
+  const def = PROCEDURE_TYPES[x.type];
+  if (!def || !def.blockNights) return false;
+  if (!x.date || !/^\d{4}-\d{2}-\d{2}$/.test(x.date) || !ds) return false;
+  const gap = daysBetween(x.date, ds);
+  return gap >= 0 && gap < def.blockNights;
+});
+// Most recent logged occurrence of a procedure type, or null.
+const lastProcedure = (profile, type) => (profile?.procedures || []).filter(x => x.type === type).map(x => x.date).sort().pop() || null;
 const dayOrderFor = (profile, ds, session) => (profile?.dayOrder || {})[dayOrderKey(ds, session)] || null;
 // Sorts a day's products: an explicit per-day drag order first (if one
 // exists for this exact day+session), otherwise the canonical category
@@ -2782,7 +2827,7 @@ const groupRotating = rotating => {
   });
   return Object.values(groups);
 };
-const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = []) => {
+const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = [], procedures = []) => {
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
   // Rotation-pool members (see ROTATION_CATEGORY_ROLES / step 2d below) are
   // scheduled exclusively through the dedicated pool logic — excluding
@@ -2821,6 +2866,19 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // essences, toners, and moisturizers don't trigger it, since they're not
   // the barrier-stressing actives the rest night is protecting against.
   const isActiveIngredient = p => classifyActiveGroups(p).some(g => g === "retinoid" || g === "acid-exfoliant");
+  // Procedure recovery windows (see PROCEDURE_TYPES): on a night covered by
+  // a microneedling recovery window, retinoids and acid exfoliants are held
+  // back entirely. This is a hard block rather than a deprioritization —
+  // applying an acid or retinoid to freshly-needled skin is the one
+  // interaction here with a real injury risk, so it can't be traded off
+  // against rotation fairness the way ordinary spacing can.
+  const procedureBlocksActives = ds => (procedures || []).some(x => {
+    const def = PROCEDURE_TYPES[x.type];
+    if (!def || !def.blockNights) return false;
+    if (!x.date || !/^\d{4}-\d{2}-\d{2}$/.test(x.date)) return false;
+    const gap = daysBetween(x.date, ds);
+    return gap >= 0 && gap < def.blockNights;
+  });
   let pendingCarry = new Set();
   const schedule = {};
   let cur = epoch;
@@ -3015,6 +3073,9 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         if (!candidates.length) return;
         const winner = candidates[0].p;
         if (conflictsWithToday(winner)) return;
+        // Procedure recovery window: never place an active on a night
+        // inside a microneedling block (see procedureBlocksActives).
+        if (isActiveIngredient(winner) && procedureBlocksActives(ds)) return;
         // No rest-night cooldown here (unlike the general fill below) —
         // ROTATION_SLOTS' offsetDays ARE the deliberate spacing design.
         // With retinoid now at 3 slots/week alongside exfoliant(2) +
@@ -3111,6 +3172,10 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // retinoid product's own due night.
         const activeClash = c.members.some(p => isActiveIngredient(p)) && lastActiveDate && daysBetween(lastActiveDate, ds) === 1;
         if (activeClash) return;
+        // Procedure recovery window (see procedureBlocksActives): hard
+        // block, checked separately from the rest-night cooldown above
+        // because it applies even when no active ran yesterday.
+        if (c.members.some(p => isActiveIngredient(p)) && procedureBlocksActives(ds)) return;
         if (c.members.length <= remaining) {
           c.members.forEach(p => {
             dayList.push({
@@ -3416,6 +3481,125 @@ const SwapPickerModal = ({
       }
     }, fit.text)));
   }))));
+};
+// PM-only strip for logging treatments (microneedling / red-light LED) on a
+// given night, and seeing when each was last done. Deliberately manual: a
+// treatment appears here only because Israel logged it, and logging one
+// immediately reshapes the PM schedule around its recovery window (see
+// PROCEDURE_TYPES / procedureBlocksActives).
+const TreatmentStrip = ({ ds, profile, onUpdate }) => {
+  const [open, setOpen] = useState(false);
+  const logged = proceduresOn(profile, ds);
+  const toggle = type => {
+    const existing = (profile.procedures || []).find(x => x.date === ds && x.type === type);
+    const next = existing ? (profile.procedures || []).filter(x => !(x.date === ds && x.type === type)) : [...(profile.procedures || []), { date: ds, type }];
+    onUpdate({ procedures: next });
+  };
+  const sinceText = type => {
+    const last = lastProcedure(profile, type);
+    if (!last) return "never logged";
+    const gap = daysBetween(last, todayStr());
+    if (gap === 0) return "today";
+    if (gap === 1) return "yesterday";
+    if (gap < 0) return `scheduled ${last}`;
+    return `${gap} days ago`;
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    style: { marginTop: 8 }
+  },
+  // Logged treatments render as their own rows, so the night's actual
+  // contents are visible at a glance alongside the product steps.
+  logged.map(item => {
+    const def = PROCEDURE_TYPES[item.type];
+    if (!def) return null;
+    return /*#__PURE__*/React.createElement("div", {
+      key: item.type,
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 10px",
+        marginBottom: 6,
+        borderRadius: 8,
+        background: T.greenSoft,
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, /*#__PURE__*/React.createElement("span", { style: { fontSize: 15 } }, def.icon), /*#__PURE__*/React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 13, fontWeight: 700, color: T.text }
+    }, def.label), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: T.muted, marginTop: 2 }
+    }, def.blockNights ? "Actives paused tonight and tomorrow night" : "No recovery window — actives unaffected")), /*#__PURE__*/React.createElement("button", {
+      onClick: () => toggle(item.type),
+      style: {
+        border: "none",
+        background: "transparent",
+        color: T.muted,
+        fontSize: 12,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, "Remove"));
+  }),
+  open ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: 10,
+      borderRadius: 8,
+      border: `1px solid ${T.border}`,
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, Object.entries(PROCEDURE_TYPES).map(([type, def]) => {
+    const already = logged.some(x => x.type === type);
+    return /*#__PURE__*/React.createElement("button", {
+      key: type,
+      onClick: () => { toggle(type); setOpen(false); },
+      disabled: already,
+      style: {
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        marginBottom: 6,
+        padding: "8px 10px",
+        borderRadius: 8,
+        border: `1px solid ${T.border}`,
+        background: already ? T.faint : "transparent",
+        opacity: already ? 0.5 : 1,
+        cursor: already ? "default" : "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 13, fontWeight: 700, color: T.text }
+    }, `${def.icon} ${def.label}`), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: T.muted, marginTop: 2 }
+    }, `Last: ${sinceText(type)}`), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: T.muted, marginTop: 2 }
+    }, def.note));
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(false),
+    style: {
+      border: "none",
+      background: "transparent",
+      color: T.muted,
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, "Cancel")) : /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(true),
+    style: {
+      width: "100%",
+      padding: "8px 0",
+      borderRadius: 8,
+      border: `1px dashed ${T.border}`,
+      background: "transparent",
+      color: T.muted,
+      fontSize: 12,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, "+ Log treatment"));
 };
 const RoutineBlock = ({
   prods,
@@ -4005,6 +4189,10 @@ const RoutineBlock = ({
       const log = logs.find(l => l.productId === p.id && l.session === session);
       return !(log?.skipped && !log?.done);
     })
+  }), session === "pm" && /*#__PURE__*/React.createElement(TreatmentStrip, {
+    ds: ds,
+    profile: profile,
+    onUpdate: onUpdate
   }), dragWarning && /*#__PURE__*/React.createElement("div", {
     onClick: () => setDragWarning(null),
     style: {
@@ -4309,8 +4497,8 @@ const RoutineListView = ({ profile, onOpenDay }) => {
   const [rangeEnd, setRangeEnd] = useState(() => addDays(today, LIST_CHUNK_DAYS));
   const atFloor = dateStr(rangeStart) <= floorDs;
   const toDate = dateStr(addDays(rangeEnd, LIST_CHUNK_DAYS));
-  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins]);
-  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins]);
+  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || [], profile.procedures || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins, profile.procedures]);
+  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || [], profile.procedures || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins, profile.procedures]);
   const days = [];
   for (let d = new Date(rangeStart); d <= rangeEnd; d = addDays(d, 1)) days.push(new Date(d));
   const containerRef = useRef(null);
@@ -4418,8 +4606,8 @@ const CalendarTab = ({
   const toDate = dateStr(addDays(cursor, 14));
   const amEpoch = useMemo(() => computeEpoch(profile.products, "am"), [profile.products]);
   const pmEpoch = useMemo(() => computeEpoch(profile.products, "pm"), [profile.products]);
-  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins]);
-  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins]);
+  const amSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "am", amEpoch, toDate, SESSION_CAP, profile.pins || [], profile.procedures || []), [profile.products, profile.logs, amEpoch, toDate, profile.pins, profile.procedures]);
+  const pmSchedule = useMemo(() => buildSessionSchedule(profile.products, profile.logs, "pm", pmEpoch, toDate, SESSION_CAP, profile.pins || [], profile.procedures || []), [profile.products, profile.logs, pmEpoch, toDate, profile.pins, profile.procedures]);
   const openDay = date => {
     setCursor(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
     setView("day");
