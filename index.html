@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-19.1";
+const APP_VERSION = "2026-09-20.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -456,12 +456,28 @@ const dayOrderFor = (profile, ds, session) => (profile?.dayOrder || {})[dayOrder
 // order. Ties inside a category fall back to product id so the result is
 // stable rather than dependent on array order.
 const sortForDay = (prods, profile, ds, session) => {
+  const canon = (a, b) => canonicalStepOrder(a) - canonicalStepOrder(b) || String(a.id).localeCompare(String(b.id));
   const override = dayOrderFor(profile, ds, session);
-  const idx = id => {
-    const i = override ? override.indexOf(id) : -1;
-    return i === -1 ? Infinity : i;
-  };
-  return [...prods].sort((a, b) => idx(a.id) - idx(b.id) || canonicalStepOrder(a) - canonicalStepOrder(b) || String(a.id).localeCompare(String(b.id)));
+  if (!Array.isArray(override) || !override.length) return [...prods].sort(canon);
+  // Products named in the override keep the dragged order. Anything NOT
+  // named (a step added after the drag, or a product that newly became due)
+  // used to sort after every named product regardless of category, so a
+  // cleanser or toner added later landed at the bottom. Each such product is
+  // now slotted in at its canonical position among the named ones instead.
+  const seen = new Set();
+  const out = [];
+  override.forEach(id => {
+    const p = prods.find(x => x.id === id);
+    if (p && !seen.has(id)) {
+      seen.add(id);
+      out.push(p);
+    }
+  });
+  prods.filter(p => !seen.has(p.id)).sort(canon).forEach(e => {
+    const at = out.findIndex(o => canonicalStepOrder(o) > canonicalStepOrder(e));
+    out.splice(at === -1 ? out.length : at, 0, e);
+  });
+  return out;
 };
 // One distinct color per category, used for the category tag pill and the
 // row's leading dot. Kept separate from RANK_STYLE's palette (green/blue/
@@ -1252,7 +1268,8 @@ const EMPTY_PROFILE = {
   logs: [],
   skinImgs: [],
   pins: [], // manual per-day swap/add overrides — see buildSessionSchedule step 1b
-  breakouts: [] // { id, date, locations, severity, notes } — see analyzeBreakoutTriggers
+  breakouts: [], // { id, date, locations, severity, notes } — see analyzeBreakoutTriggers
+  routineSync: null // { on, snapshot } — baseline for the Update routine button, see analyzeRoutine
 };
 
 // ─── STORAGE (real localStorage — persists properly on this device) ───────────
@@ -2905,7 +2922,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     // product's own scheduling config (never mutates it), and always shown
     // like the one-offs above, regardless of remaining budget.
     pins.forEach(pin => {
-      if (pin.date === ds && pin.session === session && !placedIds.has(pin.productId)) {
+      if (pin && pin.date === ds && pin.session === session && !placedIds.has(pin.productId)) {
         dayList.push({
           productId: pin.productId,
           carried: false,
@@ -3226,6 +3243,146 @@ const queueFor = (schedule, products, date) => {
     carried: e.carried,
     pinned: e.pinned || false
   })).filter(p => p.id);
+};
+
+// ─── UPDATE ROUTINE ─────────────────────────────────────────────────────────
+// The schedule is a pure function of the profile (products, logs, pins,
+// procedures) and is recomputed on every render, so a newly added step or
+// logged treatment already reflows the plan by itself. What the Update
+// routine button adds is the part that was invisible: (1) it shows exactly
+// what changed in the coming week since the last time it was pressed,
+// (2) it confirms which treatment windows are now holding actives back, and
+// (3) it lists steps that were added for a day but never made part of the
+// routine, with an explicit per-product "Add to routine" (never automatic —
+// a Swap also creates a pin, and a one-off try shouldn't silently become a
+// standing weekly step).
+// routineSync = { on, snapshot } is only a comparison baseline: it never
+// feeds the scheduler, so it cannot change what the schedule produces.
+const SYNC_HORIZON_DAYS = 7;
+const ADD_LOOKBACK_DAYS = 7;
+// Bulk-schedule eligibility, shared by Auto-Schedule and Update routine: a
+// "bad"-tagged product is never scheduled automatically, and a "good" one
+// whose own review calls out overlap/redundancy needs a manual decision.
+const isBulkSchedulable = p => {
+  const r = getProductRank(p);
+  if (!r) return true;
+  if (r.tag === "bad") return false;
+  if (r.tag === "good" && (r.cons || []).some(c => /overlap|redundan/i.test(c))) return false;
+  return true;
+};
+// Product ids per "YYYY-MM-DD:session" for the next `days` days, sorted so
+// two snapshots compare by membership, not order. Uses computeEpoch like the
+// real views — a simulation from epoch = today would diverge from production.
+const routineSnapshot = (profile, fromDs, days = SYNC_HORIZON_DAYS) => {
+  const prods = profile.products || [];
+  const toDs = addDaysStr(fromDs, days - 1);
+  const snap = {};
+  ["am", "pm"].forEach(session => {
+    const sched = buildSessionSchedule(prods, profile.logs || [], session, computeEpoch(prods, session), toDs, SESSION_CAP, profile.pins || [], profile.procedures || []);
+    for (let d = fromDs; d <= toDs; d = addDaysStr(d, 1)) {
+      snap[`${d}:${session}`] = (sched[d] || []).map(e => String(e.productId)).sort();
+    }
+  });
+  return snap;
+};
+// Day/session slots whose membership differs. Days present in only one
+// snapshot (they slid into or out of the window) are not changes.
+const diffRoutineSnapshots = (prev, next, products) => {
+  const nameOf = id => {
+    const p = (products || []).find(x => String(x.id) === id);
+    return p ? p.genericName : "a removed product";
+  };
+  const changes = [];
+  Object.keys(next).sort().forEach(key => {
+    const before = prev && prev[key];
+    if (!Array.isArray(before) || !Array.isArray(next[key])) return;
+    const added = next[key].filter(id => !before.includes(id));
+    const removed = before.filter(id => !next[key].includes(id));
+    if (!added.length && !removed.length) return;
+    const [date, session] = key.split(":");
+    changes.push({
+      date,
+      session,
+      added: added.map(nameOf),
+      removed: removed.map(nameOf)
+    });
+  });
+  return changes;
+};
+// Everything the button reports, computed without mutating anything.
+const analyzeRoutine = (profile, todayDs) => {
+  const prods = profile.products || [];
+  const snapshot = routineSnapshot(profile, todayDs);
+  const rs = profile.routineSync;
+  const prevSnap = rs && typeof rs.snapshot === "object" && rs.snapshot ? rs.snapshot : null;
+  const changes = prevSnap ? diffRoutineSnapshots(prevSnap, snapshot, prods) : [];
+  // Treatment windows still ahead of (or covering) today.
+  const treatments = [];
+  (profile.procedures || []).forEach(x => {
+    const def = PROCEDURE_TYPES[x.type];
+    if (!def || !x.date || !/^\d{4}-\d{2}-\d{2}$/.test(x.date)) return;
+    if (def.blockNights) {
+      const dates = [];
+      for (let i = 0; i < def.blockNights; i++) {
+        const d = addDaysStr(x.date, i);
+        if (d >= todayDs) dates.push(d);
+      }
+      if (dates.length) treatments.push({ label: def.label, date: x.date, blockedDates: dates });
+    } else if (x.date >= todayDs) {
+      treatments.push({ label: def.label, date: x.date, blockedDates: [] });
+    }
+  });
+  // Steps added to a day (pinned) whose product isn't part of the routine.
+  const cutoff = addDaysStr(todayDs, -ADD_LOOKBACK_DAYS);
+  const seen = new Set();
+  const adds = [];
+  (profile.pins || []).forEach(pin => {
+    if (!pin || !pin.date || pin.date < cutoff || seen.has(pin.productId)) return;
+    const p = prods.find(x => x.id === pin.productId);
+    if (!p || p.scheduled) return;
+    seen.add(pin.productId);
+    adds.push({
+      id: p.id,
+      name: p.genericName,
+      schedulable: isBulkSchedulable(p),
+      suggestion: suggestSchedule(p)
+    });
+  });
+  return { snapshot, changes, treatments, adds, first: !prevSnap };
+};
+// The button press: record the new baseline. Deliberately touches nothing
+// but routineSync — scheduling a product is a separate, explicit action.
+const computeRoutineUpdate = (profile, todayDs) => {
+  const a = analyzeRoutine(profile, todayDs);
+  return {
+    patch: { routineSync: { on: todayDs, snapshot: a.snapshot } },
+    report: a
+  };
+};
+// Explicit "Add to routine" for one added step. Returns null when the
+// product is gone, already scheduled, or flagged Bad/overlapping (those keep
+// needing a manual decision in Products). `ripple` is the exact effect of
+// this one product on the coming week, measured against a fresh snapshot.
+const scheduleAddedProduct = (profile, productId, todayDs) => {
+  const prods = profile.products || [];
+  const p = prods.find(x => x.id === productId);
+  if (!p || p.scheduled || !isBulkSchedulable(p)) return null;
+  const s = suggestSchedule(p);
+  const products = prods.map(x => x.id === productId ? {
+    ...x,
+    session: s.session,
+    frequency: s.frequency,
+    stepOrder: s.stepOrder,
+    nextDate: x.nextDate || todayDs,
+    scheduled: true
+  } : x);
+  const before = routineSnapshot(profile, todayDs);
+  const after = routineSnapshot({ ...profile, products }, todayDs);
+  return {
+    patch: { products, routineSync: { on: todayDs, snapshot: after } },
+    ripple: diffRoutineSnapshots(before, after, products),
+    schedule: s
+  };
 };
 
 // ─── ROUTINE BLOCK ──────────────────────────────────────────────────────────
@@ -4590,6 +4747,78 @@ const RoutineListView = ({ profile, onOpenDay }) => {
   })));
 };
 
+// ─── UPDATE ROUTINE BUTTON ─────────────────────────────────────────────────
+const FREQ_LABEL = { daily: "daily", weekly: "weekly", "twice-weekly": "2×/week" };
+const fmtSlot = (date, session) => `${DAYS[parseDate(date).getDay()]} ${Number(date.slice(8))} ${session.toUpperCase()}`;
+const fmtDay = date => `${DAYS[parseDate(date).getDay()]} ${Number(date.slice(8))}`;
+const RoutineUpdateBar = ({ profile, onUpdate }) => {
+  const h = React.createElement;
+  const todayDs = todayStr();
+  const [report, setReport] = useState(null);
+  const [added, setAdded] = useState([]); // [{ name, schedule, ripple }] added via the report card
+  // Dot on the button: the coming week differs from the last baseline.
+  const pending = useMemo(() => {
+    const a = analyzeRoutine(profile, todayDs);
+    return a.changes.length > 0;
+  }, [profile.products, profile.logs, profile.pins, profile.procedures, profile.routineSync, todayDs]);
+  const press = () => {
+    const { patch, report: r } = computeRoutineUpdate(profile, todayDs);
+    onUpdate(patch);
+    setReport(r);
+    setAdded([]);
+  };
+  const addToRoutine = add => {
+    const res = scheduleAddedProduct(profile, add.id, todayDs);
+    if (!res) return;
+    onUpdate(res.patch);
+    setAdded(a => [...a, { name: add.name, schedule: res.schedule, ripple: res.ripple }]);
+    setReport(r => r ? { ...r, adds: r.adds.filter(x => x.id !== add.id) } : r);
+  };
+  const small = { fontSize: 12, color: T.text, fontFamily: "'Inter',sans-serif", lineHeight: 1.5 };
+  const head = txt => h("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px", fontFamily: "'Inter',sans-serif" } }, txt);
+  const changeRow = (c, key) => h("div", { key, style: small }, h("b", null, fmtSlot(c.date, c.session)), c.added.length ? "  + " + c.added.join(", ") : "", c.removed.length ? "  − " + c.removed.join(", ") : "");
+  const nothing = report && !report.changes.length && !report.treatments.length && !report.adds.length && !added.length;
+  return h("div", { style: { marginBottom: 12 } },
+    h("button", {
+      onClick: press,
+      "data-testid": "update-routine",
+      style: {
+        width: "100%",
+        padding: "10px 0",
+        borderRadius: 10,
+        border: `1px solid ${T.border}`,
+        background: pending ? T.accentSoft : T.faint,
+        color: pending ? T.accent : T.text,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, pending ? "↻ Update routine •" : "↻ Update routine"),
+    report && h("div", {
+      "data-testid": "update-report",
+      style: { marginTop: 8, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.card }
+    },
+      h("div", { style: { ...small, fontWeight: 700 } }, nothing ? "Routine is up to date" : "Routine updated"),
+      report.first && h("div", { style: { ...small, color: T.muted, marginTop: 2 } }, "Baseline saved — next time I'll show what your adds and treatments changed."),
+      report.treatments.length > 0 && head("Treatments"),
+      report.treatments.map((t, i) => h("div", { key: "t" + i, style: small }, t.blockedDates.length ? `${t.label}: retinoids and acid exfoliants paused ${t.blockedDates.map(fmtDay).join(", ")}` : `${t.label}: tracked only — routine unchanged`)),
+      report.changes.length > 0 && head("Next 7 days, since last update"),
+      report.changes.map((c, i) => changeRow(c, "c" + i)),
+      added.map((a, i) => h("div", { key: "a" + i }, head(`${a.name} added to routine`), h("div", { style: small }, `${a.schedule.session === "both" ? "AM + PM" : a.schedule.session.toUpperCase()} · ${FREQ_LABEL[a.schedule.frequency] || a.schedule.frequency}`), a.ripple.map((c, j) => changeRow(c, "r" + j)))),
+      report.adds.length > 0 && head("Added to a day, not in your routine"),
+      report.adds.map(a => h("div", { key: "p" + a.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0" } },
+        h("div", { style: { ...small, flex: 1, minWidth: 0 } }, a.name, a.schedulable ? h("span", { style: { color: T.muted } }, ` · ${a.suggestion.session === "both" ? "AM + PM" : a.suggestion.session.toUpperCase()} ${FREQ_LABEL[a.suggestion.frequency] || a.suggestion.frequency}`) : h("span", { style: { color: T.muted } }, " · flagged — decide in Products")),
+        a.schedulable && h("button", {
+          onClick: () => addToRoutine(a),
+          style: { border: `1px solid ${T.border}`, background: "transparent", color: T.accent, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
+        }, "Add to routine"))),
+      h("button", {
+        onClick: () => setReport(null),
+        style: { border: "none", background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "8px 0 0", fontFamily: "'Inter',sans-serif" }
+      }, "Dismiss")));
+};
+
 // ─── CALENDAR ──────────────────────────────────────────────────────────────────
 const CalendarTab = ({
   profile,
@@ -4681,7 +4910,10 @@ const CalendarTab = ({
       padding: "8px 14px",
       fontSize: 12
     }
-  }, "Today"))), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
+  }, "Today"))), /*#__PURE__*/React.createElement(RoutineUpdateBar, {
+    profile: profile,
+    onUpdate: onUpdate
+  }), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
     date: cursor,
     profile: profile,
     onUpdate: onUpdate,
@@ -5250,13 +5482,6 @@ const ProductsTab = ({
   // too if its own review reason calls out overlap/redundancy with an
   // existing routine item — those need a manual, deliberate decision, not
   // a one-click bulk add.
-  const isBulkSchedulable = p => {
-    const r = getProductRank(p);
-    if (!r) return true;
-    if (r.tag === "bad") return false;
-    if (r.tag === "good" && (r.cons || []).some(c => /overlap|redundan/i.test(c))) return false;
-    return true;
-  };
   const autoSchedulable = unscheduled.filter(isBulkSchedulable);
   const [autoScheduledFlash, setAutoScheduledFlash] = useState(0);
   const autoScheduleAll = () => {
