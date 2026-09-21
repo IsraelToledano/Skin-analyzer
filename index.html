@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-20.1";
+const APP_VERSION = "2026-09-21.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3245,6 +3245,82 @@ const queueFor = (schedule, products, date) => {
   })).filter(p => p.id);
 };
 
+// ─── PRODUCT USAGE ("last used") ────────────────────────────────────────────
+// For one product: when it was actually applied last (a done log), when it
+// was last on the schedule before today and what became of that slot, when
+// it is next scheduled, and how many of the last 30 days' scheduled slots
+// were actually applied. "Applied" comes only from done logs; "scheduled"
+// comes from the same schedule the Day view renders, so the two can be
+// compared — the gap between them is exactly the under-use this surfaces.
+const productUsage = (profile, productId, todayDs) => {
+  const prods = profile.products || [];
+  const logs = (profile.logs || []).filter(Boolean);
+  const id = String(productId);
+  const logAt = (d, sess) => logs.find(l => l.date === d && l.session === sess && String(l.productId) === id);
+  let lastApplied = null;
+  logs.forEach(l => {
+    if (!l.done || String(l.productId) !== id || !l.date || l.date > todayDs) return;
+    if (!lastApplied || l.date > lastApplied.date || l.date === lastApplied.date && l.session === "pm") lastApplied = { date: l.date, session: l.session };
+  });
+  const toDs = addDaysStr(todayDs, 30);
+  const slots = [];
+  ["am", "pm"].forEach(session => {
+    const sched = buildSessionSchedule(prods, logs, session, computeEpoch(prods, session), toDs, SESSION_CAP, profile.pins || [], profile.procedures || []);
+    Object.keys(sched).forEach(d => {
+      if ((sched[d] || []).some(e => String(e.productId) === id)) slots.push({ date: d, session });
+    });
+  });
+  slots.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.session === b.session ? 0 : a.session === "am" ? -1 : 1);
+  const outcomeOf = sl => {
+    const l = logAt(sl.date, sl.session);
+    return l && l.done ? "applied" : l && l.skipped ? "skipped" : "missed";
+  };
+  const past = slots.filter(sl => sl.date < todayDs);
+  const lastSlot = past.length ? past[past.length - 1] : null;
+  const nextScheduled = slots.find(sl => sl.date > todayDs || sl.date === todayDs && !(logAt(sl.date, sl.session) || {}).done) || null;
+  const winStart = addDaysStr(todayDs, -30);
+  const recent = past.filter(sl => sl.date >= winStart);
+  return {
+    lastApplied,
+    daysSinceApplied: lastApplied ? daysBetween(lastApplied.date, todayDs) : null,
+    lastScheduled: lastSlot ? { ...lastSlot, outcome: outcomeOf(lastSlot) } : null,
+    nextScheduled,
+    last30: { scheduled: recent.length, applied: recent.filter(sl => outcomeOf(sl) === "applied").length }
+  };
+};
+const fmtUsageDate = d => {
+  const dt = parseDate(d);
+  return `${DAYS[dt.getDay()]} ${MONTHS[dt.getMonth()].slice(0, 3)} ${dt.getDate()}`;
+};
+const relDays = (d, todayDs) => {
+  const n = daysBetween(d, todayDs);
+  if (n === 0) return "today";
+  if (n === 1) return "yesterday";
+  if (n === -1) return "tomorrow";
+  return n > 0 ? `${n} days ago` : `in ${-n} days`;
+};
+const ProductUsagePanel = ({ profile, p }) => {
+  const h = React.createElement;
+  const todayDs = todayStr();
+  const u = useMemo(() => productUsage(profile, p.id, todayDs), [profile.products, profile.logs, profile.pins, profile.procedures, p.id, todayDs]);
+  const expected = FREQ_DAYS[p.frequency] || 1;
+  const behind = u.lastApplied ? u.daysSinceApplied > Math.max(3, expected * 2) : u.last30.scheduled > 0;
+  const row = (label, value, color) => h("div", { style: { display: "flex", gap: 8, padding: "3px 0", fontSize: 12, fontFamily: "'Inter',sans-serif", lineHeight: 1.4 } },
+    h("div", { style: { width: 96, flexShrink: 0, color: T.muted } }, label),
+    h("div", { style: { flex: 1, color: color || T.text } }, value));
+  const slot = sl => `${fmtUsageDate(sl.date)} · ${sl.session.toUpperCase()}`;
+  const outcomeColor = { applied: T.green, skipped: T.muted, missed: T.red };
+  return h("div", {
+    "data-testid": "usage-panel",
+    onClick: e => e.stopPropagation(),
+    style: { flexBasis: "100%", width: "100%", boxSizing: "border-box", margin: "6px 0 2px", padding: "8px 12px", borderRadius: 10, background: T.faint, border: `1px solid ${T.border}` }
+  },
+    row("Last applied", u.lastApplied ? `${slot(u.lastApplied)} — ${relDays(u.lastApplied.date, todayDs)}` : "Never marked done", u.lastApplied ? null : T.red),
+    row("Last scheduled", u.lastScheduled ? h("span", null, `${slot(u.lastScheduled)} — `, h("b", { style: { color: outcomeColor[u.lastScheduled.outcome] } }, u.lastScheduled.outcome)) : "Not scheduled before today"),
+    row("Next scheduled", u.nextScheduled ? `${u.nextScheduled.date === todayDs ? "Today" : fmtUsageDate(u.nextScheduled.date)} · ${u.nextScheduled.session.toUpperCase()}${u.nextScheduled.date === todayDs ? "" : " — " + relDays(u.nextScheduled.date, todayDs)}` : "Nothing in the next 30 days"),
+    row("Last 30 days", u.last30.scheduled ? `Applied ${u.last30.applied} of ${u.last30.scheduled} scheduled` : "Not scheduled in the last 30 days"),
+    behind && h("div", { style: { marginTop: 4, fontSize: 11, fontWeight: 600, color: T.red, fontFamily: "'Inter',sans-serif" } }, u.lastApplied ? `Not applied in ${u.daysSinceApplied} days — it's meant to be ${expected === 1 ? "daily" : "about every " + expected + " days"}.` : "Scheduled but never marked done."));
+};
 // ─── UPDATE ROUTINE ─────────────────────────────────────────────────────────
 // The schedule is a pure function of the profile (products, logs, pins,
 // procedures) and is recomputed on every render, so a newly added step or
@@ -3427,6 +3503,31 @@ const fitLabel = score => {
     color: T.muted
   };
 };
+// Swap/Add picker layout. Candidates arrive sorted by score; the picker shows
+// them as titled blocks by fit tier instead of a per-row label on the far
+// right. For a swap, the blocks hold only products from the SAME category
+// as the step being replaced (a toner for a toner); everything from other
+// categories is kept apart in `otherItems` so it is one deliberate tap away
+// rather than mixed in. For "Add a step" there is no category to match, so
+// everything sits in the tier blocks.
+const fitTier = score => score >= 40 ? "great" : score >= 15 ? "good" : "weak";
+const FIT_TIER_STYLE = {
+  great: { title: "Great fit", color: T.green },
+  good: { title: "Good fit", color: T.accent },
+  weak: { title: "Not a great fit", color: T.muted }
+};
+const buildPickerSections = (candidates, excludeProduct) => {
+  const category = excludeProduct ? productCategoryGroup(excludeProduct) : null;
+  const same = category ? candidates.filter(c => productCategoryGroup(c.p) === category) : candidates;
+  const otherItems = category ? candidates.filter(c => productCategoryGroup(c.p) !== category) : [];
+  const sections = ["great", "good", "weak"].map(tier => ({
+    tier,
+    title: FIT_TIER_STYLE[tier].title,
+    color: FIT_TIER_STYLE[tier].color,
+    items: same.filter(c => fitTier(c.score) === tier)
+  })).filter(sec => sec.items.length > 0);
+  return { category, sections, sameCount: same.length, otherItems };
+};
 // iOS Safari doesn't resize the layout viewport when the keyboard opens —
 // only window.visualViewport shrinks. A `position: fixed; inset: 0` sheet
 // stays full-height and ends up behind the keyboard. This hook tracks the
@@ -3463,181 +3564,81 @@ const SwapPickerModal = ({
   onSelect,
   onClose
 }) => {
+  const h = React.createElement;
   const [filter, setFilter] = useState("");
+  const [showOther, setShowOther] = useState(false);
   const { height: vvHeight, offsetTop: vvOffsetTop } = useVisualViewportInsets();
   const activeIds = new Set(activeProducts.map(p => p.id));
   const otherActiveProducts = activeProducts.filter(p => p.id !== excludeProduct?.id);
   const candidates = (profile.products || []).filter(p => p.id !== excludeProduct?.id && !activeIds.has(p.id)).filter(p => !filter || `${p.genericName} ${p.brandName || ""}`.toLowerCase().includes(filter.toLowerCase())).map(p => ({
     p,
-    score: scoreCandidate(p, {
-      session,
-      ds,
-      profile,
-      otherActiveProducts
-    })
+    score: scoreCandidate(p, { session, ds, profile, otherActiveProducts })
   })).sort((a, b) => b.score - a.score);
-  return /*#__PURE__*/React.createElement("div", {
-    onClick: onClose,
-    style: {
-      position: "fixed",
-      left: 0,
-      right: 0,
-      top: vvOffsetTop,
-      height: vvHeight,
-      background: "rgba(44,36,32,0.5)",
-      zIndex: 1000,
-      display: "flex",
-      alignItems: "flex-end",
-      justifyContent: "center"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    onClick: e => e.stopPropagation(),
-    style: {
-      background: "#fff",
-      borderRadius: "24px 24px 0 0",
-      width: "100%",
-      maxWidth: 580,
-      maxHeight: `min(80vh, ${vvHeight}px)`,
-      display: "flex",
-      flexDirection: "column",
-      boxShadow: T.shadowMd
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: "14px 20px 10px",
-      borderBottom: `1px solid ${T.border}`,
-      flexShrink: 0
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      width: 40,
-      height: 4,
-      background: T.border,
-      borderRadius: 2,
-      margin: "0 auto 10px"
-    }
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between"
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 700,
-      color: T.text,
-      fontSize: 15,
-      fontFamily: "'Cormorant Garamond',serif"
-    }
-  }, mode === "swap" ? `Swap "${excludeProduct?.genericName || ""}"` : "Add a step"), /*#__PURE__*/React.createElement("button", {
-    onClick: onClose,
-    style: {
-      background: T.faint,
-      border: "none",
-      borderRadius: "50%",
-      width: 28,
-      height: 28,
-      cursor: "pointer",
-      fontSize: 14,
-      color: T.muted
-    }
-  }, "×")), /*#__PURE__*/React.createElement("input", {
-    value: filter,
-    onChange: e => setFilter(e.target.value),
-    placeholder: "Search products…",
-    style: {
-      width: "100%",
-      marginTop: 10,
-      padding: "8px 12px",
-      borderRadius: 8,
-      border: `1px solid ${T.border}`,
-      fontSize: 13,
-      fontFamily: "'Inter',sans-serif"
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      overflowY: "auto",
-      padding: "8px 20px 24px",
-      flex: 1
-    }
-  }, candidates.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: T.muted,
-      fontSize: 13,
-      fontStyle: "italic",
-      padding: "16px 0",
-      textAlign: "center"
-    }
-  }, "No matching products."), candidates.map(({
-    p,
-    score
-  }) => {
+  const { category, sections, sameCount, otherItems } = buildPickerSections(candidates, mode === "swap" ? excludeProduct : null);
+  // Other categories stay folded until asked for — except when searching
+  // (the person is clearly looking for something specific) or when the
+  // step's own category has nothing else to offer.
+  const otherOpen = showOther || filter.trim() !== "" || sameCount === 0 && otherItems.length > 0;
+  const chip = (txt, color) => h("span", { style: { fontSize: 9, fontWeight: 700, background: `${color}18`, color, border: `1px solid ${color}44`, borderRadius: 100, padding: "1px 7px" } }, txt);
+  const renderRow = ({ p }, showCat, last) => {
     const col = pcolor(p);
-    const fit = fitLabel(score);
     const rank = getProductRank(p);
-    return /*#__PURE__*/React.createElement("div", {
+    return h("div", {
       key: p.id,
+      "data-testid": "picker-row",
       onClick: () => onSelect(p),
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "10px 4px",
-        borderBottom: `1px solid ${T.border}`,
-        cursor: "pointer"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: col.border,
-        flexShrink: 0
-      }
-    }), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 13,
-        fontWeight: 600,
-        color: T.text
-      }
-    }, p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: T.muted,
-        fontWeight: 400,
-        fontSize: 12
-      }
-    }, " · ", p.brandName))), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        flexShrink: 0
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      // Rank indicator — lets you see at a glance that you're swapping to
-      // a lower-ranked ("Good"/"Bad") product instead of the top pick,
-      // rather than that only surfacing later in the product detail view.
-      style: {
-        fontSize: 9,
-        fontWeight: 700,
-        background: RANK_STYLE[rank.tag].bg,
-        color: RANK_STYLE[rank.tag].color,
-        border: `1px solid ${RANK_STYLE[rank.tag].color}44`,
-        borderRadius: 100,
-        padding: "1px 7px"
-      }
-    }, RANK_STYLE[rank.tag].label), /*#__PURE__*/React.createElement("span", {
-      style: {
-        fontSize: 10,
-        fontWeight: 700,
-        color: fit.color
-      }
-    }, fit.text)));
-  }))));
+      style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: last ? "none" : `1px solid ${T.border}`, cursor: "pointer", background: "#fff" }
+    },
+      h("div", { style: { width: 8, height: 8, borderRadius: "50%", background: col.border, flexShrink: 0 } }),
+      h("div", { style: { flex: 1, minWidth: 0 } },
+        h("div", { style: { fontSize: 13, fontWeight: 600, color: T.text } }, p.genericName, p.brandName && h("span", { style: { color: T.muted, fontWeight: 400, fontSize: 12 } }, " · ", p.brandName)),
+        showCat && h("div", { style: { fontSize: 11, color: T.muted, marginTop: 1 } }, productCategoryGroup(p))),
+      // Rank verdict stays: you can see you're swapping to a lower-ranked
+      // product rather than that only surfacing later in the detail view.
+      h("span", { style: { fontSize: 9, fontWeight: 700, background: RANK_STYLE[rank.tag].bg, color: RANK_STYLE[rank.tag].color, border: `1px solid ${RANK_STYLE[rank.tag].color}44`, borderRadius: 100, padding: "1px 7px", flexShrink: 0 } }, RANK_STYLE[rank.tag].label));
+  };
+  const block = (key, title, color, sub, items, showCat) => h("div", {
+    key,
+    "data-testid": "picker-block",
+    style: { margin: "12px 0", border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }
+  },
+    h("div", { style: { padding: "8px 12px", background: T.faint, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "baseline", gap: 8 } },
+      h("span", { style: { width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0, alignSelf: "center" } }),
+      h("span", { style: { fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "'Inter',sans-serif" } }, title),
+      sub && h("span", { style: { fontSize: 11, color: T.muted, fontFamily: "'Inter',sans-serif" } }, sub),
+      h("span", { style: { marginLeft: "auto", fontSize: 11, color: T.muted } }, items.length)),
+    items.map((it, i) => renderRow(it, showCat, i === items.length - 1)));
+  return h("div", {
+    onClick: onClose,
+    style: { position: "fixed", left: 0, right: 0, top: vvOffsetTop, height: vvHeight, background: "rgba(44,36,32,0.5)", zIndex: 1000, display: "flex", alignItems: "flex-end", justifyContent: "center" }
+  },
+    h("div", {
+      onClick: e => e.stopPropagation(),
+      style: { background: "#fff", borderRadius: "24px 24px 0 0", width: "100%", maxWidth: 580, maxHeight: `min(80vh, ${vvHeight}px)`, display: "flex", flexDirection: "column", boxShadow: T.shadowMd }
+    },
+      h("div", { style: { padding: "14px 20px 10px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 } },
+        h("div", { style: { width: 40, height: 4, background: T.border, borderRadius: 2, margin: "0 auto 10px" } }),
+        h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          h("div", null,
+            h("div", { style: { fontWeight: 700, color: T.text, fontSize: 15, fontFamily: "'Cormorant Garamond',serif" } }, mode === "swap" ? `Swap "${excludeProduct?.genericName || ""}"` : "Add a step"),
+            mode === "swap" && category && h("div", { style: { fontSize: 11, color: T.muted, fontFamily: "'Inter',sans-serif", marginTop: 1 } }, `Showing ${category} first`)),
+          h("button", { onClick: onClose, style: { background: T.faint, border: "none", borderRadius: "50%", width: 28, height: 28, cursor: "pointer", fontSize: 14, color: T.muted } }, "×")),
+        h("input", {
+          value: filter,
+          onChange: e => setFilter(e.target.value),
+          placeholder: "Search products…",
+          style: { width: "100%", marginTop: 10, padding: "8px 12px", borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 13, fontFamily: "'Inter',sans-serif" }
+        })),
+      h("div", { style: { overflowY: "auto", padding: "0 20px 24px", flex: 1 } },
+        candidates.length === 0 && h("div", { style: { color: T.muted, fontSize: 13, fontStyle: "italic", padding: "16px 0", textAlign: "center" } }, "No matching products."),
+        mode === "swap" && category && sameCount === 0 && otherItems.length > 0 && h("div", { style: { color: T.muted, fontSize: 12, padding: "12px 0 0" } }, `No other ${category} to swap in — showing other categories.`),
+        sections.map(sec => block(sec.tier, sec.title, sec.color, category ? `Same category · ${category}` : null, sec.items, !category)),
+        otherItems.length > 0 && !otherOpen && h("button", {
+          onClick: () => setShowOther(true),
+          "data-testid": "show-other-categories",
+          style: { width: "100%", marginTop: 12, padding: "10px 0", borderRadius: 10, border: `1px dashed ${T.border}`, background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
+        }, `Show ${otherItems.length} from other categories`),
+        otherItems.length > 0 && otherOpen && block("other", "Other categories", T.muted, `Outside ${category}`, otherItems, true))));
 };
 // PM-only strip for logging treatments (microneedling / red-light LED) on a
 // given night, and seeing when each was last done. Deliberately manual: a
@@ -3775,6 +3776,7 @@ const RoutineBlock = ({
   const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || appToday(), allDone));
   const [picker, setPicker] = useState(null); // { mode: "swap"|"add", excludeProduct } | null
   const [detailProduct, setDetailProduct] = useState(null); // rank badge tap → "why this step" modal
+  const [usageOpen, setUsageOpen] = useState({}); // productId → true while its "last used" panel is expanded
 
   // ── Drag-to-reorder ──────────────────────────────────────────────────
   // Steps are ordered by each product's global stepOrder. Dragging a row
@@ -4144,6 +4146,7 @@ const RoutineBlock = ({
         display: "flex",
         alignItems: "center",
         gap: 10,
+        flexWrap: "wrap",
         padding: "9px 0",
         borderBottom: i < orderedProds.length - 1 ? `1px solid ${T.border}` : "none",
         opacity: dragId === p.id ? 0.45 : 1,
@@ -4186,6 +4189,7 @@ const RoutineBlock = ({
     }, "✓")), /*#__PURE__*/React.createElement("div", {
       style: {
         flex: 1,
+        minWidth: 0,
         cursor: "pointer"
       },
       onClick: () => toggleDone(p.id, session)
@@ -4232,7 +4236,7 @@ const RoutineBlock = ({
         borderRadius: 20,
         padding: "1px 7px"
       }
-    }, cat), p.frequency !== "daily" && /*#__PURE__*/React.createElement("span", {
+    }, cat), p.frequency !== "daily" && FREQS[p.frequency] && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
         background: col.bg,
@@ -4292,7 +4296,23 @@ const RoutineBlock = ({
       // auto-remove anything; it's a visible flag, not enforcement, so a
       // product kept scheduled on purpose (e.g. to finish out a bottle)
       // still shows up normally — just with an honest label attached.
-    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label))), /*#__PURE__*/React.createElement("div", {
+    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label), /*#__PURE__*/React.createElement("span", {
+      onClick: e => {
+        e.stopPropagation();
+        setUsageOpen(o => ({ ...o, [p.id]: !o[p.id] }));
+      },
+      "data-testid": "usage-toggle",
+      style: {
+        fontSize: 10,
+        background: usageOpen[p.id] ? T.accentSoft : "transparent",
+        color: usageOpen[p.id] ? T.accent : T.muted,
+        border: `1px solid ${usageOpen[p.id] ? T.accent : T.border}`,
+        borderRadius: 20,
+        padding: "1px 7px",
+        fontWeight: 600,
+        cursor: "pointer"
+      }
+    }, usageOpen[p.id] ? "Last used ▴" : "Last used ▾"))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 5,
@@ -4340,7 +4360,10 @@ const RoutineBlock = ({
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, skipped ? "Skipped" : "Skip")));
+    }, skipped ? "Skipped" : "Skip")), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
+      profile: profile,
+      p: p
+    }));
   }), /*#__PURE__*/React.createElement(RoutineHealthCheck, {
     prods: prods.filter(p => {
       const log = logs.find(l => l.productId === p.id && l.session === session);
