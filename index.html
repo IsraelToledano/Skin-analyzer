@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-21.1";
+const APP_VERSION = "2026-09-22.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1256,6 +1256,9 @@ const scheduledDates = (p, from, to) => {
 // ─── EMPTY PROFILE ─────────────────────────────────────────────────────────────
 // On the phone version, products start empty — use Sync to pull your products
 // in from the Claude.ai version (see README).
+// How many deleted products Recently deleted keeps. Deliberately small:
+// it's an undo buffer for mis-taps, not an archive.
+const TRASH_LIMIT = 20;
 const EMPTY_PROFILE = {
   id: 1,
   name: "My Profile",
@@ -1269,7 +1272,8 @@ const EMPTY_PROFILE = {
   skinImgs: [],
   pins: [], // manual per-day swap/add overrides — see buildSessionSchedule step 1b
   breakouts: [], // { id, date, locations, severity, notes } — see analyzeBreakoutTriggers
-  routineSync: null // { on, snapshot } — baseline for the Update routine button, see analyzeRoutine
+  routineSync: null, // { on, snapshot } — baseline for the Update routine button, see analyzeRoutine
+  removedProducts: [] // soft-deleted products, newest first — see removeProduct/TRASH_LIMIT
 };
 
 // ─── STORAGE (real localStorage — persists properly on this device) ───────────
@@ -2211,6 +2215,39 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "restore_ginseng_essence_water_v1",
+  // Israel deleted a product by mistake in the Products tab (the old ×
+  // deleted instantly, with no confirmation — fixed in this same build) and
+  // asked for it back, describing it as a "toner essence". The only
+  // essence-toner in his library is the Beauty of Joseon Ginseng Essence
+  // Water (RANK_DATA id 27, tag "good"), so this restores that one.
+  // Deliberately scheduled:false — it was never meant to run in the routine
+  // (its review calls out overlap with the COSRX Snail Essence, which is
+  // exactly why isBulkSchedulable keeps it out of Auto-Schedule), so it
+  // comes back to the library and stays out of the schedule, the state it
+  // was in before the deletion. No-op if any ginseng product is present,
+  // so it can't duplicate one that's still there or that he re-adds first.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName, p.notes].filter(Boolean).join(" ").toLowerCase();
+    const products = profile.products || [];
+    if (products.some(p => hay(p).includes("ginseng"))) return profile;
+    return {
+      ...profile,
+      products: [...products, {
+        id: 27,
+        genericName: "Ginseng Essence Water",
+        brandName: "Beauty of Joseon",
+        notes: "Restored after an accidental delete. Hydrating essence-toner; overlaps with the COSRX Snail Essence, so it stays out of the routine unless deliberately scheduled.",
+        session: "",
+        frequency: "",
+        stepOrder: 0,
+        nextDate: "",
+        isOneOff: false,
+        scheduled: false
+      }]
     };
   }
 }];
@@ -3290,14 +3327,14 @@ const productUsage = (profile, productId, todayDs) => {
 };
 const fmtUsageDate = d => {
   const dt = parseDate(d);
-  return `${DAYS[dt.getDay()]} ${MONTHS[dt.getMonth()].slice(0, 3)} ${dt.getDate()}`;
+  return `${DAYS[dt.getDay()]} ${dt.getDate()}`;
 };
-const relDays = (d, todayDs) => {
-  const n = daysBetween(d, todayDs);
-  if (n === 0) return "today";
-  if (n === 1) return "yesterday";
-  if (n === -1) return "tomorrow";
-  return n > 0 ? `${n} days ago` : `in ${-n} days`;
+const SESSION_WORD = { am: "morning", pm: "evening" };
+// Plain-language slot description: "yesterday evening", "Tue 22 morning".
+const usagePhrase = (slot, todayDs) => {
+  const n = daysBetween(slot.date, todayDs);
+  const when = n === 0 ? "today" : n === 1 ? "yesterday" : n === -1 ? "tomorrow" : n > 0 ? `${fmtUsageDate(slot.date)} (${n} days ago)` : `${fmtUsageDate(slot.date)} (in ${-n} days)`;
+  return `${when}, ${SESSION_WORD[slot.session] || slot.session}`;
 };
 const ProductUsagePanel = ({ profile, p }) => {
   const h = React.createElement;
@@ -3305,21 +3342,48 @@ const ProductUsagePanel = ({ profile, p }) => {
   const u = useMemo(() => productUsage(profile, p.id, todayDs), [profile.products, profile.logs, profile.pins, profile.procedures, p.id, todayDs]);
   const expected = FREQ_DAYS[p.frequency] || 1;
   const behind = u.lastApplied ? u.daysSinceApplied > Math.max(3, expected * 2) : u.last30.scheduled > 0;
-  const row = (label, value, color) => h("div", { style: { display: "flex", gap: 8, padding: "3px 0", fontSize: 12, fontFamily: "'Inter',sans-serif", lineHeight: 1.4 } },
-    h("div", { style: { width: 96, flexShrink: 0, color: T.muted } }, label),
-    h("div", { style: { flex: 1, color: color || T.text } }, value));
-  const slot = sl => `${fmtUsageDate(sl.date)} · ${sl.session.toUpperCase()}`;
-  const outcomeColor = { applied: T.green, skipped: T.muted, missed: T.red };
+  const row = (label, value, color) => h("div", { style: { display: "flex", gap: 10, padding: "4px 0", fontSize: 13, fontFamily: "'Inter',sans-serif", lineHeight: 1.4 } },
+    h("div", { style: { width: 86, flexShrink: 0, color: T.muted } }, label),
+    h("div", { style: { flex: 1, color: color || T.text, fontWeight: 500 } }, value));
+  // Only shown when the last time it came up wasn't actually used — the
+  // "scheduled vs applied" distinction only matters when the two differ.
+  const missed = u.lastScheduled && u.lastScheduled.outcome !== "applied" ? u.lastScheduled : null;
   return h("div", {
     "data-testid": "usage-panel",
     onClick: e => e.stopPropagation(),
-    style: { flexBasis: "100%", width: "100%", boxSizing: "border-box", margin: "6px 0 2px", padding: "8px 12px", borderRadius: 10, background: T.faint, border: `1px solid ${T.border}` }
+    style: { flexBasis: "100%", width: "100%", boxSizing: "border-box", margin: "2px 0 6px", padding: "10px 14px", borderRadius: 10, background: T.faint, border: `1px solid ${T.border}` }
   },
-    row("Last applied", u.lastApplied ? `${slot(u.lastApplied)} — ${relDays(u.lastApplied.date, todayDs)}` : "Never marked done", u.lastApplied ? null : T.red),
-    row("Last scheduled", u.lastScheduled ? h("span", null, `${slot(u.lastScheduled)} — `, h("b", { style: { color: outcomeColor[u.lastScheduled.outcome] } }, u.lastScheduled.outcome)) : "Not scheduled before today"),
-    row("Next scheduled", u.nextScheduled ? `${u.nextScheduled.date === todayDs ? "Today" : fmtUsageDate(u.nextScheduled.date)} · ${u.nextScheduled.session.toUpperCase()}${u.nextScheduled.date === todayDs ? "" : " — " + relDays(u.nextScheduled.date, todayDs)}` : "Nothing in the next 30 days"),
-    row("Last 30 days", u.last30.scheduled ? `Applied ${u.last30.applied} of ${u.last30.scheduled} scheduled` : "Not scheduled in the last 30 days"),
-    behind && h("div", { style: { marginTop: 4, fontSize: 11, fontWeight: 600, color: T.red, fontFamily: "'Inter',sans-serif" } }, u.lastApplied ? `Not applied in ${u.daysSinceApplied} days — it's meant to be ${expected === 1 ? "daily" : "about every " + expected + " days"}.` : "Scheduled but never marked done."));
+    row("Last used", u.lastApplied ? usagePhrase(u.lastApplied, todayDs) : "Never", u.lastApplied ? null : T.red),
+    missed && row(missed.outcome === "skipped" ? "Skipped" : "Missed", usagePhrase(missed, todayDs), T.muted),
+    row("Next", u.nextScheduled ? usagePhrase(u.nextScheduled, todayDs) : "Not scheduled"),
+    row("Last month", u.last30.scheduled ? `Used ${u.last30.applied} of ${u.last30.scheduled} times` : "Never came up"),
+    behind && h("div", { style: { marginTop: 6, fontSize: 12, fontWeight: 600, color: T.red, fontFamily: "'Inter',sans-serif" } }, u.lastApplied ? `${u.daysSinceApplied} days since you used this.` : "Comes up in your routine, but you've never marked it used."));
+};
+// Why a product in the library isn't in the routine. Mirrors the real
+// gates: isBulkSchedulable (Auto-Schedule skips flagged products) and the
+// session+frequency fields the Schedule form requires. Returns the reason
+// and whether it's a "nothing's wrong, just not set up yet" case.
+const unscheduledReason = p => {
+  const rank = getProductRank(p);
+  const overlapCon = (rank.cons || []).find(c => /overlap|redundan/i.test(c));
+  if (rank.tag === "bad") return {
+    blocked: true,
+    title: "Flagged as not worth using",
+    detail: (rank.cons || [])[0] || "Its review flags it as redundant or not worth a slot.",
+    fix: "You can still schedule it yourself — open Schedule above."
+  };
+  if (overlapCon) return {
+    blocked: true,
+    title: "Overlaps with something already in your routine",
+    detail: overlapCon,
+    fix: "Auto-Schedule skips it on purpose. Schedule it yourself if you want it anyway."
+  };
+  return {
+    blocked: false,
+    title: "Nothing's wrong with it — it just hasn't been set up",
+    detail: !p.session || !p.frequency ? "No session or frequency picked yet, so there's nothing to schedule from." : "It has a session and frequency, but was removed from the routine.",
+    fix: "Tap Schedule above, or use Auto-Schedule to do it for you."
+  };
 };
 // ─── UPDATE ROUTINE ─────────────────────────────────────────────────────────
 // The schedule is a pure function of the profile (products, logs, pins,
@@ -4296,23 +4360,7 @@ const RoutineBlock = ({
       // auto-remove anything; it's a visible flag, not enforcement, so a
       // product kept scheduled on purpose (e.g. to finish out a bottle)
       // still shows up normally — just with an honest label attached.
-    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label), /*#__PURE__*/React.createElement("span", {
-      onClick: e => {
-        e.stopPropagation();
-        setUsageOpen(o => ({ ...o, [p.id]: !o[p.id] }));
-      },
-      "data-testid": "usage-toggle",
-      style: {
-        fontSize: 10,
-        background: usageOpen[p.id] ? T.accentSoft : "transparent",
-        color: usageOpen[p.id] ? T.accent : T.muted,
-        border: `1px solid ${usageOpen[p.id] ? T.accent : T.border}`,
-        borderRadius: 20,
-        padding: "1px 7px",
-        fontWeight: 600,
-        cursor: "pointer"
-      }
-    }, usageOpen[p.id] ? "Last used ▴" : "Last used ▾"))), /*#__PURE__*/React.createElement("div", {
+    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 5,
@@ -4360,7 +4408,31 @@ const RoutineBlock = ({
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, skipped ? "Skipped" : "Skip")), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
+    }, skipped ? "Skipped" : "Skip")), /*#__PURE__*/React.createElement("button", {
+      onClick: e => {
+        e.stopPropagation();
+        setUsageOpen(o => ({ ...o, [p.id]: !o[p.id] }));
+      },
+      "data-testid": "usage-toggle",
+      style: {
+        flexBasis: "100%",
+        width: "100%",
+        boxSizing: "border-box",
+        marginTop: 6,
+        padding: "9px 12px",
+        borderRadius: 10,
+        border: `1px solid ${T.border}`,
+        background: usageOpen[p.id] ? T.accentSoft : "transparent",
+        color: usageOpen[p.id] ? T.accent : T.muted,
+        fontSize: 12,
+        fontWeight: 600,
+        fontFamily: "'Inter',sans-serif",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between"
+      }
+    }, "Last used", /*#__PURE__*/React.createElement("span", null, usageOpen[p.id] ? "▴" : "▾")), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
       profile: profile,
       p: p
     }));
@@ -4970,6 +5042,8 @@ const ProductRow = ({
   allProducts
 }) => {
   const isEditing = editId === rowKey;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showWhy, setShowWhy] = useState(false);
   const rank = getProductRank(p);
   const cat = productCategoryGroup(p);
   const catColor = CATEGORY_COLORS[cat] || T.muted;
@@ -5116,7 +5190,8 @@ const ProductRow = ({
       flexShrink: 0
     }
   }, p.scheduled ? "Edit" : "Schedule"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => removeProduct(p.id),
+    onClick: () => setConfirmDelete(true),
+    title: "Delete product",
     style: {
       background: "none",
       border: "none",
@@ -5127,7 +5202,49 @@ const ProductRow = ({
       padding: "0 2px",
       flexShrink: 0
     }
-  }, "×")), isEditing && /*#__PURE__*/React.createElement("div", {
+  }, "×")), confirmDelete && /*#__PURE__*/React.createElement("div", {
+    "data-testid": "delete-confirm",
+    style: {
+      marginTop: 8,
+      marginLeft: 22,
+      padding: "10px 12px",
+      borderRadius: 10,
+      background: T.redSoft,
+      border: `1px solid ${T.red}33`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, color: T.text, fontFamily: "'Inter',sans-serif", marginBottom: 8 }
+  }, "Delete ", /*#__PURE__*/React.createElement("b", null, p.genericName), "? You can restore it from Recently deleted."), /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 8 }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setConfirmDelete(false);
+      removeProduct(p.id);
+    },
+    "data-testid": "delete-confirm-yes",
+    style: { border: "none", background: T.red, color: "#fff", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
+  }, "Delete"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setConfirmDelete(false),
+    style: { border: `1px solid ${T.border}`, background: "#fff", color: T.text, borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
+  }, "Cancel"))), !p.scheduled && !isEditing && /*#__PURE__*/React.createElement("div", {
+    style: { marginLeft: 22, marginTop: 6 }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowWhy(v => !v),
+    "data-testid": "why-toggle",
+    style: { border: "none", background: "transparent", color: T.muted, fontSize: 11, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "'Inter',sans-serif" }
+  }, showWhy ? "Why isn't this scheduled? \u25b4" : "Why isn't this scheduled? \u25be"), showWhy && (() => {
+    const why = unscheduledReason(p);
+    return /*#__PURE__*/React.createElement("div", {
+      "data-testid": "why-panel",
+      style: { marginTop: 6, padding: "10px 12px", borderRadius: 10, background: T.faint, border: `1px solid ${T.border}` }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, fontWeight: 700, color: why.blocked ? T.red : T.text, fontFamily: "'Inter',sans-serif" }
+    }, why.title), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: T.text, marginTop: 3, lineHeight: 1.45, fontFamily: "'Inter',sans-serif" }
+    }, why.detail), /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 11, color: T.muted, marginTop: 5, fontFamily: "'Inter',sans-serif" }
+    }, why.fix));
+  })()), isEditing && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 10,
       marginLeft: 22,
@@ -5480,11 +5597,32 @@ const ProductsTab = ({
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+  // Deleting a product is now recoverable: the × asks for confirmation
+  // first (it used to delete on a single tap, which cost a product during
+  // a search), and what it deletes goes to Recently deleted rather than
+  // disappearing. Logs and pins are deliberately left alone — they key off
+  // productId, so a restore lands the product back on its own history.
   const removeProduct = id => {
+    const victim = profile.products.find(p => p.id === id);
+    if (!victim) return;
     onUpdate({
-      products: profile.products.filter(p => p.id !== id)
+      products: profile.products.filter(p => p.id !== id),
+      removedProducts: [{ ...victim, removedAt: todayStr() }, ...(profile.removedProducts || []).filter(p => p.id !== id)].slice(0, TRASH_LIMIT)
     });
     if (editId === id) setEditId(null);
+  };
+  const restoreProduct = id => {
+    const victim = (profile.removedProducts || []).find(p => p.id === id);
+    if (!victim) return;
+    const { removedAt, ...prod } = victim;
+    if (profile.products.some(p => p.id === id)) {
+      onUpdate({ removedProducts: (profile.removedProducts || []).filter(p => p.id !== id) });
+      return;
+    }
+    onUpdate({
+      products: [...profile.products, prod],
+      removedProducts: (profile.removedProducts || []).filter(p => p.id !== id)
+    });
   };
   const updateSchedule = (id, patch) => {
     onUpdate({
@@ -5769,7 +5907,31 @@ const ProductsTab = ({
       color: T.muted,
       fontSize: 12
     }
-  }, "• ", c.p1.genericName, " + ", c.p2.genericName, " — schedule at different sessions or days")), detailProduct && /*#__PURE__*/React.createElement(ProductDetailModal, {
+  }, "• ", c.p1.genericName, " + ", c.p2.genericName, " — schedule at different sessions or days")), (profile.removedProducts || []).length > 0 && /*#__PURE__*/React.createElement(Card, {
+    key: "trash-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }
+  }, /*#__PURE__*/React.createElement(Lbl, {
+    style: { marginBottom: 0 }
+  }, "Recently deleted"), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, color: T.muted }
+  }, (profile.removedProducts || []).length)), (profile.removedProducts || []).map(rp => /*#__PURE__*/React.createElement("div", {
+    key: `trash-${rp.id}`,
+    "data-testid": "trash-row",
+    style: { display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}` }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { flex: 1, minWidth: 0 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 13, fontWeight: 600, color: T.text }
+  }, rp.genericName, rp.brandName && /*#__PURE__*/React.createElement("span", {
+    style: { color: T.muted, fontWeight: 400, fontSize: 12 }
+  }, " · ", rp.brandName)), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 11, color: T.muted, marginTop: 1 }
+  }, "Deleted ", rp.removedAt === todayStr() ? "today" : rp.removedAt)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => restoreProduct(rp.id),
+    "data-testid": "restore-btn",
+    style: { border: `1px solid ${T.border}`, background: "transparent", color: T.accent, borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif", flexShrink: 0 }
+  }, "Restore")))), detailProduct && /*#__PURE__*/React.createElement(ProductDetailModal, {
     product: detailProduct,
     onClose: () => setDetailId(null)
   })));
