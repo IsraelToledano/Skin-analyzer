@@ -105,7 +105,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-22.1";
+const APP_VERSION = "2026-09-22.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -230,6 +230,8 @@ const classifySingletonGroups = p => {
     // it shares exclusivity WITH toners, not just with other mists.
     groups.push("layer:toner");
   } else if (type === "serum" && groups.length === 0) {
+    // A treatment-free hydrating "serum" (COSRX Snail 96 Essence is sold as
+    // an essence, The Ordinary's as a serum) is an essence in all but name.
     const hay = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
     if (HYDRATION_SERUM_KEYWORDS.some(kw => hay.includes(kw))) groups.push("layer:essence");
   }
@@ -338,6 +340,20 @@ const detectType = p => {
   if (/toner/.test(hay)) return "toner";
   if (/essence/.test(hay)) return "essence";
   if (/serum/.test(hay)) return "serum";
+  // A hydrator that names neither "essence" nor "serum" — The Ordinary's
+  // "Marine Hyaluronics" is the live example — used to fall through to
+  // "other" and lose BOTH the essence step slot and the one-essence-per-
+  // night exclusivity (classifySingletonGroups only looked for hydration
+  // keywords on type "serum"). That silently broke
+  // rotate_hyaluronics_essence_v1, whose whole premise was that the Snail
+  // Essence and Marine Hyaluronics alternate: with no shared group they
+  // could land on the same night, and the "other" step order put the
+  // hydrator in the wrong place in the sequence. Classifying it here fixes
+  // the group, the ordering, and the category badge from one place instead
+  // of special-casing each. Reached only after every active/cleanser/
+  // moisturizer/toner branch above has already claimed its own products,
+  // so a real treatment serum or a ceramide cream can't be swept in.
+  if (HYDRATION_SERUM_KEYWORDS.some(kw => hay.includes(kw))) return "essence";
   return "other";
 };
 const CATEGORY_GROUP_MAP = {
@@ -2248,6 +2264,38 @@ const MIGRATIONS = [{
         isOneOff: false,
         scheduled: false
       }]
+    };
+  }
+}, {
+  id: "rotate_ginseng_essence_v1",
+  // Follow-up to restore_ginseng_essence_water_v1 above, which brought the
+  // Ginseng Essence Water back unscheduled because its review flags overlap
+  // with the COSRX Snail Essence. Israel's decision: rotate it rather than
+  // shelve it. Same mechanism rotate_hyaluronics_essence_v1 uses — no new
+  // scheduling machinery. All three hydrating essences (Snail 96, Marine
+  // Hyaluronics, Ginseng) are PM daily and share the "layer:essence"
+  // singleton group, so buildSessionSchedule can never place two of them on
+  // the same night, and its lastServed/servedCount fairness tiebreak takes
+  // turns between them — each lands roughly every third night. Scheduling
+  // it is therefore the whole change; the overlap is resolved by the
+  // one-per-night rule, not by keeping it out of the routine.
+  // Only ever turns a ginseng essence ON — never rewrites one already
+  // scheduled (a session/frequency set by hand stays as set).
+  apply: profile => {
+    const isGinseng = p => /ginseng/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+    const target = (profile.products || []).find(p => isGinseng(p) && !p.scheduled);
+    if (!target) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => p.id === target.id ? {
+        ...p,
+        scheduled: true,
+        session: "pm",
+        frequency: "daily",
+        stepOrder: 50,
+        nextDate: p.nextDate || todayStr(),
+        notes: "Hydrating essence-toner. Rotates with the COSRX Snail Essence and Marine Hyaluronics — one essence per night, taking turns."
+      } : p)
     };
   }
 }];
