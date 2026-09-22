@@ -15,9 +15,21 @@
 <meta name="apple-mobile-web-app-title" content="Skin Ritual">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
-  *{box-sizing:border-box;margin:0;padding:0;}
-  html,body{background:#FAF7F4;}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{background:#FAF7F4;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;}
   input,select,textarea{outline:none;}
+  /* One place for the interaction polish, so every button in the app gets
+     the same feel without each component repeating transition rules: a
+     quick ease on hover/press state, and a real press response on touch
+     (mobile has no hover, so the pressed state is what reads as tactile). */
+  button{transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .1s ease,box-shadow .16s ease;}
+  button:active{transform:scale(0.975);}
+  @media (hover:hover){button:hover{filter:brightness(0.985);}}
+  /* Panels that expand in place (Last used, Why isn't this scheduled) slide
+     open instead of appearing abruptly. prefers-reduced-motion is honoured. */
+  @keyframes sr-expand{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+  .sr-expand{animation:sr-expand .18s ease both;}
+  @media (prefers-reduced-motion:reduce){.sr-expand{animation:none;}button{transition:none;}button:active{transform:none;}}
   ::placeholder{color:#9E8E87;opacity:0.7;}
   ::-webkit-scrollbar{width:4px;}
   ::-webkit-scrollbar-thumb{background:#EDE8E3;border-radius:2px;}
@@ -97,15 +109,21 @@ const T = {
   purpleSoft: "#9B8ABF15",
   orange: "#E8A87A",
   orangeSoft: "#E8A87A15",
-  shadow: "0 2px 12px rgba(44,36,32,0.07)",
-  shadowMd: "0 4px 24px rgba(44,36,32,0.12)"
+  // Layered rather than single-blur: a tight contact shadow plus a wide
+  // soft one reads as a card resting on the surface instead of a flat box
+  // with a grey halo.
+  shadow: "0 1px 2px rgba(44,36,32,0.04), 0 4px 16px rgba(44,36,32,0.05)",
+  shadowMd: "0 2px 6px rgba(44,36,32,0.07), 0 12px 32px rgba(44,36,32,0.10)",
+  // A barely-there top highlight; on the warm background it gives surfaces
+  // a subtle sheen without tinting them.
+  gloss: "linear-gradient(180deg,#FFFFFF 0%,#FDFBF9 100%)"
 };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-22.2";
+const APP_VERSION = "2026-09-22.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -414,6 +432,16 @@ const CATEGORY_STEP_ORDER = {
 // The canonical position for a product, derived purely from its category.
 // Deliberately ignores p.stepOrder — see CATEGORY_STEP_ORDER above.
 const canonicalStepOrder = p => CATEGORY_STEP_ORDER[detectType(p)] ?? 50;
+// The step cap is about how much you're asking your FACE to absorb in one
+// session. Lip balm isn't on that skin, competes with nothing, conflicts
+// with nothing — so it shouldn't push a real step off the day. It is
+// therefore scheduled and shown like any other step, but is invisible to
+// the cap: it neither consumes a slot nor counts in the "too many steps"
+// warning. Expressed once here so every cap site (the scheduler's budget,
+// the add-step bump, the health check) stays consistent.
+const CAP_EXEMPT_TYPES = new Set(["lip"]);
+const countsTowardCap = p => !!p && !CAP_EXEMPT_TYPES.has(detectType(p));
+const capLoad = prods => (prods || []).filter(countsTowardCap).length;
 // Per-day, per-session manual order set by dragging a row in that day's
 // list. Stored on the profile keyed by "YYYY-MM-DD:session" and scoped to
 // that ONE day — it never touches the product, so it cannot leak into any
@@ -989,8 +1017,9 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
     if (hardConflict || singletonClash) bumpIds.add(other.id);
   });
   const remaining = others.filter(p => !bumpIds.has(p.id));
-  if (remaining.length + 1 > SESSION_CAP) {
-    const weakest = remaining.map(p => ({
+  // A lip product neither occupies a slot nor can be bumped out of one.
+  if (capLoad(remaining) + (countsTowardCap(newProduct) ? 1 : 0) > SESSION_CAP) {
+    const weakest = remaining.filter(countsTowardCap).map(p => ({
       p,
       score: scoreCandidate(p, {
         session,
@@ -1050,11 +1079,12 @@ const analyzeDayRoutine = prods => {
       message: `More than one ${displayGroup} product today \u2014 ${members.map(m => m.genericName).join(", ")}`
     });
   });
-  if (prods.length > SESSION_CAP) {
+  const capSteps = capLoad(prods);
+  if (capSteps > SESSION_CAP) {
     issues.push({
       type: "cap",
       severity: "medium",
-      message: `${prods.length} steps today, above the usual ${SESSION_CAP}-step cap`
+      message: `${capSteps} steps today, above the usual ${SESSION_CAP}-step cap`
     });
   }
   prods.forEach(p => {
@@ -2387,9 +2417,9 @@ const Card = ({
   style
 }) => /*#__PURE__*/React.createElement("div", {
   style: {
-    background: T.card,
+    background: T.gloss,
     border: `1px solid ${T.border}`,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 20,
     boxShadow: T.shadow,
     ...style
@@ -2941,6 +2971,9 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   const rotating = sessionProducts.filter(p => !p.isOneOff && !rotationRoleFor(p));
   const oneOffs = sessionProducts.filter(p => p.isOneOff && p.nextDate);
   const groups = groupRotating(rotating);
+  // Lookup for cap accounting below (capUsed) — a dayList entry carries
+  // only a productId, and the cap needs each entry's type.
+  const byId = new Map((products || []).map(p => [p.id, p]));
   const lastServed = {};
   // Tracks how many times each product has been placed so far in this
   // schedule build. Used ONLY as a tiebreaker (after overdue score) when
@@ -3071,8 +3104,11 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     // if there's room and it isn't a hard-blocked layer-singleton type
     // (e.g. a legitimate oil-cleanse + gel-cleanse double-cleanse isn't
     // blocked — only a second MOISTURIZER is, same as before).
+    // Cap accounting ignores cap-exempt steps (lip care) wherever it's
+    // consulted below, so a lip balm never costs a cleanser its slot.
+    const capUsed = () => dayList.filter(e => countsTowardCap(byId.get(e.productId))).length;
     ["cleanser", "moisturizer"].forEach(cat => {
-      if (dayList.length >= cap) return;
+      if (capUsed() >= cap) return;
       if (placedGroups.has(`layer:${cat}`)) return;
       const isCat = p => detectType(p) === cat || cat === "cleanser" && detectType(p) === "cleanser_oil";
       const due = rotating.filter(p => isCat(p) && !placedIds.has(p.id)).map(p => {
@@ -3151,7 +3187,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       const anchorSource = poolMembers.find(p => p.rotationAnchor);
       const anchor = anchorSource ? anchorSource.rotationAnchor : epoch;
       ROTATION_SLOTS.forEach(slot => {
-        if (dayList.length >= cap) return; // same deliberate allowance pattern as the cleanser/moisturizer guarantee above — a foundational slot can push slightly past cap, but not compound further once already there
+        if (capUsed() >= cap) return; // same deliberate allowance pattern as the cleanser/moisturizer guarantee above — a foundational slot can push slightly past cap, but not compound further once already there
         const slotDate = addDaysStr(anchor, slot.offsetDays);
         const offset = daysBetween(slotDate, ds);
         if (offset < 0 || offset % 7 !== 0) return;
@@ -3213,8 +3249,10 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     //    reset back to identical scores together), permanently starving
     //    the rest down to whatever single slot remains, instead of every
     //    product rotating through the cap evenly over time.
-    const budget = Math.max(0, cap - dayList.length);
-    if (budget > 0) {
+    const budget = Math.max(0, cap - capUsed());
+    // Always entered, even at zero budget: a cap-exempt group (lip care)
+    // costs nothing, so it must still get its turn on a full day.
+    {
       const candidates = groups.map(group => {
         const members = group.filter(p => !placedIds.has(p.id));
         if (members.length === 0) return null;
@@ -3278,7 +3316,10 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // block, checked separately from the rest-night cooldown above
         // because it applies even when no active ran yesterday.
         if (c.members.some(p => isActiveIngredient(p)) && procedureBlocksActives(ds)) return;
-        if (c.members.length <= remaining) {
+        // A group's cost is its cap-counting members only — a lip balm
+        // rides along free rather than competing for the day's slots.
+        const cost = c.members.filter(countsTowardCap).length;
+        if (cost <= remaining) {
           c.members.forEach(p => {
             dayList.push({
               productId: p.id,
@@ -3289,7 +3330,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
             placedIds.add(p.id);
             registerPlaced(p);
           });
-          remaining -= c.members.length;
+          remaining -= cost;
         }
       });
     }
@@ -3398,8 +3439,9 @@ const ProductUsagePanel = ({ profile, p }) => {
   const missed = u.lastScheduled && u.lastScheduled.outcome !== "applied" ? u.lastScheduled : null;
   return h("div", {
     "data-testid": "usage-panel",
+    className: "sr-expand",
     onClick: e => e.stopPropagation(),
-    style: { flexBasis: "100%", width: "100%", boxSizing: "border-box", margin: "2px 0 6px", padding: "10px 14px", borderRadius: 10, background: T.faint, border: `1px solid ${T.border}` }
+    style: { flexBasis: "100%", width: "100%", boxSizing: "border-box", margin: "8px 0 2px", padding: "12px 14px", borderRadius: 12, background: T.card, border: `1px solid ${T.border}`, boxShadow: "inset 0 1px 2px rgba(44,36,32,0.03)" }
   },
     row("Last used", u.lastApplied ? usagePhrase(u.lastApplied, todayDs) : "Never", u.lastApplied ? null : T.red),
     missed && row(missed.outcome === "skipped" ? "Skipped" : "Missed", usagePhrase(missed, todayDs), T.muted),
@@ -4174,16 +4216,17 @@ const RoutineBlock = ({
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.faint,
-      borderRadius: 14,
+      borderRadius: 18,
       border: `1px solid ${T.border}`,
       overflow: "hidden",
-      marginBottom: 12
+      marginBottom: 14,
+      boxShadow: T.shadow
     }
   }, /*#__PURE__*/React.createElement("div", {
     onClick: () => setCollapsed(c => !c),
     style: {
-      background: `linear-gradient(135deg,${accent}18,${accent}08)`,
-      padding: "10px 16px",
+      background: `linear-gradient(135deg,${accent}22,${accent}0A)`,
+      padding: "12px 16px",
       borderBottom: collapsed ? "none" : `1px solid ${T.border}`,
       display: "flex",
       alignItems: "center",
@@ -4257,12 +4300,19 @@ const RoutineBlock = ({
       style: {
         display: "flex",
         alignItems: "center",
-        gap: 10,
+        gap: 8,
         flexWrap: "wrap",
-        padding: "9px 0",
-        borderBottom: i < orderedProds.length - 1 ? `1px solid ${T.border}` : "none",
-        opacity: dragId === p.id ? 0.45 : 1,
-        background: dragId === p.id ? T.faint : "transparent"
+        padding: "10px 10px",
+        margin: "0 0 8px",
+        borderRadius: 14,
+        // One background declaration, not two: an earlier edit left a second
+        // `background` key after this one, which silently won and made every
+        // step row transparent regardless of state.
+        background: dragId === p.id ? T.faint : done ? "transparent" : T.card,
+        border: `1px solid ${done ? "transparent" : T.border}`,
+        boxShadow: done ? "none" : "0 1px 2px rgba(44,36,32,0.03)",
+        transition: "background-color .18s ease, border-color .18s ease, box-shadow .18s ease",
+        opacity: dragId === p.id ? 0.45 : 1
       }
     }, /*#__PURE__*/React.createElement("div", {
       onPointerDown: e => handleDragPointerDown(p.id, e),
@@ -4411,7 +4461,8 @@ const RoutineBlock = ({
     }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
-        gap: 5,
+        gap: 4,
+        alignItems: "center",
         flexShrink: 0
       }
     }, !p.pinned && /*#__PURE__*/React.createElement("button", {
@@ -4421,7 +4472,12 @@ const RoutineBlock = ({
       }),
       title: "Swap this step",
       style: {
-        padding: "4px 8px",
+        width: 30,
+        height: 26,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
         borderRadius: 8,
         border: `1px solid ${T.border}`,
         background: "transparent",
@@ -4446,7 +4502,8 @@ const RoutineBlock = ({
     }, "Remove") : /*#__PURE__*/React.createElement("button", {
       onClick: () => toggleSkip(p.id, session),
       style: {
-        padding: "4px 10px",
+        height: 26,
+        padding: "0 9px",
         borderRadius: 8,
         border: `1px solid ${skipped ? T.accent : T.border}`,
         background: skipped ? T.accentSoft : "transparent",
@@ -4456,31 +4513,38 @@ const RoutineBlock = ({
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, skipped ? "Skipped" : "Skip")), /*#__PURE__*/React.createElement("button", {
+    }, skipped ? "Skipped" : "Skip"), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         setUsageOpen(o => ({ ...o, [p.id]: !o[p.id] }));
       },
       "data-testid": "usage-toggle",
+      title: "Last used",
+      "aria-label": "Last used",
+      "aria-expanded": !!usageOpen[p.id],
       style: {
-        flexBasis: "100%",
-        width: "100%",
-        boxSizing: "border-box",
-        marginTop: 6,
-        padding: "9px 12px",
-        borderRadius: 10,
-        border: `1px solid ${T.border}`,
-        background: usageOpen[p.id] ? T.accentSoft : "transparent",
-        color: usageOpen[p.id] ? T.accent : T.muted,
-        fontSize: 12,
-        fontWeight: 600,
-        fontFamily: "'Inter',sans-serif",
-        cursor: "pointer",
+        width: 30,
+        height: 26,
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between"
+        justifyContent: "center",
+        borderRadius: 8,
+        border: `1px solid ${usageOpen[p.id] ? T.accent : T.border}`,
+        background: usageOpen[p.id] ? T.accentSoft : "transparent",
+        color: usageOpen[p.id] ? T.accent : T.muted,
+        fontSize: 10,
+        lineHeight: 1,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif",
+        flexShrink: 0
       }
-    }, "Last used", /*#__PURE__*/React.createElement("span", null, usageOpen[p.id] ? "▴" : "▾")), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        display: "block",
+        transition: "transform .18s ease",
+        transform: usageOpen[p.id] ? "rotate(180deg)" : "none"
+      }
+    }, "\u25be"))), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
       profile: profile,
       p: p
     }));
@@ -5252,6 +5316,7 @@ const ProductRow = ({
     }
   }, "×")), confirmDelete && /*#__PURE__*/React.createElement("div", {
     "data-testid": "delete-confirm",
+    className: "sr-expand",
     style: {
       marginTop: 8,
       marginLeft: 22,
@@ -5284,7 +5349,8 @@ const ProductRow = ({
     const why = unscheduledReason(p);
     return /*#__PURE__*/React.createElement("div", {
       "data-testid": "why-panel",
-      style: { marginTop: 6, padding: "10px 12px", borderRadius: 10, background: T.faint, border: `1px solid ${T.border}` }
+      className: "sr-expand",
+      style: { marginTop: 6, padding: "10px 12px", borderRadius: 12, background: T.card, border: `1px solid ${T.border}`, boxShadow: "inset 0 1px 2px rgba(44,36,32,0.03)" }
     }, /*#__PURE__*/React.createElement("div", {
       style: { fontSize: 12, fontWeight: 700, color: why.blocked ? T.red : T.text, fontFamily: "'Inter',sans-serif" }
     }, why.title), /*#__PURE__*/React.createElement("div", {
