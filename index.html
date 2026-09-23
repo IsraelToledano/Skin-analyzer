@@ -123,7 +123,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-24.1";
+const APP_VERSION = "2026-09-24.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3800,6 +3800,15 @@ const FIT_TIER_STYLE = {
   good: { title: "Good fit", color: T.accent },
   weak: { title: "Not a great fit", color: T.muted }
 };
+// A product already in today's list for this session used to be filtered
+// out of the picker entirely, with nothing said about it. That reads as
+// "the app doesn't have my product": you search for it, it isn't there,
+// and the reason (it's already running tonight) is invisible. It is now
+// listed in its own block, not selectable, saying so.
+const buildAlreadyInRoutine = (activeProducts, excludeProduct, filter) => {
+  const q = (filter || "").trim().toLowerCase();
+  return (activeProducts || []).filter(p => p.id !== excludeProduct?.id).filter(p => !q || `${p.genericName} ${p.brandName || ""}`.toLowerCase().includes(q));
+};
 const buildPickerSections = (candidates, excludeProduct) => {
   const category = excludeProduct ? productCategoryGroup(excludeProduct) : null;
   const same = category ? candidates.filter(c => productCategoryGroup(c.p) === category) : candidates;
@@ -3862,7 +3871,13 @@ const SwapPickerModal = ({
   // Other categories stay folded until asked for — except when searching
   // (the person is clearly looking for something specific) or when the
   // step's own category has nothing else to offer.
-  const otherOpen = showOther || filter.trim() !== "" || sameCount === 0 && otherItems.length > 0;
+  // Opened on <= 1 same-category option, not just 0: with a single
+  // alternative the fold is hiding most of the real choice. Exfoliating
+  // toners are the live case — the app files "AHA.BHA.PHA 30 Days Miracle
+  // Toner" under Exfoliants (correct: its acids are the point), so it sits
+  // outside the Toners block that its own name would lead you to expect.
+  const otherOpen = showOther || filter.trim() !== "" || sameCount <= 1 && otherItems.length > 0;
+  const alreadyIn = buildAlreadyInRoutine(activeProducts, excludeProduct, filter);
   const chip = (txt, color) => h("span", { style: { fontSize: 9, fontWeight: 700, background: `${color}18`, color, border: `1px solid ${color}44`, borderRadius: 100, padding: "1px 7px" } }, txt);
   const renderRow = ({ p }, showCat, last) => {
     const col = pcolor(p);
@@ -3922,7 +3937,23 @@ const SwapPickerModal = ({
           "data-testid": "show-other-categories",
           style: { width: "100%", marginTop: 12, padding: "10px 0", borderRadius: 10, border: `1px dashed ${T.border}`, background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
         }, `Show ${otherItems.length} from other categories`),
-        otherItems.length > 0 && otherOpen && block("other", "Other categories", T.muted, `Outside ${category}`, otherItems, true))));
+        otherItems.length > 0 && otherOpen && block("other", "Other categories", T.muted, `Outside ${category}`, otherItems, true),
+        alreadyIn.length > 0 && h("div", {
+          "data-testid": "already-in-block",
+          style: { margin: "12px 0", border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", opacity: 0.75 }
+        },
+          h("div", { style: { padding: "8px 12px", background: T.faint, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "baseline", gap: 8 } },
+            h("span", { style: { fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "'Inter',sans-serif" } }, session === "pm" ? "Already in tonight's routine" : "Already in this morning's routine"),
+            h("span", { style: { marginLeft: "auto", fontSize: 11, color: T.muted } }, alreadyIn.length)),
+          alreadyIn.map((p, i) => h("div", {
+            key: p.id,
+            "data-testid": "already-in-row",
+            style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: i === alreadyIn.length - 1 ? "none" : `1px solid ${T.border}`, background: "#fff" }
+          },
+            h("div", { style: { width: 8, height: 8, borderRadius: "50%", background: pcolor(p).border, flexShrink: 0 } }),
+            h("div", { style: { flex: 1, minWidth: 0 } },
+              h("div", { style: { fontSize: 13, fontWeight: 600, color: T.text } }, p.genericName, p.brandName && h("span", { style: { color: T.muted, fontWeight: 400, fontSize: 12 } }, " \u00b7 ", p.brandName)),
+              h("div", { style: { fontSize: 11, color: T.muted, marginTop: 1 } }, productCategoryGroup(p)))))))));
 };
 // PM-only strip for logging treatments (microneedling / red-light LED) on a
 // given night, and seeing when each was last done. Deliberately manual: a
