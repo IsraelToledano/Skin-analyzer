@@ -123,7 +123,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-23.1";
+const APP_VERSION = "2026-09-23.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -237,8 +237,20 @@ const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer", "clean
 // exfoliant) is never swept in — those already carry their own active
 // group and are excluded below.
 const HYDRATION_SERUM_KEYWORDS = ["hyaluronic", "hyaluronate", "marine", "snail", "centella", "ceramide"];
+// A wash is on the skin for under a minute and is rinsed away before
+// anything else is applied, so its actives are never simultaneously on the
+// face with a leave-on treatment. Used for the two rules that are about
+// what shares the skin at once (the one-active-per-session claim below and
+// the scheduler's rest-night cooldown), NOT for cross-active conflicts:
+// conflictGroupsFor still reports an acid cleanser's acids, so it can't
+// land on the same night as a retinoid.
+const isRinseOffProduct = p => ["cleanser", "cleanser_oil"].includes(detectType(p));
 const classifySingletonGroups = p => {
-  const groups = classifyActiveGroups(p);
+  // An exfoliating cleanser doesn't "use up" the night's acid slot: a wash
+  // and a leave-on exfoliant aren't the same step done twice, which is what
+  // this exclusivity is for. Without this, a daily acid cleanser quietly
+  // locked the real exfoliant rotation out of every night it ran.
+  const groups = isRinseOffProduct(p) ? [] : classifyActiveGroups(p);
   const type = detectType(p);
   if (LAYER_SINGLETON_TYPES.has(type)) {
     groups.push(`layer:${type}`);
@@ -735,9 +747,14 @@ const RANK_DATA = [
     cons: ["Functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — same occasional-intensive-peel role", "Quietly adds retinyl palmitate on top of the glycolic acid, straddling your exfoliant and retinoid categories at once — a contribution the app's dedicated tretinoin/retinol slots don't track", "30% is peel-strength — must not run at the weekly cadence your gentler exfoliants use; monthly-or-less only if used at all"],
     general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
     alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "better", note: "Already in your routine at the correct occasional cadence — one less peel to manage, and you're not missing any capability by skipping this one." }] },
-  { id: 35, match: ["cetaphil", "sa cleanser"], tag: "good",
-    pros: ["A rinse-off acid step — short contact time, so meaningfully gentler than a leave-on acid at the same strength", "Salicylic acid is oil-soluble, which suits your blackheads and oiliness better than an AHA would", "Mandelic acid and PHA are the two largest, slowest-penetrating acids, so this is a mild multi-acid rather than an aggressive one"],
-    cons: ["Carries an acid active in a step you'd otherwise run daily — scheduled at night it would eat into the rest nights your retinoid and exfoliant rotation depends on, which is why it sits in the morning instead", "Duplicates your existing gel cleanser's job on any morning both would run, so they alternate rather than stack"],
+  { id: 35, match: ["cetaphil", "sa cleanser"], tag: "best",
+    pros: ["Fragrance- and essential-oil-free, unlike both of your other cleansers", "A rinse-off acid step — short contact time, so meaningfully gentler than a leave-on acid at the same strength", "Salicylic acid is oil-soluble, which suits your blackheads and oiliness better than an AHA would", "Mandelic acid and PHA are the two largest, slowest-penetrating acids, so this is a mild multi-acid rather than an aggressive one"],
+    // Judged on the formula. An earlier version of this entry listed the
+    // app's own scheduling decisions (which session it runs in, that it
+    // alternates with another cleanser) as cons — those are choices made
+    // around the product, not faults in it, and they belong in the
+    // migration that schedules it, not in its review.
+    cons: ["Adds to your total acid exposure on any day it runs alongside the leave-on acids (glycolic toner, BHA) — the rinse-off dose is small, but it isn't zero"],
     general: "An exfoliating cleanser combining salicylic acid (BHA), mandelic acid (a large, slow AHA) and PHA. Because it rinses off within a minute, the acid dose delivered is far lower than a leave-on toner or serum of similar strength — it's a maintenance step for texture and pores, not a replacement for your actual exfoliant nights.",
     alternatives: [{ name: "CeraVe SA Smoothing Cleanser", relation: "as-good", note: "The other commonly-cited salicylic cleanser at this tier — comparable formulation and price, no reason to switch between them." }] },
   { id: 34, match: ["paula", "skin perfecting"], tag: "good",
@@ -2380,6 +2397,32 @@ const MIGRATIONS = [{
       }]
     };
   }
+}, {
+  id: "split_cleansers_by_session_v1",
+  // Israel's call, and the right one: give each cleanser a session of its
+  // own instead of having them alternate mornings.
+  //   Morning — Cetaphil SA (already AM from add_cetaphil_sa_cleanser_v1).
+  //   Evening — the gel cleanser, moved from "both" to "pm".
+  // The gel cleanser is NOT only a second cleanse: on the nights the oil
+  // cleanse doesn't run (it's weekly) it runs alone as the single evening
+  // wash, and the existing cleanse-pair linkGroup only binds the two
+  // together on the nights the oil IS due — verified by simulation, the
+  // gel lands every night, the oil on its own weekly cadence.
+  // Only ever narrows a gel cleanser that is currently "both"; a session
+  // set by hand to "am" or "pm" is left exactly as it is.
+  apply: profile => {
+    const isGelCleanser = p => /gel cleanser/i.test(p.genericName || "") || /gel cleanser/i.test(p.brandName || "");
+    const target = (profile.products || []).find(p => isGelCleanser(p) && p.scheduled && p.session === "both");
+    if (!target) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => p.id === target.id ? {
+        ...p,
+        session: "pm",
+        notes: "Evening cleanse — on its own on most nights, as the second step after the oil cleanse on the nights that runs. Mornings are the Cetaphil SA cleanser."
+      } : p)
+    };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -3053,6 +3096,18 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // essences, toners, and moisturizers don't trigger it, since they're not
   // the barrier-stressing actives the rest night is protecting against.
   const isActiveIngredient = p => classifyActiveGroups(p).some(g => g === "retinoid" || g === "acid-exfoliant");
+  // The rest night exists to limit how much ACTIVE TIME the barrier gets,
+  // and a cleanser is on the skin for under a minute before it's washed
+  // off — a fraction of the dose a leave-on toner or serum delivers over
+  // hours. Counting an exfoliating cleanser as a full active night was a
+  // modelling artifact: it made a daily acid cleanser mark every night as
+  // active and starve the real retinoid/exfoliant rotation. Rinse-off
+  // actives are therefore exempt from the cooldown in BOTH directions —
+  // they don't consume a rest night, and they aren't deferred by one.
+  // Same-night stacking is a separate question and still enforced above
+  // (conflictsWithToday): washing with an acid and then applying retinol
+  // the same evening is still blocked.
+  const costsRestNight = p => isActiveIngredient(p) && !isRinseOffProduct(p);
   // Procedure recovery windows (see PROCEDURE_TYPES): on a night covered by
   // a microneedling recovery window, retinoids and acid exfoliants are held
   // back entirely. This is a hard block rather than a deprioritization —
@@ -3141,7 +3196,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       // general group fill) already runs through, so recording active-
       // ingredient placements here — rather than duplicating this check in
       // each individual placement site — can't miss a path.
-      if (isActiveIngredient(prod)) lastActiveDate = ds;
+      if (costsRestNight(prod)) lastActiveDate = ds;
     };
     placedIds.forEach(id => registerPlaced(products.find(p => p.id === id)));
     const conflictsWithToday = prod => groupsConflict(conflictGroupsFor(prod), Array.from(placedConflictGroups));
@@ -3362,7 +3417,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // ROTATION_SLOTS' built-in offsets) landing the night right after
         // a rotation-pool exfoliant/mask night, or right after another
         // retinoid product's own due night.
-        const activeClash = c.members.some(p => isActiveIngredient(p)) && lastActiveDate && daysBetween(lastActiveDate, ds) === 1;
+        const activeClash = c.members.some(costsRestNight) && lastActiveDate && daysBetween(lastActiveDate, ds) === 1;
         if (activeClash) return;
         // Procedure recovery window (see procedureBlocksActives): hard
         // block, checked separately from the rest-night cooldown above
