@@ -123,7 +123,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-23.2";
+const APP_VERSION = "2026-09-24.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2421,6 +2421,29 @@ const MIGRATIONS = [{
         session: "pm",
         notes: "Evening cleanse — on its own on most nights, as the second step after the oil cleanse on the nights that runs. Mornings are the Cetaphil SA cleanser."
       } : p)
+    };
+  }
+}, {
+  id: "finish_thermal_spring_water_v1",
+  // The thermal spring water mist is used up. Earlier finished-product
+  // migrations (delete_bio_oil_v1, delete_effaclar_mat_v1) deleted outright,
+  // but Recently deleted now exists, so this moves it to the trash instead:
+  // if a new bottle turns up, Restore in Products puts it back scheduled as
+  // it was, and nothing is lost in the meantime. Its logs stay keyed to its
+  // id either way, so its history survives a restore.
+  // Side effect worth knowing: the mist shared the one-per-session toner
+  // slot with the Vinopure toner (they alternated). With it gone the toner
+  // simply runs every night instead of every other — verified by
+  // simulation, 11 nights becomes 22 over three weeks.
+  apply: profile => {
+    const isThermalWater = p => /thermal|spring water/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+    const products = profile.products || [];
+    const victim = products.find(isThermalWater);
+    if (!victim) return profile;
+    return {
+      ...profile,
+      products: products.filter(p => p.id !== victim.id),
+      removedProducts: [{ ...victim, removedAt: todayStr() }, ...(profile.removedProducts || []).filter(p => p.id !== victim.id)].slice(0, TRASH_LIMIT)
     };
   }
 }];
