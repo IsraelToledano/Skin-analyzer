@@ -123,7 +123,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-24.2";
+const APP_VERSION = "2026-09-24.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -4463,9 +4463,13 @@ const RoutineBlock = ({
         alignItems: "center",
         gap: 8,
         flexWrap: "wrap",
-        padding: "10px 10px",
-        margin: "0 0 8px",
-        borderRadius: 14,
+        // Compact by default: the card had grown tall enough that a
+        // five-step evening no longer fit on one phone screen. Vertical
+        // space now comes off padding, the chip row and the name wrap —
+        // not off tap targets, which stay at their full size.
+        padding: "7px 9px",
+        margin: "0 0 5px",
+        borderRadius: 12,
         // One background declaration, not two: an earlier edit left a second
         // `background` key after this one, which silently won and made every
         // step row transparent regardless of state.
@@ -4479,11 +4483,11 @@ const RoutineBlock = ({
       onPointerDown: e => handleDragPointerDown(p.id, e),
       title: "Drag to reorder",
       style: {
-        width: 18,
+        width: 14,
         flexShrink: 0,
         textAlign: "center",
         color: T.muted,
-        fontSize: 15,
+        fontSize: 13,
         cursor: "grab",
         touchAction: "none",
         userSelect: "none"
@@ -4491,8 +4495,8 @@ const RoutineBlock = ({
     }, "⠿"), /*#__PURE__*/React.createElement("div", {
       onClick: () => toggleDone(p.id, session),
       style: {
-        width: 22,
-        height: 22,
+        width: 20,
+        height: 20,
         borderRadius: "50%",
         border: `2px solid ${done ? T.green : skipped ? T.muted : col.border}`,
         background: done ? T.green : "transparent",
@@ -4521,13 +4525,24 @@ const RoutineBlock = ({
         color: done ? T.muted : skipped ? T.muted : T.text,
         fontSize: 13,
         fontWeight: 600,
-        textDecoration: done ? "line-through" : "none"
+        textDecoration: done ? "line-through" : "none",
+        // A long name used to wrap to three lines and set the card's height
+        // on its own. Capped at two tight lines: short names give a uniform
+        // compact card, and a long one grows by a single line instead of
+        // pushing the step below off the screen. Truncating to one line was
+        // shorter still, but "Gentle Gel Clean…" hides the part of the name
+        // that tells two similar products apart.
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+        lineHeight: 1.25
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
         color: done ? T.muted : accent,
         fontSize: 12,
-        marginRight: 6
+        marginRight: 4
       }
     }, i + 1, "."), p.genericName, p.brandName && /*#__PURE__*/React.createElement("span", {
       style: {
@@ -4538,9 +4553,11 @@ const RoutineBlock = ({
     }, " · ", p.brandName)), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
-        gap: 5,
-        marginTop: 2,
-        flexWrap: "wrap"
+        gap: 4,
+        marginTop: 1,
+        flexWrap: "nowrap",
+        overflow: "hidden",
+        alignItems: "center"
       }
       // Category pill (Cleanser/Toner/Exfoliant/Serum/etc.) is shown first
       // in this chip row on every step, in every session view, so the
@@ -4557,7 +4574,9 @@ const RoutineBlock = ({
         color: catColor,
         border: `1px solid ${catColor}44`,
         borderRadius: 20,
-        padding: "1px 7px"
+        padding: "1px 6px",
+        whiteSpace: "nowrap",
+        flexShrink: 0
       }
     }, cat), p.frequency !== "daily" && FREQS[p.frequency] && /*#__PURE__*/React.createElement("span", {
       style: {
@@ -4565,7 +4584,9 @@ const RoutineBlock = ({
         background: col.bg,
         color: col.text,
         borderRadius: 20,
-        padding: "1px 7px"
+        padding: "1px 6px",
+        whiteSpace: "nowrap",
+        flexShrink: 0
       }
     }, FREQS[p.frequency]), p.carried && !done && /*#__PURE__*/React.createElement("span", {
       style: {
@@ -4574,9 +4595,11 @@ const RoutineBlock = ({
         color: T.muted,
         border: `1px solid ${T.border}`,
         borderRadius: 20,
-        padding: "1px 7px"
+        padding: "1px 6px",
+        whiteSpace: "nowrap",
+        flexShrink: 0
       }
-    }, "carried from yesterday"), skipped && /*#__PURE__*/React.createElement("span", {
+    }, "carried"), skipped && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
         background: T.faint,
