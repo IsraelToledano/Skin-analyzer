@@ -123,7 +123,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-22.3";
+const APP_VERSION = "2026-09-23.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -219,7 +219,14 @@ const productsConflict = (p1, p2) => groupsConflict(conflictGroupsFor(p1), confl
 // These "layer" types piggyback on the exact same one-per-day mechanism
 // as classifyActiveGroups via classifySingletonGroups below, rather than
 // needing a second, separately-maintained enforcement path.
-const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer"]);
+// "cleanser" here means a water/gel/foam cleanser, NOT cleanser_oil: an
+// oil cleanse followed by a water cleanse is a deliberate double cleanse
+// and stays allowed (the two are different types, so they never share this
+// group). What this blocks is TWO water cleansers in the same session —
+// e.g. a plain gel cleanser and an exfoliating SA cleanser both landing in
+// the same morning, which is just washing twice with no added benefit.
+// They alternate through the existing fairness tiebreak instead.
+const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer", "cleanser"]);
 // A "serum" that carries no treatment active of its own — just a
 // humectant/hydrator — is functionally an essence wearing a different
 // label. COSRX Snail 96 Essence and The Ordinary Marine Hyaluronics do
@@ -728,6 +735,11 @@ const RANK_DATA = [
     cons: ["Functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — same occasional-intensive-peel role", "Quietly adds retinyl palmitate on top of the glycolic acid, straddling your exfoliant and retinoid categories at once — a contribution the app's dedicated tretinoin/retinol slots don't track", "30% is peel-strength — must not run at the weekly cadence your gentler exfoliants use; monthly-or-less only if used at all"],
     general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
     alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "better", note: "Already in your routine at the correct occasional cadence — one less peel to manage, and you're not missing any capability by skipping this one." }] },
+  { id: 35, match: ["cetaphil", "sa cleanser"], tag: "good",
+    pros: ["A rinse-off acid step — short contact time, so meaningfully gentler than a leave-on acid at the same strength", "Salicylic acid is oil-soluble, which suits your blackheads and oiliness better than an AHA would", "Mandelic acid and PHA are the two largest, slowest-penetrating acids, so this is a mild multi-acid rather than an aggressive one"],
+    cons: ["Carries an acid active in a step you'd otherwise run daily — scheduled at night it would eat into the rest nights your retinoid and exfoliant rotation depends on, which is why it sits in the morning instead", "Duplicates your existing gel cleanser's job on any morning both would run, so they alternate rather than stack"],
+    general: "An exfoliating cleanser combining salicylic acid (BHA), mandelic acid (a large, slow AHA) and PHA. Because it rinses off within a minute, the acid dose delivered is far lower than a leave-on toner or serum of similar strength — it's a maintenance step for texture and pores, not a replacement for your actual exfoliant nights.",
+    alternatives: [{ name: "CeraVe SA Smoothing Cleanser", relation: "as-good", note: "The other commonly-cited salicylic cleanser at this tier — comparable formulation and price, no reason to switch between them." }] },
   { id: 34, match: ["paula", "skin perfecting"], tag: "good",
     pros: ["Genuinely fragrance-free 2% salicylic acid (BHA) — minimal 8-ingredient formula, no parabens/sulfates/silicones, widely regarded as one of the gold-standard BHA exfoliants", "Oil-soluble BHA penetrates into pores rather than just working on the surface — well matched to blackheads and enlarged pores"],
     cons: ["A third salicylic-acid product alongside Caudalie Vinopure Purifying Toner and Vinopure Salicylic Serum — same active, different concentrations, real overlap", "Now a fifth candidate sharing your 2x/week exfoliant rotation slot, meaning each individual exfoliant gets served less often — the category's total exfoliation frequency doesn't change, but any one product's turn comes up less"],
@@ -2326,6 +2338,46 @@ const MIGRATIONS = [{
         nextDate: p.nextDate || todayStr(),
         notes: "Hydrating essence-toner. Rotates with the COSRX Snail Essence and Marine Hyaluronics — one essence per night, taking turns."
       } : p)
+    };
+  }
+}, {
+  id: "add_cetaphil_sa_cleanser_v1",
+  // Cetaphil Gentle Exfoliating SA Cleanser (salicylic + mandelic + PHA),
+  // added from a photo of the bottle.
+  //
+  // MORNING, not evening, and that placement is the whole decision: the app
+  // reads its acids as an "acid-exfoliant" active (correctly — it is one),
+  // and buildSessionSchedule's rest-night rule holds actives back the night
+  // after any active ran. A nightly acid cleanser therefore marks EVERY
+  // night as an active night in that session and starves the real
+  // exfoliant/retinoid rotation. Simulated over 43 nights against a routine
+  // shaped like Israel's: 19 active nights without it, 15 with it at PM
+  // daily. Rest-night tracking is per session, so in the morning it costs
+  // nothing — and AM is where a rinse-off acid belongs anyway, away from
+  // the leave-on actives.
+  //
+  // It does NOT replace the gel cleanser: with "cleanser" now a layer
+  // singleton (see LAYER_SINGLETON_TYPES), the two can't land in the same
+  // session on the same day, so they alternate mornings on their own.
+  // No-op if a Cetaphil SA cleanser is already present.
+  apply: profile => {
+    const products = profile.products || [];
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    if (products.some(p => /cetaphil/.test(hay(p)) && /sa cleanser|exfoliating/.test(hay(p)))) return profile;
+    return {
+      ...profile,
+      products: [...products, {
+        id: "cetaphil-sa-cleanser-v1",
+        genericName: "Gentle Exfoliating SA Cleanser",
+        brandName: "Cetaphil",
+        notes: "Salicylic, mandelic and PHA acids, rinse-off. Morning only: scheduled at night its acids would count as an active night and hold back the retinoid/exfoliant rotation. Alternates mornings with the gel cleanser.",
+        session: "am",
+        frequency: "daily",
+        stepOrder: 15,
+        nextDate: todayStr(),
+        isOneOff: false,
+        scheduled: true
+      }]
     };
   }
 }];
