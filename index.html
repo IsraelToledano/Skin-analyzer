@@ -29,6 +29,9 @@
      open instead of appearing abruptly. prefers-reduced-motion is honoured. */
   @keyframes sr-expand{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
   .sr-expand{animation:sr-expand .18s ease both;}
+  /* Narrow phones (iPhone SE and similar, 320px): the one-row calendar
+     controls only fit if the weekday is dropped from the date. */
+  @media (max-width:350px){.sr-date-wd{display:none;}}
   @media (prefers-reduced-motion:reduce){.sr-expand{animation:none;}button{transition:none;}button:active{transform:none;}}
   ::placeholder{color:#9E8E87;opacity:0.7;}
   ::-webkit-scrollbar{width:4px;}
@@ -123,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-24.3";
+const APP_VERSION = "2026-09-24.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -4642,39 +4645,49 @@ const RoutineBlock = ({
       // auto-remove anything; it's a visible flag, not enforcement, so a
       // product kept scheduled on purpose (e.g. to finish out a bottle)
       // still shows up normally — just with an honest label attached.
-    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label))), /*#__PURE__*/React.createElement("div", {
+    }, rank.tag === "bad" ? "⚠ " : "", RANK_STYLE[rank.tag].label))),
+    // Actions, laid out to take a thin strip instead of half the card:
+    // Swap and Skip are stacked in one narrow column (they're the two
+    // actions you reach for), and the Last used chevron sits alone at the
+    // card's far right edge. Each keeps a full-width tap row even though
+    // the column is only ~50px wide.
+    /*#__PURE__*/React.createElement("div", {
+      "data-testid": "step-actions",
       style: {
         display: "flex",
-        gap: 4,
-        alignItems: "center",
+        flexDirection: "column",
+        gap: 3,
+        width: 52,
         flexShrink: 0
       }
-    }, !p.pinned && /*#__PURE__*/React.createElement("button", {
+    }, p.pinned ? /*#__PURE__*/React.createElement("button", {
+      onClick: () => removePin(p.id),
+      style: {
+        height: 24,
+        borderRadius: 7,
+        border: `1px solid ${T.border}`,
+        background: "transparent",
+        color: T.muted,
+        fontSize: 10,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif",
+        padding: 0
+      }
+    }, "Remove") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
       onClick: () => setPicker({
         mode: "swap",
         excludeProduct: p
       }),
       title: "Swap this step",
       style: {
-        width: 30,
-        height: 26,
+        height: 24,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        gap: 3,
         padding: 0,
-        borderRadius: 8,
-        border: `1px solid ${T.border}`,
-        background: "transparent",
-        color: T.muted,
-        fontSize: 12,
-        cursor: "pointer",
-        fontFamily: "'Inter',sans-serif"
-      }
-    }, "⇄"), p.pinned ? /*#__PURE__*/React.createElement("button", {
-      onClick: () => removePin(p.id),
-      style: {
-        padding: "4px 10px",
-        borderRadius: 8,
+        borderRadius: 7,
         border: `1px solid ${T.border}`,
         background: "transparent",
         color: T.muted,
@@ -4683,12 +4696,12 @@ const RoutineBlock = ({
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, "Remove") : /*#__PURE__*/React.createElement("button", {
+    }, "\u21c4 Swap"), /*#__PURE__*/React.createElement("button", {
       onClick: () => toggleSkip(p.id, session),
       style: {
-        height: 26,
-        padding: "0 9px",
-        borderRadius: 8,
+        height: 24,
+        padding: 0,
+        borderRadius: 7,
         border: `1px solid ${skipped ? T.accent : T.border}`,
         background: skipped ? T.accentSoft : "transparent",
         color: skipped ? T.accent : T.muted,
@@ -4697,7 +4710,7 @@ const RoutineBlock = ({
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
-    }, skipped ? "Skipped" : "Skip"), /*#__PURE__*/React.createElement("button", {
+    }, skipped ? "Skipped" : "Skip"))), /*#__PURE__*/React.createElement("button", {
       onClick: e => {
         e.stopPropagation();
         setUsageOpen(o => ({ ...o, [p.id]: !o[p.id] }));
@@ -4707,20 +4720,27 @@ const RoutineBlock = ({
       "aria-label": "Last used",
       "aria-expanded": !!usageOpen[p.id],
       style: {
-        width: 30,
-        height: 26,
+        width: 24,
+        alignSelf: "stretch",
+        minHeight: 34,
+        // Bleeds to the card's right edge (the card has 7px/9px padding) so
+        // the whole strip is the tap target. When the panel is open it stops
+        // at the first line instead of overlapping the panel below it.
+        margin: usageOpen[p.id] ? "-7px -9px 0 -2px" : "-7px -9px -7px -2px",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: 8,
-        border: `1px solid ${usageOpen[p.id] ? T.accent : T.border}`,
+        border: "none",
+        borderLeft: `1px solid ${T.border}`,
+        borderRadius: usageOpen[p.id] ? "0 12px 0 0" : "0 12px 12px 0",
         background: usageOpen[p.id] ? T.accentSoft : "transparent",
         color: usageOpen[p.id] ? T.accent : T.muted,
         fontSize: 10,
         lineHeight: 1,
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif",
-        flexShrink: 0
+        flexShrink: 0,
+        padding: 0
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
@@ -4728,7 +4748,7 @@ const RoutineBlock = ({
         transition: "transform .18s ease",
         transform: usageOpen[p.id] ? "rotate(180deg)" : "none"
       }
-    }, "\u25be"))), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
+    }, "\u25be")), usageOpen[p.id] && /*#__PURE__*/React.createElement(ProductUsagePanel, {
       profile: profile,
       p: p
     }));
@@ -5169,26 +5189,29 @@ const RoutineUpdateBar = ({ profile, onUpdate }) => {
   const head = txt => h("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px", fontFamily: "'Inter',sans-serif" } }, txt);
   const changeRow = (c, key) => h("div", { key, style: small }, h("b", null, fmtSlot(c.date, c.session)), c.added.length ? "  + " + c.added.join(", ") : "", c.removed.length ? "  − " + c.removed.join(", ") : "");
   const nothing = report && !report.changes.length && !report.treatments.length && !report.adds.length && !added.length;
-  return h("div", { style: { marginBottom: 12 } },
+  // A small pill at the bottom of the Calendar tab, below the routines: it's
+  // an occasional check-in, not something that should sit above today's
+  // steps. The report still opens directly beneath it.
+  return h("div", { style: { marginTop: 4, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center" } },
     h("button", {
       onClick: press,
       "data-testid": "update-routine",
       style: {
-        width: "100%",
-        padding: "10px 0",
-        borderRadius: 10,
-        border: `1px solid ${T.border}`,
-        background: pending ? T.accentSoft : T.faint,
-        color: pending ? T.accent : T.text,
-        fontSize: 13,
-        fontWeight: 700,
+        height: 30,
+        padding: "0 14px",
+        borderRadius: 100,
+        border: `1px solid ${pending ? T.accent : T.border}`,
+        background: pending ? T.accentSoft : "transparent",
+        color: pending ? T.accent : T.muted,
+        fontSize: 11,
+        fontWeight: 600,
         cursor: "pointer",
         fontFamily: "'Inter',sans-serif"
       }
     }, pending ? "↻ Update routine •" : "↻ Update routine"),
     report && h("div", {
       "data-testid": "update-report",
-      style: { marginTop: 8, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.card }
+      style: { alignSelf: "stretch", marginTop: 8, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.card }
     },
       h("div", { style: { ...small, fontWeight: 700 } }, nothing ? "Routine is up to date" : "Routine updated"),
       report.first && h("div", { style: { ...small, color: T.muted, marginTop: 2 } }, "Baseline saved — next time I'll show what your adds and treatments changed."),
@@ -5232,27 +5255,45 @@ const CalendarTab = ({
     setCursor(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
     setView("day");
   };
+  // One control row: view toggle, ‹ date ›, Today. It used to wrap, with
+  // the long date ("Sunday, September 20") taking three lines on its own.
+  const isToday = dateStr(cursor) === dateStr(today);
+  const navBtn = {
+    width: 30,
+    height: 30,
+    flexShrink: 0,
+    background: T.faint,
+    border: `1px solid ${T.border}`,
+    borderRadius: 9,
+    padding: 0,
+    color: T.text,
+    cursor: "pointer",
+    fontSize: 15,
+    lineHeight: 1
+  };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    "data-testid": "calendar-controls",
     style: {
       display: "flex",
       alignItems: "center",
-      gap: 8,
-      marginBottom: 16,
-      flexWrap: "wrap"
+      gap: 6,
+      marginBottom: 12,
+      flexWrap: "nowrap"
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
+      flexShrink: 0,
       background: T.faint,
       borderRadius: 100,
-      padding: 3,
+      padding: 2,
       border: `1px solid ${T.border}`
     }
   }, ["list", "day"].map(v => /*#__PURE__*/React.createElement("button", {
     key: v,
     onClick: () => setView(v),
     style: {
-      padding: "7px 14px",
+      padding: "6px 11px",
       borderRadius: 100,
       background: view === v ? T.accent : "transparent",
       color: view === v ? "#fff" : T.muted,
@@ -5265,46 +5306,45 @@ const CalendarTab = ({
     }
   }, v))), view === "day" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     onClick: prev,
-    style: {
-      background: T.faint,
-      border: `1px solid ${T.border}`,
-      borderRadius: 10,
-      padding: "8px 14px",
-      color: T.text,
-      cursor: "pointer",
-      fontSize: 14
-    }
+    "aria-label": "Previous day",
+    style: navBtn
   }, "\u2039"), /*#__PURE__*/React.createElement("div", {
+    "data-testid": "calendar-date",
     style: {
       flex: 1,
+      minWidth: 0,
       textAlign: "center",
       fontWeight: 700,
       color: T.text,
       fontFamily: "'Cormorant Garamond',serif",
-      fontSize: 17
+      fontSize: 16,
+      whiteSpace: "nowrap",
+      overflow: "hidden",
+      textOverflow: "ellipsis"
     }
-  }, fmtLong(cursor)), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "sr-date-wd"
+  }, DAYS[cursor.getDay()], ", "), `${MONTHS[cursor.getMonth()].slice(0, 3)} ${cursor.getDate()}`), /*#__PURE__*/React.createElement("button", {
     onClick: next,
-    style: {
-      background: T.faint,
-      border: `1px solid ${T.border}`,
-      borderRadius: 10,
-      padding: "8px 14px",
-      color: T.text,
-      cursor: "pointer",
-      fontSize: 14
-    }
-  }, "\u203a"), /*#__PURE__*/React.createElement(Btn, {
+    "aria-label": "Next day",
+    style: navBtn
+  }, "\u203a"), /*#__PURE__*/React.createElement("button", {
     onClick: () => setCursor(new Date(today.getFullYear(), today.getMonth(), today.getDate())),
-    variant: "ghost",
+    disabled: isToday,
     style: {
-      padding: "8px 14px",
-      fontSize: 12
+      height: 30,
+      flexShrink: 0,
+      padding: "0 10px",
+      borderRadius: 9,
+      border: `1px solid ${T.border}`,
+      background: "transparent",
+      color: isToday ? T.border : T.text,
+      fontSize: 11,
+      fontWeight: 600,
+      cursor: isToday ? "default" : "pointer",
+      fontFamily: "'Inter',sans-serif"
     }
-  }, "Today"))), /*#__PURE__*/React.createElement(RoutineUpdateBar, {
-    profile: profile,
-    onUpdate: onUpdate
-  }), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
+  }, "Today"))), view === "day" ? /*#__PURE__*/React.createElement(DayAgenda, {
     date: cursor,
     profile: profile,
     onUpdate: onUpdate,
@@ -5313,6 +5353,9 @@ const CalendarTab = ({
   }) : /*#__PURE__*/React.createElement(RoutineListView, {
     profile: profile,
     onOpenDay: openDay
+  }), /*#__PURE__*/React.createElement(RoutineUpdateBar, {
+    profile: profile,
+    onUpdate: onUpdate
   }));
 };
 
