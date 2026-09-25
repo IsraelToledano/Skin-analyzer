@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-24.5";
+const APP_VERSION = "2026-09-25.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2449,6 +2449,24 @@ const MIGRATIONS = [{
       removedProducts: [{ ...victim, removedAt: todayStr() }, ...(profile.removedProducts || []).filter(p => p.id !== victim.id)].slice(0, TRASH_LIMIT)
     };
   }
+}, {
+  id: "remove_saffron_serum_v1",
+  // Explicit request: the Mars saffron (safranal) serum burns — remove it
+  // from the product list entirely (which also removes it from the
+  // scheduler) and park it in the trash so it can be restored. Same
+  // pattern as finish_thermal_spring_water_v1. No-op if not present.
+  apply: profile => {
+    const isSaffron = p => /saffron|safranal|\bmars\b/i.test([p.genericName, p.brandName, p.notes].filter(Boolean).join(" "));
+    const products = profile.products || [];
+    const victims = products.filter(isSaffron);
+    if (!victims.length) return profile;
+    const ids = new Set(victims.map(v => v.id));
+    return {
+      ...profile,
+      products: products.filter(p => !ids.has(p.id)),
+      removedProducts: [...victims.map(v => ({ ...v, removedAt: todayStr() })), ...(profile.removedProducts || []).filter(p => !ids.has(p.id))].slice(0, TRASH_LIMIT)
+    };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -4470,8 +4488,9 @@ const RoutineBlock = ({
         // five-step evening no longer fit on one phone screen. Vertical
         // space now comes off padding, the chip row and the name wrap —
         // not off tap targets, which stay at their full size.
-        padding: "10px 9px",
-        margin: "0 0 6px",
+        padding: "18px 9px",
+        minHeight: 78,
+        margin: "0 0 8px",
         borderRadius: 12,
         // One background declaration, not two: an earlier edit left a second
         // `background` key after this one, which silently won and made every
