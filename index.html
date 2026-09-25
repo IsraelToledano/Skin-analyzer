@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-25.3";
+const APP_VERSION = "2026-09-25.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -705,6 +705,13 @@ const RANK_DATA = [
     cons: ["Overlaps with Aztec Secret Clay for the same purpose — no reason to run both"],
     general: "A clay-based pore-refining mask, functionally similar to other bentonite/kaolin clay masks — draws out oil and debris with occasional use.",
     alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Already active in your weekly rotation, confirmed fragrance/EO-free, and rated Best — a genuine upgrade over reactivating this one rather than a lateral swap." }] },
+  // Must stay ahead of the generic ["anua"] entry (id 25, the heartleaf
+  // toner): getProductRank takes the first entry whose keywords all match.
+  { id: 36, match: ["anua", "hyaluronic"], tag: "good",
+    pros: ["Fragrance- and essential-oil-free with mild amino-acid surfactants (cocoyl alaninate, cocoyl glycinate, coco-betaine) — no sulfates", "Squalane, ceramide NP and ectoin add barrier support during the wash, which suits combination skin that also carries retinoid and acid load", "No exfoliating acids of its own, so it adds nothing to your acid exposure on active nights"],
+    cons: ["Both cleanser slots are already taken — Cetaphil SA in the morning and the Caudalie gel in the evening — and cleanser is a one-per-session step, so this overlaps with them rather than adding a step", "A gentle hydrating wash does nothing for blackheads or enlarged pores, which are your main concerns — the Cetaphil SA cleanser is the one doing that work", "The eight hyaluronic acids are dosed at parts-per-billion and rinsed off within a minute — a label claim, not a functional hydration boost"],
+    general: "A low-foam, fragrance-free gel cleanser built on mild amino-acid surfactants, with squalane, ceramide NP, ectoin and eight forms of hyaluronic acid. It cleans without stripping and is meant for daily use; it is a comfort cleanser, not a treatment one.",
+    alternatives: [{ name: "Cetaphil Gentle Exfoliating SA Cleanser (already in your routine)", relation: "better", note: "Does the pore and blackhead work this one doesn't, and it is already scheduled — this one only makes sense as a swap-in gentler wash on days your skin feels irritated or over-exfoliated." }] },
   { id: 25, match: ["anua"], tag: "best",
     pros: ["Gentle, soothing, anti-inflammatory botanical (heartleaf)", "Would genuinely complement an actives-heavy routine as a calming buffer, if reactivated"],
     cons: [],
@@ -765,6 +772,7 @@ const RANK_DATA = [
     cons: ["A third salicylic-acid product alongside Caudalie Vinopure Purifying Toner and Vinopure Salicylic Serum — same active, different concentrations, real overlap", "Now a fifth candidate sharing your 2x/week exfoliant rotation slot, meaning each individual exfoliant gets served less often — the category's total exfoliation frequency doesn't change, but any one product's turn comes up less"],
     general: "Salicylic acid (BHA) is oil-soluble, so unlike a water-soluble AHA it can actually penetrate into the pore itself — effective for blackheads and oil control, and gentler on the surface than a glycolic acid at comparable strength.",
     alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "no-better-option", note: "Same active at a comparable concentration — this isn't an upgrade over what you already have, just another well-formulated option in the same lane. Worth considering whether you need three salicylic-acid products rather than which one is best." }] }
+
 ];
 const getProductRank = p => {
   // RANK_DATA's own "id" field and product ids are two entirely
@@ -2465,6 +2473,37 @@ const MIGRATIONS = [{
       ...profile,
       products: products.filter(p => !ids.has(p.id)),
       removedProducts: [...victims.map(v => ({ ...v, removedAt: todayStr() })), ...(profile.removedProducts || []).filter(p => !ids.has(p.id))].slice(0, TRASH_LIMIT)
+    };
+  }
+}, {
+  id: "add_anua_hyaluronic_gel_cleanser_v1",
+  // Anua 8 Hyaluronic Acid Moisturizing Gentle Gel Cleanser (150 ml), added
+  // from a photo of the bottle. INCI checked against the brand's own page:
+  // fragrance/essential-oil free, amino-acid surfactants, no acids.
+  // Added to the product LIBRARY only (scheduled: false), same as the
+  // Dr.Melaxin mask: the morning (Cetaphil SA) and evening (gel) cleanser
+  // slots are both filled and "cleanser" is a one-per-session step, so
+  // scheduling it would only displace one of them. Schedule it from the
+  // Products tab if you want it — e.g. as the evening wash while the skin
+  // needs a break from the acid cleanser. No-op if it is already present.
+  apply: profile => {
+    const products = profile.products || [];
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    if (products.some(p => /anua/.test(hay(p)) && /hyaluronic/.test(hay(p)))) return profile;
+    return {
+      ...profile,
+      products: [...products, {
+        id: "anua-hyaluronic-gel-cleanser-v1",
+        genericName: "8 Hyaluronic Acid Moisturizing Gentle Gel Cleanser",
+        brandName: "Anua",
+        notes: "150 ml. Fragrance-free gel cleanser with mild amino-acid surfactants, squalane, ceramide NP, ectoin and 8 hyaluronic acids (ppb-level). No exfoliating acids. Library only: both cleanser slots are already filled (Cetaphil SA AM, gel cleanser PM).",
+        session: "",
+        frequency: "",
+        stepOrder: 0,
+        nextDate: "",
+        isOneOff: false,
+        scheduled: false
+      }]
     };
   }
 }];
