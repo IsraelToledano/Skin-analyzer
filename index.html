@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-25.2";
+const APP_VERSION = "2026-09-25.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3598,7 +3598,41 @@ const ProductUsagePanel = ({ profile, p }) => {
     missed && row(missed.outcome === "skipped" ? "Skipped" : "Missed", usagePhrase(missed, todayDs), T.muted),
     row("Next", u.nextScheduled ? usagePhrase(u.nextScheduled, todayDs) : "Not scheduled"),
     row("Last month", u.last30.scheduled ? `Used ${u.last30.applied} of ${u.last30.scheduled} times` : "Never came up"),
-    behind && h("div", { style: { marginTop: 6, fontSize: 12, fontWeight: 600, color: T.red, fontFamily: "'Inter',sans-serif" } }, u.lastApplied ? `${u.daysSinceApplied} days since you used this.` : "Comes up in your routine, but you've never marked it used."));
+    behind && h("div", { style: { marginTop: 6, fontSize: 12, fontWeight: 600, color: T.red, fontFamily: "'Inter',sans-serif" } }, u.lastApplied ? `${u.daysSinceApplied} days since you used this.` : "Comes up in your routine, but you've never marked it used."),
+    // Product insight, right under the usage facts: what the product is, why
+    // its step sits where it does, and — from the product review, which was
+    // written against this skin (combination, blackheads, pores, scarring) —
+    // what it does well and what to watch for in THIS routine. Same source
+    // as the "why this step" modal, so the two never disagree.
+    h(ProductInsight, { p }));
+};
+const ProductInsight = ({ p }) => {
+  const h = React.createElement;
+  const rank = getProductRank(p);
+  const stepInfo = stepInfoFor(p);
+  const pros = rank.pros || [];
+  const cons = rank.cons || [];
+  const better = (rank.alternatives || []).find(a => a.relation === "better");
+  const font = "'Inter',sans-serif";
+  const label = (text, color) => h("div", { style: { fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: color || T.muted, marginBottom: 3, fontFamily: font } }, text);
+  const body = { fontSize: 12.5, lineHeight: 1.5, color: T.text, fontFamily: font };
+  const list = (items, mark, markColor) => items.map((t, i) => h("div", { key: i, style: { ...body, display: "flex", gap: 6, marginBottom: i === items.length - 1 ? 0 : 3 } },
+    h("span", { style: { color: markColor, flexShrink: 0, fontWeight: 700 } }, mark), h("span", { style: { flex: 1, minWidth: 0 } }, t)));
+  const block = (key, node) => h("div", { key, style: { marginTop: 10 } }, node);
+  const blocks = [];
+  const about = rank.general || rank.reason;
+  if (about) blocks.push(block("about", [label("What it is", null), h("div", { style: body }, about)]));
+  if (stepInfo) blocks.push(block("step", [label(`Why it sits here \u2014 ${stepInfo.name}`, null), h("div", { style: body }, stepInfo.desc)]));
+  if (pros.length) blocks.push(block("pros", [label("Why it works for you", T.green), list(pros, "+", T.green)]));
+  if (cons.length) blocks.push(block("cons", [label("Watch for", T.red), list(cons, "!", T.red)]));
+  if (better) blocks.push(block("alt", [label("Better option", T.blue), h("div", { style: body }, h("b", null, better.name), better.note ? ` \u2014 ${better.note}` : "")]));
+  if (!blocks.length) return null;
+  const rs = RANK_STYLE[rank.tag];
+  return h("div", { "data-testid": "product-insight", style: { marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.border}` } },
+    h("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+      label("About this product", null),
+      rs && h("span", { style: { fontSize: 10, fontWeight: 700, background: rs.bg, color: rs.color, border: `1px solid ${rs.color}44`, borderRadius: 20, padding: "1px 7px", marginBottom: 3, fontFamily: font } }, rs.label)),
+    blocks);
 };
 // Why a product in the library isn't in the routine. Mirrors the real
 // gates: isBulkSchedulable (Auto-Schedule skips flagged products) and the
