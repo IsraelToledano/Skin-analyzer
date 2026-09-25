@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-25.4";
+const APP_VERSION = "2026-09-25.5";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -705,13 +705,13 @@ const RANK_DATA = [
     cons: ["Overlaps with Aztec Secret Clay for the same purpose — no reason to run both"],
     general: "A clay-based pore-refining mask, functionally similar to other bentonite/kaolin clay masks — draws out oil and debris with occasional use.",
     alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Already active in your weekly rotation, confirmed fragrance/EO-free, and rated Best — a genuine upgrade over reactivating this one rather than a lateral swap." }] },
+  { id: 36, match: ["anua", "hyaluronic"], tag: "good",
+    pros: ["Fragrance- and essential-oil-free with mild amino-acid surfactants (cocoyl alaninate, cocoyl glycinate, coco-betaine) — no sulfates", "Squalane, ceramide NP and ectoin add barrier support during the wash, which suits combination skin that also carries retinoid and acid load", "The better evening wash on retinoid and acid nights: it puts no fragrance allergens or exfoliating acids on skin that is about to get a treatment, which the Caudalie gel's six essential oils do"],
+    cons: ["A gentle hydrating wash does nothing for blackheads or enlarged pores, which are your main concerns — the Cetaphil SA cleanser does that work, which is why it keeps every morning", "The eight hyaluronic acids are dosed at parts-per-billion and rinsed off within a minute — a label claim, not a functional hydration boost", "Shares the evening cleanser slot with the Caudalie gel, so the app alternates the two and it lands on about two evenings in three rather than nightly"],
+    general: "A low-foam, fragrance-free gel cleanser built on mild amino-acid surfactants, with squalane, ceramide NP, ectoin and eight forms of hyaluronic acid. It cleans without stripping and is meant for daily use; it is a comfort cleanser, not a treatment one.",
+    alternatives: [{ name: "Cetaphil Gentle Exfoliating SA Cleanser (already in your routine)", relation: "better", note: "Does the pore and blackhead work this one doesn't, so it keeps the morning slot daily. This one is the gentler evening wash, and it is only ahead of the Caudalie gel because it carries no fragrance allergens." }] },
   // Must stay ahead of the generic ["anua"] entry (id 25, the heartleaf
   // toner): getProductRank takes the first entry whose keywords all match.
-  { id: 36, match: ["anua", "hyaluronic"], tag: "good",
-    pros: ["Fragrance- and essential-oil-free with mild amino-acid surfactants (cocoyl alaninate, cocoyl glycinate, coco-betaine) — no sulfates", "Squalane, ceramide NP and ectoin add barrier support during the wash, which suits combination skin that also carries retinoid and acid load", "No exfoliating acids of its own, so it adds nothing to your acid exposure on active nights"],
-    cons: ["Both cleanser slots are already taken — Cetaphil SA in the morning and the Caudalie gel in the evening — and cleanser is a one-per-session step, so this overlaps with them rather than adding a step", "A gentle hydrating wash does nothing for blackheads or enlarged pores, which are your main concerns — the Cetaphil SA cleanser is the one doing that work", "The eight hyaluronic acids are dosed at parts-per-billion and rinsed off within a minute — a label claim, not a functional hydration boost"],
-    general: "A low-foam, fragrance-free gel cleanser built on mild amino-acid surfactants, with squalane, ceramide NP, ectoin and eight forms of hyaluronic acid. It cleans without stripping and is meant for daily use; it is a comfort cleanser, not a treatment one.",
-    alternatives: [{ name: "Cetaphil Gentle Exfoliating SA Cleanser (already in your routine)", relation: "better", note: "Does the pore and blackhead work this one doesn't, and it is already scheduled — this one only makes sense as a swap-in gentler wash on days your skin feels irritated or over-exfoliated." }] },
   { id: 25, match: ["anua"], tag: "best",
     pros: ["Gentle, soothing, anti-inflammatory botanical (heartleaf)", "Would genuinely complement an actives-heavy routine as a calming buffer, if reactivated"],
     cons: [],
@@ -2504,6 +2504,60 @@ const MIGRATIONS = [{
         isOneOff: false,
         scheduled: false
       }]
+    };
+  }
+}, {
+  id: "schedule_anua_cleanser_rotation_v1",
+  // Explicit request: bring the Anua gel cleanser into the routine and
+  // rotate it with the other cleansers by clinical fit for this skin
+  // (combination, blackheads/pores, retinoid + acid rotation).
+  //   Morning — Cetaphil SA stays daily. It is the only cleanser that works
+  //   on the actual concerns (rinse-off SA + mandelic + PHA) and the
+  //   best-ranked of the three; a rinse-off acid belongs in the morning,
+  //   away from the leave-on retinoid/exfoliant nights.
+  //   Evening — Anua becomes the main wash (daily) and the Caudalie gel
+  //   drops to twice-weekly. The Caudalie gel carries six essential oils
+  //   plus allergens (see its review), which is the wrong thing to put on
+  //   skin about to get a retinoid or acid; Anua is fragrance-free with
+  //   barrier lipids. "cleanser" is a layer singleton, so the two never
+  //   share a night and the scheduler's overdue/served tiebreak alternates
+  //   them: simulated over 8 weeks with the real buildSessionSchedule, the
+  //   evening comes out at Anua ~4.6 nights/week, Caudalie ~2.4, and the
+  //   weekly oil cleanse always lands with one of them as its second wash.
+  //   Weekly totals: Cetaphil 7, Anua ~4.6, Caudalie ~2.4 — highest for the
+  //   best fit, lowest for the weakest.
+  // Only ever schedules a not-yet-scheduled Anua, and only narrows the
+  // Caudalie gel when it is still daily (a cadence set by hand is left
+  // alone). No-op if Anua isn't in the library.
+  apply: profile => {
+    const products = profile.products || [];
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const isAnua = p => /anua/.test(hay(p)) && /hyaluronic/.test(hay(p));
+    const anua = products.find(isAnua);
+    if (!anua) return profile;
+    const isCaudalieGel = p => !isAnua(p) && /caudalie/.test(hay(p)) && /gel cleanser/.test(hay(p));
+    const needsAnua = !anua.scheduled;
+    const needsCaudalie = products.some(p => isCaudalieGel(p) && p.scheduled && p.session === "pm" && p.frequency === "daily");
+    if (!needsAnua && !needsCaudalie) return profile;
+    return {
+      ...profile,
+      products: products.map(p => {
+        if (needsAnua && p.id === anua.id) return {
+          ...p,
+          session: "pm",
+          frequency: "daily",
+          stepOrder: 15,
+          nextDate: todayStr(),
+          scheduled: true,
+          notes: "150 ml. Evening wash, the main one: fragrance-free, mild amino-acid surfactants, squalane/ceramide/ectoin, no acids — the right thing on skin about to get a retinoid or acid. Alternates with the Caudalie gel (about 2 evenings in 3). Mornings stay with the Cetaphil SA cleanser, which is what works on blackheads and pores."
+        };
+        if (needsCaudalie && isCaudalieGel(p) && p.scheduled && p.session === "pm" && p.frequency === "daily") return {
+          ...p,
+          frequency: "twice-weekly",
+          notes: "Evening cleanse, about 2 nights a week — alternates with the Anua gel cleanser, which is the main evening wash. Cut back because it carries six essential oils plus allergens; it still pairs with the weekly oil cleanse when that lands on its night."
+        };
+        return p;
+      })
     };
   }
 }];
