@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-25.1";
+const APP_VERSION = "2026-09-25.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -4488,8 +4488,8 @@ const RoutineBlock = ({
         // five-step evening no longer fit on one phone screen. Vertical
         // space now comes off padding, the chip row and the name wrap —
         // not off tap targets, which stay at their full size.
-        padding: "18px 9px",
-        minHeight: 78,
+        padding: "16px 9px",
+        minHeight: 84,
         margin: "0 0 8px",
         borderRadius: 12,
         // One background declaration, not two: an earlier edit left a second
@@ -4554,11 +4554,11 @@ const RoutineBlock = ({
         // pushing the step below off the screen. Truncating to one line was
         // shorter still, but "Gentle Gel Clean…" hides the part of the name
         // that tells two similar products apart.
-        display: "-webkit-box",
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: "vertical",
-        overflow: "hidden",
-        lineHeight: 1.25
+        // Full name always visible (the 2-line clamp used to cut long
+        // product/brand names off with an ellipsis); the card grows instead.
+        display: "block",
+        overflowWrap: "anywhere",
+        lineHeight: 1.3
       }
     }, /*#__PURE__*/React.createElement("span", {
       style: {
@@ -4576,9 +4576,8 @@ const RoutineBlock = ({
       style: {
         display: "flex",
         gap: 4,
-        marginTop: 1,
-        flexWrap: "nowrap",
-        overflow: "hidden",
+        marginTop: 4,
+        flexWrap: "wrap",
         alignItems: "center"
       }
       // Category pill (Cleanser/Toner/Exfoliant/Serum/etc.) is shown first
@@ -4741,11 +4740,11 @@ const RoutineBlock = ({
       style: {
         width: 24,
         alignSelf: "stretch",
-        minHeight: 34,
+        minHeight: 40,
         // Bleeds to the card's right edge (the card has 10px/9px padding) so
         // the whole strip is the tap target. When the panel is open it stops
         // at the first line instead of overlapping the panel below it.
-        margin: usageOpen[p.id] ? "-10px -9px 0 -2px" : "-10px -9px -10px -2px",
+        margin: usageOpen[p.id] ? "-16px -9px 0 -2px" : "-16px -9px -16px -2px",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
