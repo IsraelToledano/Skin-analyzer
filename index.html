@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-25.5";
+const APP_VERSION = "2026-09-26.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2560,6 +2560,30 @@ const MIGRATIONS = [{
       })
     };
   }
+}, {
+  id: "hydrating_mask_own_night_v1",
+  // Why the masks "weren't in the routine": ROTATION_CATEGORY_ROLES pulls
+  // EVERY scheduled product of type "mask" into the rotation pool, and the
+  // pool has exactly ONE mask night per week (ROTATION_SLOTS). So the
+  // Caudalie VinoHydra hydrating mask — added as a standalone weekly step
+  // (add_caudalie_vinohydra_mask_v1 says so in its own comment) — was
+  // silently absorbed into that single slot and had to share it with every
+  // clay mask: about one appearance every 2-3 weeks instead of weekly.
+  // A hydrating cream mask carries no actives, so it doesn't need the
+  // pool's rest-night spacing at all. rotationRole "none" takes it back out
+  // of the pool (see rotationRoleFor) so it runs on its own weekly cadence;
+  // the clay masks keep the pool's one weekly mask night between them.
+  // Only touches a scheduled VinoHydra that isn't already opted out.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const isVinoHydra = p => hay(p).includes("vinohydra");
+    const products = profile.products || [];
+    if (!products.some(p => isVinoHydra(p) && p.rotationRole !== "none")) return profile;
+    return {
+      ...profile,
+      products: products.map(p => isVinoHydra(p) && p.rotationRole !== "none" ? { ...p, rotationRole: "none", inRotationPool: false } : p)
+    };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -3143,6 +3167,11 @@ const ROTATION_CATEGORY_ROLES = {
   mask: "mask"
 };
 const rotationRoleFor = p => {
+  // Explicit opt-out: a product typed "mask" that should NOT share the one
+  // weekly clay/exfoliant mask night (e.g. a plain hydrating mask, which has
+  // no actives and needs no rest night). It is then scheduled like any
+  // ordinary weekly product.
+  if (p.rotationRole === "none") return null;
   if (p.rotationRole) return p.rotationRole;
   const type = detectType(p);
   if (type === "retinoid") {
