@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-26.1";
+const APP_VERSION = "2026-09-26.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3429,6 +3429,41 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           placedIds.add(p.id);
           registerPlaced(p);
         });
+        // Double-cleanse guarantee: an oil cleanse is ALWAYS followed by a
+        // water cleanser (gel/foam) the same night — clinically the oil only
+        // dissolves; the water step is what actually removes it. The linked
+        // partner above only covers this while that partner is itself due
+        // that night, which stopped being true once the gel cleansers began
+        // alternating (a twice-weekly gel is not due on most oil nights), and
+        // the general fill below can't be relied on for it: on a full night
+        // the water cleanser lost the cap and the oil went out alone. So if
+        // the oil cleanse is on today's list and no water cleanser is, claim
+        // the best-priority one now — due ones first (same overdue/served
+        // ranking as everywhere else), then any scheduled one — allowed to
+        // push past the cap like the other foundational steps. Registering
+        // it also takes the one-water-cleanser-per-session slot.
+        const oilPlaced = dayList.some(e => detectType(byId.get(e.productId) || {}) === "cleanser_oil");
+        const waterPlaced = dayList.some(e => detectType(byId.get(e.productId) || {}) === "cleanser");
+        if (cat === "cleanser" && oilPlaced && !waterPlaced) {
+          const waters = rotating.filter(p => detectType(p) === "cleanser" && !placedIds.has(p.id)).map(p => {
+            const iv3 = FREQ_DAYS[p.frequency] || 1;
+            const last3 = lastServed[p.id];
+            const since3 = last3 ? daysBetween(last3, ds) : daysBetween(p.nextDate, ds);
+            const due3 = last3 ? since3 >= iv3 : daysBetween(p.nextDate, ds) >= 0;
+            return { p, due: due3, overdue: (since3 - iv3) / iv3, served: servedCount[p.id] || 0 };
+          }).sort((a, b) => Number(b.due) - Number(a.due) || b.overdue - a.overdue || a.served - b.served);
+          const pick = waters.find(w => !conflictsWithToday(w.p));
+          if (pick) {
+            dayList.push({
+              productId: pick.p.id,
+              carried: false
+            });
+            lastServed[pick.p.id] = ds;
+            servedCount[pick.p.id] = (servedCount[pick.p.id] || 0) + 1;
+            placedIds.add(pick.p.id);
+            registerPlaced(pick.p);
+          }
+        }
       }
     });
     // 2d. Rotation pools (currently used for one thing: Israel's PM
