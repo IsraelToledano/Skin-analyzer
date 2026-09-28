@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-28.1";
+const APP_VERSION = "2026-09-29.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2674,6 +2674,31 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "retinoid_full_potency_wait_v1",
+  // Explicit statement: skin isn't sensitive, so the toner-before-retinoid
+  // order shouldn't be used as an unintentional buffer (buffering trades a
+  // little potency for less irritation — a real technique, but not one he
+  // needs). A toner is thin enough that it isn't blocking absorption the
+  // way a cream would, but it still needs a few minutes to fully absorb
+  // first. Rather than changing the step order (Tone still belongs right
+  // after cleansing per STEP_INFO), this adds a wait-time note directly on
+  // each scheduled retinoid product (Ret-Avit tretinoin, OTC retinol) —
+  // matched by detectType, so it also covers a retinoid added later, not
+  // just these two by name. Appends rather than overwrites so any note
+  // already on the product (e.g. Ret-Avit's own) is kept; no-op if the
+  // guidance is already there.
+  apply: profile => {
+    const products = profile.products || [];
+    const note = "Skin isn't sensitive — no need to let the toner buffer this. Give the toner (Anua Heartleaf) about 10 minutes to fully absorb first so it isn't taking any edge off this step's potency.";
+    const targets = products.filter(p => p.scheduled && detectType(p) === "retinoid" && !(p.notes || "").includes("isn't sensitive"));
+    if (!targets.length) return profile;
+    const targetIds = new Set(targets.map(p => p.id));
+    return {
+      ...profile,
+      products: products.map(p => targetIds.has(p.id) ? { ...p, notes: p.notes ? `${p.notes} ${note}` : note } : p)
     };
   }
 }];
