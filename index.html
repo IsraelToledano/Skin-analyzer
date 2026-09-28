@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-26.2";
+const APP_VERSION = "2026-09-28.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -771,7 +771,17 @@ const RANK_DATA = [
     pros: ["Genuinely fragrance-free 2% salicylic acid (BHA) — minimal 8-ingredient formula, no parabens/sulfates/silicones, widely regarded as one of the gold-standard BHA exfoliants", "Oil-soluble BHA penetrates into pores rather than just working on the surface — well matched to blackheads and enlarged pores"],
     cons: ["A third salicylic-acid product alongside Caudalie Vinopure Purifying Toner and Vinopure Salicylic Serum — same active, different concentrations, real overlap", "Now a fifth candidate sharing your 2x/week exfoliant rotation slot, meaning each individual exfoliant gets served less often — the category's total exfoliation frequency doesn't change, but any one product's turn comes up less"],
     general: "Salicylic acid (BHA) is oil-soluble, so unlike a water-soluble AHA it can actually penetrate into the pore itself — effective for blackheads and oil control, and gentler on the surface than a glycolic acid at comparable strength.",
-    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "no-better-option", note: "Same active at a comparable concentration — this isn't an upgrade over what you already have, just another well-formulated option in the same lane. Worth considering whether you need three salicylic-acid products rather than which one is best." }] }
+    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "no-better-option", note: "Same active at a comparable concentration — this isn't an upgrade over what you already have, just another well-formulated option in the same lane. Worth considering whether you need three salicylic-acid products rather than which one is best." }] },
+  { id: 37, match: ["ordinary", "niacinamide"], tag: "best",
+    pros: ["Same 10% niacinamide + zinc PCA formula that already stood as your benchmark alternative to the Yeouth serum — fragrance and essential-oil free, no parabens", "Zinc PCA adds mild oil control alongside the niacinamide, useful for combination/oily pore-prone skin", "A clean gel serum with no shimmer or cosmetic fillers — a direct swap into the exact niacinamide role Yeouth held"],
+    cons: ["Its thickening-gum base (tamarindus, carrageenan, acacia, xanthan) can pill under some moisturizers or SPF — apply on fully dry skin and give it a minute before the next step"],
+    general: "10% niacinamide with 1% zinc PCA in a fragrance-free gel base — one of the two most commonly cited OTC niacinamide benchmarks (the other being Yeouth's, which this replaces). Reduces oil, refines the look of pores, and calms redness.",
+    alternatives: [] },
+  { id: 38, match: ["trader joe", "dewy"], tag: "good",
+    pros: ["Niacinamide sits third on the ingredient list — a real, meaningful dose, not a trace amount", "Fragrance-free, and its several hyaluronic-acid forms add genuine surface hydration"],
+    cons: ["Duplicates the niacinamide active now coming from The Ordinary serum — the app won't schedule both the same night, so this would only ever run when the Ordinary is skipped", "Also overlaps the existing hydrating-essence step (Snail 96 / Marine Hyaluronics) on the hyaluronic-acid side", "Contains titanium dioxide, mica and tin oxide — cosmetic shimmer pigments for a 'dewy glow' finish, not treatment ingredients; it's formulated closer to a tinted glow serum than a plain niacinamide treatment"],
+    general: "A niacinamide + multi-form hyaluronic-acid serum with added shimmer pigments (titanium dioxide, mica, tin oxide) for a dewy-glow finish.",
+    alternatives: [{ name: "The Ordinary Niacinamide 10% + Zinc 1% (already in your routine)", relation: "better", note: "Does the same niacinamide job without competing for the same active slot or adding shimmer pigments — the reason this one stays in the library rather than scheduled." }] },
 
 ];
 const getProductRank = p => {
@@ -2582,6 +2592,88 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: products.map(p => isVinoHydra(p) && p.rotationRole !== "none" ? { ...p, rotationRole: "none", inRotationPool: false } : p)
+    };
+  }
+}, {
+  id: "finish_yeouth_niacinamide_v1",
+  // Explicit request: current bottle of Yeouth Niacinamide Serum is used
+  // up — remove it entirely (not just unschedule it), same pattern as
+  // finish_thermal_spring_water_v1: reaches into existing data and deletes
+  // it for real, once, keeping it in removedProducts (with usage history
+  // intact) rather than wiping it outright.
+  apply: profile => {
+    const isYeouthNiacinamide = p => /yeouth/i.test(p.brandName || "") && /niacinamide/i.test(p.genericName || "");
+    const products = profile.products || [];
+    const victim = products.find(isYeouthNiacinamide);
+    if (!victim) return profile;
+    return {
+      ...profile,
+      products: products.filter(p => p.id !== victim.id),
+      removedProducts: [{ ...victim, removedAt: todayStr() }, ...(profile.removedProducts || []).filter(p => p.id !== victim.id)].slice(0, TRASH_LIMIT)
+    };
+  }
+}, {
+  id: "add_ordinary_niacinamide_zinc_v1",
+  // Explicit request: replace the finished Yeouth Niacinamide Serum with
+  // The Ordinary Niacinamide 10% + Zinc 1% — already RANK_DATA's own
+  // "as-good" benchmark alternative to Yeouth (see id 13's entry), so it
+  // takes over the exact same slot Yeouth held: both sessions, daily,
+  // canonical niacinamide stepOrder. INCI checked against the brand's own
+  // listing. No-op if already present.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const isOrdinaryNiacinamide = p => hay(p).includes("ordinary") && hay(p).includes("niacinamide");
+    const products = profile.products || [];
+    if (products.some(isOrdinaryNiacinamide)) return profile;
+    const newProduct = {
+      id: "ordinary-niacinamide-zinc-v1",
+      genericName: "Niacinamide 10% + Zinc 1%",
+      brandName: "The Ordinary",
+      notes: "10% niacinamide + 1% zinc PCA, fragrance-free gel serum. Replaces the finished Yeouth Niacinamide Serum in its exact slot: both sessions, daily.",
+      session: "both",
+      frequency: "daily",
+      stepOrder: 40,
+      nextDate: todayStr(),
+      isOneOff: false,
+      scheduled: true
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "add_traderjoes_dewy_serum_v1",
+  // Explicit request (photo of the bottle): add Trader Joe's Dewy Skin
+  // Serum (niacinamide + hyaluronic acid complex, 1 fl oz). INCI checked:
+  // niacinamide is a real dose (3rd ingredient), but it also carries
+  // titanium dioxide/mica/tin oxide shimmer pigments — a glow product, not
+  // a plain treatment serum. Added to the product LIBRARY only (scheduled:
+  // false), same pattern as the Dr.Melaxin mask: it duplicates the
+  // niacinamide active now covered by The Ordinary (added above) and the
+  // hyaluronic-acid role already covered by the hydrating-essence step, so
+  // scheduling it would only ever displace one of those rather than add
+  // anything. Schedule it manually if wanted. No-op if already present.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const isTjDewy = p => hay(p).includes("trader joe") && hay(p).includes("dewy");
+    const products = profile.products || [];
+    if (products.some(isTjDewy)) return profile;
+    const newProduct = {
+      id: "traderjoes-dewy-serum-v1",
+      genericName: "Dewy Skin Serum — Niacinamide + Hyaluronic Acid Complex",
+      brandName: "Trader Joe's",
+      notes: "1 fl oz (29 mL). Niacinamide + hyaluronic acid complex, plus titanium dioxide/mica/tin oxide shimmer for a dewy-glow finish. Library only: overlaps the niacinamide (The Ordinary) and hydrating-essence steps already scheduled.",
+      session: "",
+      frequency: "",
+      stepOrder: 0,
+      nextDate: "",
+      isOneOff: false,
+      scheduled: false
+    };
+    return {
+      ...profile,
+      products: [...products, newProduct]
     };
   }
 }];
