@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-09-29.1";
+const APP_VERSION = "2026-10-01.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -431,16 +431,24 @@ const productCategoryGroup = p => CATEGORY_GROUP_MAP[detectType(p)] || "Other";
 // category ordering that genuinely matters is encoded as distinct
 // categories: cleanser_oil (10) deliberately sorts before cleanser (15), so
 // a double cleanse runs oil-first, water-based-second.
+// 2026-10-01 re-ordering, after the evening list showed niacinamide
+// BEFORE the exfoliant and the essence:
+//  - exfoliant 40 -> 18: an exfoliant goes on bare, just-cleansed skin. For a
+//    rinse-off one (Dermalogica Microfoliant) this is the only order that
+//    works at all — anything applied before it is washed off with it. A
+//    leave-on acid likewise shouldn't sit on top of a treatment serum.
+//  - essence 50 -> 30: an essence is a watery prep layer; it belongs before
+//    the treatment serums (thinnest to thickest), not after them.
 const CATEGORY_STEP_ORDER = {
   cleanser_oil: 10,
   cleanser: 15,
+  exfoliant: 18,
   toner: 20,
   mist: 20,
+  essence: 30,
   vitc: 35,
   niacinamide: 35,
-  exfoliant: 40,
   retinoid: 45,
-  essence: 50,
   serum: 50,
   eye: 55,
   mask: 60,
@@ -861,12 +869,12 @@ const AUTO_SCHEDULE_RULES = [
   // should hit bare, freshly-cleansed skin before any hydrating essence
   // goes on. Routing "essence toner"/"essence water" to the essence/serum
   // stage (step 50) fixes that ordering.
-  { keywords: ["essence toner", "essence water"], session: "pm", frequency: "daily", step: 50 },
+  { keywords: ["essence toner", "essence water"], session: "pm", frequency: "daily", step: 30 },
   // Exfoliant-acid check comes BEFORE the generic toner rule below — an
   // "AHA/BHA/PHA toner" is functionally a leave-on chemical exfoliant, not
   // a basic toner, and needs to sort/group with other exfoliants (not get
   // stranded early in the routine with a serum splitting the two apart).
-  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 40 },
+  { keywords: ["glycolic acid", "glycolic", "aha", "bha", "pha", "lactic acid", "salicylic acid", "mandelic acid", "exfoliant", "exfoliating", "peeling"], session: "pm", frequency: "weekly", step: 18 },
   { keywords: ["toner", "thermal water", "spring water", "mist"], session: "both", frequency: "daily", step: 20 },
   { keywords: ["vitamin c", "ascorbic acid"], session: "am", frequency: "twice-weekly", step: 35 },
   { keywords: ["niacinamide"], session: "am", frequency: "daily", step: 35 },
@@ -927,11 +935,13 @@ const recommendStepOrder = p => p.stepOrder || classifyStepOrder(p) || 50;
 const STEP_INFO = [
   { step: 10, name: "Oil cleanse", desc: "Dissolves sunscreen, sebum, and makeup first so nothing blocks the water-based cleanser or the actives that follow." },
   { step: 15, name: "Cleanse", desc: "Removes water-based residue and buildup, leaving a clean base — everything after this step absorbs better on bare skin." },
+  { step: 18, name: "Exfoliant", desc: "Goes on bare, just-cleansed skin, before anything else. A rinse-off exfoliant has to come first or it washes away whatever was applied before it; a leave-on acid works best without a serum layer in the way." },
   { step: 20, name: "Tone", desc: "Preps and balances skin right after cleansing, before any treatment step goes on." },
+  { step: 30, name: "Essence", desc: "A watery hydrating prep layer. It goes before treatment serums, thinnest to thickest, so it doesn't sit on top of them." },
   { step: 35, name: "AM active (vitamin C / niacinamide)", desc: "Antioxidant/brightening actives go on early, on clean dry skin, so they absorb before anything heavier layers on top." },
-  { step: 40, name: "Exfoliant", desc: "Chemical exfoliants need bare, freshly-cleansed skin to work, and go on before richer treatment steps so they aren't diluted or blocked." },
+
   { step: 45, name: "Retinoid", desc: "The primary treatment step for texture, pores, and scarring — placed on clean skin, before heavier moisturizing steps that could dilute it." },
-  { step: 50, name: "Serum / essence", desc: "Delivers hydration or targeted actives in a light layer, after treatment actives but before anything occlusive." },
+  { step: 50, name: "Serum", desc: "Delivers hydration or targeted actives in a light layer, after treatment actives but before anything occlusive." },
   { step: 55, name: "Eye cream", desc: "The eye area is thinner and more delicate, so it gets its own light step separate from full-face serums and creams." },
   { step: 60, name: "Mask", desc: "An occasional intensive step, layered after normal treatment steps for extra targeted benefit." },
   { step: 65, name: "Face oil", desc: "Oils seal in what's underneath, so they go after water-based serums, not before — otherwise they'd block absorption." },
@@ -941,7 +951,9 @@ const STEP_INFO = [
   { step: 95, name: "SPF", desc: "Always last in the AM routine — sits on top as the final protective layer so nothing is applied over it that could break the film." }
 ];
 const stepInfoFor = p => {
-  const step = p.stepOrder || classifyStepOrder(p);
+  // From the category, like the order itself — a stale stored stepOrder
+  // used to pick the wrong explanation (e.g. an essence still at 50).
+  const step = canonicalStepOrder(p);
   if (step == null) return null;
   return STEP_INFO.reduce((best, cur) => Math.abs(cur.step - step) < Math.abs(best.step - step) ? cur : best, STEP_INFO[0]);
 };
