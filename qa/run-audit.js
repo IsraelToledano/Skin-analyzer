@@ -1,0 +1,10 @@
+const {load,seedProfile,plan}=require('./sim');const {audit}=require('./audit');
+const DAYS=+(process.argv.find(a=>/^--days=/.test(a))||'--days=30').split('=')[1];const get=load();const prof=seedProfile(get);const pl=plan(get,prof,DAYS);
+const fmt=l=>l.map((p,i)=>`${i+1}.${p.genericName.slice(0,26)}`).join(' → ');
+if(process.argv.includes('--show'))Object.keys(pl).sort().forEach(k=>console.log(k.padEnd(14),fmt(pl[k])));
+const {issues,b2b,info}=audit(get,prof,pl,DAYS);
+info.forEach(l=>console.log('  · '+l));
+const grouped={};issues.forEach(i=>{const k=i.sev+' | '+i.msg.replace(/\d{4}-\d{2}-\d{2}/g,'');(grouped[k]=grouped[k]||[]).push(i.key)});
+console.log(`\n${issues.length} issues, ${Object.keys(grouped).length} distinct; back-to-back active nights: ${b2b}`);
+Object.entries(grouped).sort().forEach(([k,v])=>console.log(`[${v.length}×] ${k}   e.g. ${v.slice(0,3).join(', ')}`));
+process.exit(issues.filter(i=>i.sev!=='info').length?1:0);

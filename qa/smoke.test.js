@@ -1,0 +1,13 @@
+const assert=require('assert');const A=require('./harness').loadApp();const {P,baseProducts,profile,T}=require('./fixture');
+let pass=0,fail=0;const t=(n,fn)=>{try{fn();pass++;console.log('  ok  ',n)}catch(e){fail++;console.log('  FAIL',n,'\n       ',e.message.split('\n')[0])}};
+const sched=(prods,s,d=28)=>A.buildSessionSchedule(prods,[],s,A.computeEpoch(prods,s),A.addDaysStr(T,d),A.SESSION_CAP,[],[]);
+t('schedule builds for both sessions over 4 weeks',()=>{['am','pm'].forEach(s=>assert.ok(Object.keys(sched(baseProducts(),s)).length>=28))});
+t('skin steps never exceed the cap',()=>{const sc=sched(baseProducts(),'pm');Object.values(sc).forEach(l=>assert.ok(l.length<=A.SESSION_CAP))});
+t('lip balm is cap-exempt',()=>{assert.strictEqual(A.countsTowardCap(P(9,'Lip Balm','pm','daily')),false);assert.strictEqual(A.countsTowardCap(P(1,'Gentle Gel Cleanser','pm','daily')),true)});
+t('retinoid and acid never share a night',()=>{const sc=sched(baseProducts(),'pm',42);Object.entries(sc).forEach(([d,l])=>assert.ok(!(l.some(e=>e.productId===3)&&l.some(e=>e.productId===4)),d))});
+t('acid cleanser is rinse-off and does not claim the acid slot',()=>{const sa=P(8,'Gentle Exfoliating SA Cleanser','am','daily',{brandName:'Cetaphil'});assert.ok(A.isRinseOffProduct(sa));assert.ok(!A.classifySingletonGroups(sa).includes('acid-exfoliant'))});
+t('migrations are idempotent',()=>{const once=A.applyMigrations({...profile(),migrations:[]});assert.deepStrictEqual(A.applyMigrations(once),once)});
+t('microneedling blocks actives that night and the next',()=>{const prods=baseProducts();const sc=A.buildSessionSchedule(prods,[],'pm',A.computeEpoch(prods,'pm'),A.addDaysStr(T,10),A.SESSION_CAP,[],[{date:T,type:'microneedling'}]);[T,A.addDaysStr(T,1)].forEach(d=>assert.ok(!(sc[d]||[]).some(e=>[3,4].includes(e.productId)),d))});
+t('usage panel data still computes',()=>{const u=A.productUsage(profile({logs:[{date:'2026-09-19',session:'am',productId:1,done:true}]}),1,T);assert.strictEqual(u.lastApplied.date,'2026-09-19')});
+t('picker keeps same-category products together',()=>{const S=A.buildPickerSections([{p:P(40,'Rice Toner','pm','daily'),score:30},{p:P(41,'Vitamin C Serum','am','daily'),score:30}],P(2,'Hydrating Toner','pm','daily'));assert.strictEqual(S.sameCount,1);assert.strictEqual(S.otherItems.length,1)});
+console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);

@@ -1,0 +1,15 @@
+{
+  "name": "skin-ritual-qa",
+  "private": true,
+  "description": "Behavioral tests and the 30-day routine audit for index.html",
+  "scripts": {
+    "test": "node syntax.js && node smoke.test.js && node order.test.js && node fixes.test.js && node run-audit.js && node run-audit.js --days=60 && node sweep.js && node order.e2e.js && node layout.e2e.js",
+    "audit": "node run-audit.js --show"
+  },
+  "devDependencies": {
+    "@babel/standalone": "^7.26.0",
+    "playwright-core": "^1.49.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

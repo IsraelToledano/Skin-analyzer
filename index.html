@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-01.1";
+const APP_VERSION = "2026-10-01.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -377,6 +377,12 @@ const detectType = p => {
   if (/moisturi|water gel|gel cream|effaclar mat|red bean/.test(hay)) return "moisturizer";
   if (/eye/.test(hay)) return "eye";
   if (/bio-oil|face oil|facial oil|vitamin e|squalane|jojoba|rosehip/.test(hay)) return "faceoil";
+  // "Essence Toner" / "Essence Water" (Beauty of Joseon Ginseng) is a
+  // hydrating essence: it must share the one-essence-per-night alternation
+  // with the Snail Essence and Marine Hyaluronics, not take a toner slot.
+  // AUTO_SCHEDULE_RULES already treated these as essences; detectType now
+  // agrees, so the category, order and alternation all follow.
+  if (/essence toner|essence water/.test(hay)) return "essence";
   if (/toner/.test(hay)) return "toner";
   if (/essence/.test(hay)) return "essence";
   if (/serum/.test(hay)) return "serum";
@@ -454,14 +460,22 @@ const CATEGORY_STEP_ORDER = {
   mask: 60,
   faceoil: 65,
   moisturizer: 75,
-  lip: 85,
+  // Lip is the last step of the evening (after self-tan at 88) — found by
+  // the 30-day plan audit: the self-tan was landing after the lip mask.
+  lip: 90,
   selftan: 88,
   spf: 95,
   other: 50
 };
 // The canonical position for a product, derived purely from its category.
 // Deliberately ignores p.stepOrder — see CATEGORY_STEP_ORDER above.
-const canonicalStepOrder = p => CATEGORY_STEP_ORDER[detectType(p)] ?? 50;
+// Clay/detox/pore masks are WASHED OFF, so they must come right after
+// cleansing: in the 60 slot they were applied after the essence and
+// niacinamide and then rinsed them away. Found by the 30-day plan audit.
+// The type stays "mask" (so the weekly mask rotation is unchanged) — only
+// the position moves. Name/brand only; notes are never read here.
+const isWashOffMask = p => detectType(p) === "mask" && /clay|pore mask|pore cleansing|d[eé]tox|wash.?off|rinse.?off/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+const canonicalStepOrder = p => isWashOffMask(p) ? 16 : CATEGORY_STEP_ORDER[detectType(p)] ?? 50;
 // The step cap is about how much you're asking your FACE to absorb in one
 // session. Lip balm isn't on that skin, competes with nothing, conflicts
 // with nothing — so it shouldn't push a real step off the day. It is
@@ -935,6 +949,7 @@ const recommendStepOrder = p => p.stepOrder || classifyStepOrder(p) || 50;
 const STEP_INFO = [
   { step: 10, name: "Oil cleanse", desc: "Dissolves sunscreen, sebum, and makeup first so nothing blocks the water-based cleanser or the actives that follow." },
   { step: 15, name: "Cleanse", desc: "Removes water-based residue and buildup, leaving a clean base — everything after this step absorbs better on bare skin." },
+  { step: 16, name: "Wash-off mask", desc: "A clay or detox mask is rinsed off, so it goes straight after cleansing — anything applied before it would be washed away with it." },
   { step: 18, name: "Exfoliant", desc: "Goes on bare, just-cleansed skin, before anything else. A rinse-off exfoliant has to come first or it washes away whatever was applied before it; a leave-on acid works best without a serum layer in the way." },
   { step: 20, name: "Tone", desc: "Preps and balances skin right after cleansing, before any treatment step goes on." },
   { step: 30, name: "Essence", desc: "A watery hydrating prep layer. It goes before treatment serums, thinnest to thickest, so it doesn't sit on top of them." },
@@ -946,7 +961,7 @@ const STEP_INFO = [
   { step: 60, name: "Mask", desc: "An occasional intensive step, layered after normal treatment steps for extra targeted benefit." },
   { step: 65, name: "Face oil", desc: "Oils seal in what's underneath, so they go after water-based serums, not before — otherwise they'd block absorption." },
   { step: 75, name: "Moisturizer", desc: "Locks in hydration and everything applied before it — one of the last steps so it isn't undone by something layered on top." },
-  { step: 85, name: "Lip", desc: "A separate, low-priority finishing step since lips aren't part of the main face routine." },
+  { step: 90, name: "Lip", desc: "The last step of the evening, since lips aren't part of the main face routine and a lip mask shouldn't get anything layered over it." },
   { step: 88, name: "Self-tan", desc: "Cosmetic DHA stain that reacts unpredictably with actives, so it's kept on its own night, near the end of the routine." },
   { step: 95, name: "SPF", desc: "Always last in the AM routine — sits on top as the final protective layer so nothing is applied over it that could break the film." }
 ];
@@ -3721,9 +3736,18 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           members,
           overdue: bestOverdue,
           stepOrder: minStepOrder,
-          served: minServedCount
+          served: minServedCount,
+          // A due product used less often than daily. Found by the 30-day
+          // plan audit: when more daily products compete than the cap
+          // allows, one of them is always a day "overdue" (ratio 1.0), and a
+          // due weekly product only reaches 1.0 after a full extra week —
+          // so the VinoHydra mask and the self-tan ran every 14 days instead
+          // of every 7. Missing a day costs a daily product 1 use in ~30;
+          // missing its day costs a weekly product 1 use in 4. Due
+          // infrequent items are therefore placed first.
+          infrequent: members.some(p => (FREQ_DAYS[p.frequency] || 1) > 1)
         } : null;
-      }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.served - b.served || a.stepOrder - b.stepOrder);
+      }).filter(Boolean).sort((a, b) => (b.infrequent - a.infrequent) || b.overdue - a.overdue || a.served - b.served || a.stepOrder - b.stepOrder);
       let remaining = budget;
       candidates.forEach(c => {
         // Same-active exclusivity AND cross-active conflicts: if any
