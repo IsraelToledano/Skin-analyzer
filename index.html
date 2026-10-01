@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-01.5";
+const APP_VERSION = "2026-10-01.6";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -727,9 +727,9 @@ const RANK_DATA = [
     alternatives: [{"name": "Dr. Dennis Gross Alpha Beta Universal Daily Peel", "relation": "as-good", "compare": {"this": ["Much stronger — a real peel for monthly use", "Includes 2% salicylic acid for pores"], "other": ["Far milder pre-soaked pads with a neutralizing second step", "Designed for frequent use, much lower irritation risk"]}, "note": "Different intensity, not better or worse. This is the stronger monthly reset; the pads are the gentler choice if the peel ever proves too much."}] },
   { id: 23, match: ["aztec"], tag: "good",
     pros: ["Strong oil and blackhead absorption", "Effective via absorption for oily T-zones"],
-    cons: ["Pure bentonite with nothing to buffer it — the most drying of your clay masks; mixing it with vinegar adds acid on top"],
+    cons: ["Pure bentonite with nothing to buffer it — the most drying of your clay masks", "The jar says to mix it with apple cider vinegar — don't: that puts acid on your skin on the mask night. Mix it with plain water"],
     general: "Bentonite clay masks draw out oil and impurities via absorption — effective for blackheads and oily T-zones used occasionally, since they're drying with regular use.",
-    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "compare": {"this": ["Stronger oil absorption — pure bentonite", "Very cheap per use, fragrance-free"], "other": ["Ready-made cream, no mixing with vinegar", "Blended clay with caffeine and grape — less tightening and redness", "Fragrance- and essential-oil-free (confirmed)"]}, "note": "Pure bentonite is the most drying clay there is, and mixing it with vinegar adds acid on top. On skin that gets acids and retinoids most nights, the gentler blended clay gives you the same oil and pore benefit with less barrier stress."}] },
+    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "compare": {"this": ["Stronger oil absorption — pure bentonite", "Very cheap per use, fragrance-free"], "other": ["Ready-made cream, nothing to mix", "Blended clay with caffeine and grape — less tightening and redness", "Fragrance- and essential-oil-free (confirmed)"]}, "note": "Pure bentonite is the most drying clay there is. On skin that gets acids and retinoids most nights, the gentler blended clay gives you the same oil and pore benefit with less barrier stress."}] },
   { id: 24, match: ["beauty of joseon", "pore mask"], tag: "good",
     pros: ["Gentle pore-refining clay mask", "Clay-based, functionally solid for oil/debris absorption"],
     cons: ["Overlaps with Aztec Secret Clay for the same purpose — no reason to run both"],
