@@ -5,7 +5,7 @@ function loadApp(){
   let main=scripts[scripts.length-1];
   main=main.slice(0,main.indexOf('const root = ReactDOM.createRoot'));
   main=main.replace(/const appToday = \(\) => \{[\s\S]*?\n\};\n/,'const appToday = () => new Date(2026, 8, 20);\n');
-  const names=['daysBetween','rotationRoleFor','isWashOffMask','FREQ_DAYS','canonicalStepOrder','detectType','stepInfoFor','buildSessionSchedule','computeEpoch','addDaysStr','SESSION_CAP','MIGRATIONS','applyMigrations','productCategoryGroup','classifySingletonGroups','countsTowardCap','analyzeDayRoutine','isRinseOffProduct','productUsage','buildPickerSections','sortForDay','analyzeRoutine'];
+  const names=['explainAddStepBumps','computeAddStepBumps','productsConflict','conflictGroupsFor','daysBetween','rotationRoleFor','isWashOffMask','FREQ_DAYS','canonicalStepOrder','detectType','stepInfoFor','buildSessionSchedule','computeEpoch','addDaysStr','SESSION_CAP','MIGRATIONS','applyMigrations','productCategoryGroup','classifySingletonGroups','countsTowardCap','analyzeDayRoutine','isRinseOffProduct','productUsage','buildPickerSections','sortForDay','analyzeRoutine'];
   const body=main+'\nreturn {'+names.map(n=>`${n}: (typeof ${n} !== 'undefined' ? ${n} : undefined)`).join(',')+'};';
   const noop=()=>{};
   const React={useState:v=>[typeof v==='function'?v():v,noop],useRef:v=>({current:v}),useEffect:noop,useCallback:f=>f,useMemo:f=>f(),useLayoutEffect:noop,createElement:()=>null,Fragment:'f'};

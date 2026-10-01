@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-01.3";
+const APP_VERSION = "2026-10-01.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -176,7 +176,12 @@ const FREQ_DAYS = {
 // requires hand-writing a new pair — it only requires that the product's
 // name contains something productCategories already recognizes (and if it
 // doesn't, the fix is adding one keyword in ONE place, not four).
-const CATEGORY_CONFLICT_PAIRS = [["acid-exfoliant", "retinoid"], ["vitamin-c", "retinoid"], ["benzoyl", "retinoid"], ["benzoyl", "vitamin-c"], ["niacinamide", "vitamin-c"]];
+// "clay-mask" (a wash-off clay/detox mask — see conflictGroupsFor): clay is
+// drying and the mask night is meant to give the barrier a break, so it
+// never shares a session with a retinoid or an acid. Found by the 60-day
+// add-step simulation (qa/add-sweep.js): adding a clay mask kept the
+// retinoid on the same night.
+const CATEGORY_CONFLICT_PAIRS = [["acid-exfoliant", "retinoid"], ["vitamin-c", "retinoid"], ["benzoyl", "retinoid"], ["benzoyl", "vitamin-c"], ["niacinamide", "vitamin-c"], ["clay-mask", "retinoid"], ["clay-mask", "acid-exfoliant"]];
 // Self-tan conflicts with anything that speeds cell turnover or otherwise
 // disrupts an even fake-tan finish — every active EXCEPT niacinamide
 // (gentle, doesn't accelerate turnover), preserving the exact coverage the
@@ -206,6 +211,7 @@ const classifyActiveGroups = p => Array.from(productCategories(p)).map(cat => AC
 const conflictGroupsFor = p => {
   const groups = classifyActiveGroups(p);
   if (detectType(p) === "selftan") groups.push("selftan");
+  if (isWashOffMask(p)) groups.push("clay-mask");
   return groups;
 };
 const groupsConflict = (groupsA, groupsB) => {
@@ -229,7 +235,9 @@ const productsConflict = (p1, p2) => groupsConflict(conflictGroupsFor(p1), confl
 // e.g. a plain gel cleanser and an exfoliating SA cleanser both landing in
 // the same morning, which is just washing twice with no added benefit.
 // They alternate through the existing fairness tiebreak instead.
-const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer", "cleanser"]);
+// "mask": one mask per session. The add-step simulation found adding a clay
+// mask on the hydrating-mask night left two masks in the same evening.
+const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer", "cleanser", "mask"]);
 // A "serum" that carries no treatment active of its own — just a
 // humectant/hydrator — is functionally an essence wearing a different
 // label. COSRX Snail 96 Essence and The Ordinary Marine Hyaluronics do
@@ -1101,7 +1109,14 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
   const remaining = others.filter(p => !bumpIds.has(p.id));
   // A lip product neither occupies a slot nor can be bumped out of one.
   if (capLoad(remaining) + (countsTowardCap(newProduct) ? 1 : 0) > SESSION_CAP) {
-    const weakest = remaining.filter(countsTowardCap).map(p => ({
+    // The steps a routine is built on are never the ones bumped to make
+    // room: cleansing (both steps of a double cleanse), moisturizer and
+    // sunscreen. The add-step simulation found the cap bump removing the
+    // cleanser — leaving a routine that started with a serum, or an oil
+    // cleanse with no water cleanse after it. If only foundation steps are
+    // left, nothing is bumped and the day runs one step over the cap.
+    const FOUNDATION = new Set(["cleanser", "cleanser_oil", "moisturizer", "spf"]);
+    const weakest = remaining.filter(countsTowardCap).filter(p => !FOUNDATION.has(detectType(p))).map(p => ({
       p,
       score: scoreCandidate(p, {
         session,
@@ -1114,6 +1129,16 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
   }
   return Array.from(bumpIds);
 };
+
+// Plain-language reason for each step an added step pushed out, shown the
+// moment the step is added so the reshuffle is visible, not silent.
+const explainAddStepBumps = (newProduct, bumpIds, prods) => (bumpIds || []).map(id => {
+  const p = (prods || []).find(x => x.id === id);
+  if (!p || !newProduct) return null;
+  const sameRole = classifySingletonGroups(p).some(g => classifySingletonGroups(newProduct).includes(g));
+  const why = productsConflict(newProduct, p) ? "shouldn't be used the same session" : sameRole ? "same role — one per session" : "makes room under the step cap";
+  return { id, name: p.genericName, why };
+}).filter(Boolean);
 
 // ─── DAY ROUTINE HEALTH CHECK ────────────────────────────────────────────
 // Pure, testable function: given the actual list of active products for a
@@ -3474,9 +3499,20 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       }
     });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
+    // Except onto a day where a step the user added (pin) or a one-off
+    // clashes with it: then it waits another day instead of stacking with
+    // the step that was deliberately added (e.g. a carried retinoid onto a
+    // night a clay mask was added).
     const carriedIds = new Set(pendingCarry);
+    const deferredCarry = new Set();
+    const pinnedProds = Array.from(placedIds).map(id => products.find(p => p.id === id)).filter(Boolean);
+    const clashesWithPinned = p => pinnedProds.some(q => q.id !== p.id && (productsConflict(p, q) || classifySingletonGroups(p).some(g => classifySingletonGroups(q).includes(g))));
     groups.forEach(group => {
       if (group.some(p => carriedIds.has(p.id))) {
+        if (group.some(clashesWithPinned)) {
+          group.forEach(p => deferredCarry.add(p.id));
+          return;
+        }
         group.forEach(p => {
           if (!placedIds.has(p.id)) {
             dayList.push({
@@ -3490,7 +3526,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         });
       }
     });
-    pendingCarry = new Set();
+    pendingCarry = deferredCarry;
     // Active-ingredient / layer-singleton groups already guaranteed for
     // today (one-offs, pins, carried-over skips) — everything below won't
     // stack a same-active or same-layer-type product on top of these.
@@ -4496,6 +4532,7 @@ const RoutineBlock = ({
   const [dragOrder, setDragOrder] = useState(() => prods.map(p => p.id));
   const [dragId, setDragId] = useState(null);
   const [dragWarning, setDragWarning] = useState(null);
+  const [addNotice, setAddNotice] = useState(null); // { added, removed: [{ name, why }] } after "+ Add step"
   const rowRefs = useRef({});
   const dragOrderRef = useRef(dragOrder);
   const dragIdRef = useRef(dragId);
@@ -4693,6 +4730,7 @@ const RoutineBlock = ({
       });
       patch.logs = nextLogs;
     }
+    if (mode === "add") setAddNotice({ added: newProduct.genericName, removed: explainAddStepBumps(newProduct, bumpIds, prods) });
     onUpdate(patch);
     setPicker(null);
   };
@@ -4999,7 +5037,7 @@ const RoutineBlock = ({
         borderRadius: 20,
         padding: "1px 7px"
       }
-    }, "skipped · tomorrow"), p.pinned && !done && /*#__PURE__*/React.createElement("span", {
+    }, rotationRoleFor(p) ? "skipped \u00b7 back next turn" : "skipped \u00b7 tomorrow"), p.pinned && !done && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 10,
         background: T.accentSoft,
@@ -5149,7 +5187,19 @@ const RoutineBlock = ({
     ds: ds,
     profile: profile,
     onUpdate: onUpdate
-  }), dragWarning && /*#__PURE__*/React.createElement("div", {
+  }), addNotice && /*#__PURE__*/React.createElement("div", {
+    "data-testid": "add-notice",
+    className: "sr-expand",
+    onClick: () => setAddNotice(null),
+    style: { marginTop: 6, padding: "9px 12px", borderRadius: 10, background: T.greenSoft, border: `1px solid ${T.green}33`, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, fontWeight: 700, color: T.text }
+  }, "Added ", addNotice.added, addNotice.removed.length ? "" : " \u2014 nothing else had to change"), addNotice.removed.map(r => /*#__PURE__*/React.createElement("div", {
+    key: r.id,
+    style: { fontSize: 12, color: T.text, marginTop: 3, lineHeight: 1.4 }
+  }, "\u2212 ", /*#__PURE__*/React.createElement("b", null, r.name), " \u2014 ", r.why)), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 10.5, color: T.muted, marginTop: 4 }
+  }, "Tap to dismiss")), dragWarning && /*#__PURE__*/React.createElement("div", {
     onClick: () => setDragWarning(null),
     style: {
       marginTop: 6,

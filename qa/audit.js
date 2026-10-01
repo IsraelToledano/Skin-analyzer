@@ -7,15 +7,11 @@ const RINSE_OFF=p=>{
     ||/clay|pore mask|pore cleansing mask|instant d[eé]tox/.test(t)
     ||/peeling solution|gel peel/.test(t);
 };
-function audit(get,profile,planObj,days){
+function checkDay(get,key,list,add){
   const type=p=>get('detectType')(p);
-  const issues=[];const add=(sev,key,msg)=>issues.push({sev,key,msg});
-  const counts={};
   const nameOf=p=>`${p.genericName}${p.brandName?' ('+p.brandName.split(' ').slice(0,3).join(' ')+')':''}`;
-  Object.entries(planObj).forEach(([key,list])=>{
     const [d,session]=key.split(':');
     const types=list.map(type);
-    list.forEach(p=>{counts[p.id]=counts[p.id]||{am:0,pm:0};counts[p.id][session]++;});
     const skin=list.filter(p=>type(p)!=='lip');
     if(!list.length){add('high',key,'empty session');return;}
     // R1 cleanser first; oil cleanse followed by a water cleanse
@@ -49,6 +45,20 @@ function audit(get,profile,planObj,days){
     if(leave.filter(p=>get('conflictGroupsFor')(p).includes('acid-exfoliant')).length>1)add('high',key,'two leave-on acids');
     // R8 cap (skin steps)
     if(skin.length>get('SESSION_CAP'))add('med',key,`${skin.length} skin steps (cap ${get('SESSION_CAP')})`);
+      // R11 a wash-off clay mask night carries no retinoid or leave-on acid:
+    // clay is drying and the mask night is meant to be the barrier's break.
+    const clay=list.some(p=>type(p)==='mask'&&RINSE_OFF(p));
+    if(clay&&leave.some(p=>get('conflictGroupsFor')(p).some(g=>g==='retinoid'||g==='acid-exfoliant')))add('high',key,'clay mask on the same night as a retinoid or leave-on acid');
+}
+function audit(get,profile,planObj,days){
+  const type=p=>get('detectType')(p);
+  const issues=[];const add=(sev,key,msg)=>issues.push({sev,key,msg});
+  const counts={};
+  const nameOf=p=>`${p.genericName}${p.brandName?' ('+p.brandName.split(' ').slice(0,3).join(' ')+')':''}`;
+  Object.entries(planObj).forEach(([key,list])=>{
+    const session=key.split(':')[1];
+    list.forEach(p=>{counts[p.id]=counts[p.id]||{am:0,pm:0};counts[p.id][session]++;});
+    checkDay(get,key,list,add);
   });
   // R9 frequency adherence
   const expected={daily:days,'twice-weekly':days*2/7,weekly:days/7,'bi-weekly':days/14,monthly:days/30};
@@ -97,4 +107,4 @@ function audit(get,profile,planObj,days){
   let b2b=0;for(let i=1;i<keys.length;i++){const act=k=>planObj[k].some(p=>!RINSE_OFF(p)&&get('conflictGroupsFor')(p).some(g=>g==='retinoid'||g==='acid-exfoliant'));if(act(keys[i])&&act(keys[i-1]))b2b++;}
   return {issues,counts,b2b,info};
 }
-module.exports={audit,RINSE_OFF};
+module.exports={audit,checkDay,RINSE_OFF};
