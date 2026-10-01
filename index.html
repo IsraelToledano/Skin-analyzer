@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-01.2";
+const APP_VERSION = "2026-10-01.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -619,9 +619,9 @@ const CATEGORY_COLORS = {
 const RANK_DATA = [
   { id: 1, match: ["jason", "vitamin e"], tag: "bad",
     pros: ["Vitamin E is a genuine antioxidant that supports scar/stretch-mark healing in principle"],
-    cons: ["Very heavy, occlusive oil — real comedogenic risk on combination/pore-prone skin", "Works against your blackhead/pore goals rather than for them", "Redundant with Bio-Oil, which already covers this exact role in a lighter formula"],
+    cons: ["Very heavy, occlusive oil — real comedogenic risk on combination/pore-prone skin", "Works against your blackhead/pore goals rather than for them", "Topical vitamin E has little evidence of improving scars, and in a controlled study about a third of users developed a contact rash from it"],
     general: "Pure vitamin E oil is a very heavy, occlusive antioxidant oil. It's often used for scar or stretch-mark massage, but its thickness makes it comedogenic on oilier, pore-prone skin.",
-    alternatives: [{ name: "Bio-Oil (already in your routine)", relation: "better", note: "Same 'oil for scarring' role in a lighter, less occlusive blend — you already have it scheduled twice-weekly, so this one is unnecessary." }] },
+    alternatives: [{"name": "Silicone scar gel (e.g. Dermatix Ultra)", "relation": "better", "compare": {"this": ["Cheap, easy to find"], "other": ["Silicone gel is the best-evidenced topical for raised scars", "Non-comedogenic, dries to a thin film instead of an oil layer"]}, "note": "Vitamin E oil has little evidence of improving scars and a real rash rate; silicone gel is the evidence-based topical. Neither fixes pitted acne scars — that's retinoid and procedure territory."}] },
   { id: 2, match: ["la roche-posay", "retinol"], tag: "best",
     pros: ["Well-suited retinol for blackheads, pores, and scarring", "Appropriate weekly frequency for an OTC retinol", "Speeds cell turnover and evens texture/scarring with consistent use"],
     cons: [],
@@ -631,17 +631,17 @@ const RANK_DATA = [
     pros: ["A genuine retinoid-family ingredient (vitamin A palmitate) with real efficacy for scarring/keratosis on its own"],
     cons: ["A third retinoid product on top of your existing retinol AND tretinoin — pure redundancy", "Raises irritation risk without adding any benefit over what you already have"],
     general: "A313 is a high-dose retinol-ester ointment (vitamin A palmitate), originally formulated for scarring and keratosis. It's a genuine retinoid in its own right, not a mild adjunct.",
-    alternatives: [{ name: "Ret-Avit Tretinoin (already in your routine)", relation: "better", note: "Your prescription tretinoin already covers this exact mechanism more effectively; a third retinoid on top only adds irritation risk." }] },
+    alternatives: [{"name": "Ret-Avit Tretinoin 0.05%", "relation": "better", "compare": {"this": ["Gentler — retinyl palmitate is the weakest retinoid form", "No prescription needed"], "other": ["Tretinoin is the active form itself, with the strongest evidence for acne, pores and texture", "Not in a heavy ointment base"]}, "note": "Retinyl palmitate has to be converted several times in the skin before it does anything, so most of the dose never becomes active. For your goals the tretinoin does the real work; this adds irritation risk on top without adding effect."}] },
   { id: 4, match: ["ret-avit"], tag: "best",
     pros: ["Prescription-strength tretinoin — the gold-standard, most clinically validated retinoid", "The single most effective active you have for blackheads, pores, and scarring"],
-    cons: ["The strongest and most irritating retinoid in your routine — needs careful frequency management (already handled by its dedicated 2x/week slot)"],
+    cons: ["The strongest and most irritating retinoid in your routine — needs low frequency and a rest night between uses"],
     general: "Prescription tretinoin is the gold-standard retinoid: the most clinically validated option for acne, texture, and post-acne marks, but also the strongest and most irritating of the retinoid family.",
     alternatives: [{ name: "Differin Gel (adapalene 0.1%)", relation: "as-good", note: "The only OTC retinoid in a comparable efficacy tier — not an upgrade over what you're already using." }] },
   { id: 5, match: ["pura", "vitamin c"], tag: "good",
     pros: ["Effective for scarring and brightening"],
     cons: ["20% unbuffered L-ascorbic acid is a harsh, high concentration", "Oxidizes quickly once opened", "Commonly irritates combination/sensitive skin", "Only addresses scarring — doesn't help oiliness or blackheads the way a formula built for oily skin would"],
     general: "Unbuffered L-ascorbic acid at 20% is a harsh, high concentration. It's effective for brightening and scarring but oxidizes quickly once opened and commonly irritates sensitive or combination skin.",
-    alternatives: [{ name: "SkinCeuticals Silymarin CF", relation: "better", note: "A genuinely higher tier: 5% L-ascorbic acid (far gentler than Pura d'or's unbuffered 20%) paired with salicylic acid and silymarin — SkinCeuticals' vitamin C formulated specifically for oily/blemish-prone skin, so it addresses scarring, oiliness, and blackheads at once instead of just scarring. Clinically-backed, dermatologist-office-tier formulation, not a budget/derivative alternative." }] },
+    alternatives: [{"name": "SkinCeuticals Silymarin CF", "relation": "better", "compare": {"this": ["Much cheaper", "20% L-ascorbic acid — a high dose"], "other": ["15% L-ascorbic acid stabilized with ferulic acid, so it oxidizes more slowly", "Adds 0.5% salicylic acid and silymarin, formulated for oily, blemish-prone skin"]}, "note": "20% unbuffered vitamin C is past the point of extra benefit and mostly adds irritation and fast oxidation. Silymarin CF gives an effective dose in a stabilized formula built for oily skin, so it also helps the oil and blackheads instead of only the marks."}] },
   { id: 6, match: ["dermalogica", "microfoliant"], tag: "best",
     pros: ["Gentle enzyme/physical exfoliant well suited to blackheads and pores", "Short contact time (rinse-off, activated with water) limits irritation compared to a leave-on acid"],
     cons: [],
@@ -656,12 +656,12 @@ const RANK_DATA = [
     pros: ["Good deep-clean texture for combination skin", "Rinse-off and weekly (not nightly) use meaningfully lowers fragrance-exposure risk"],
     cons: ["Contains fragrance: bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool"],
     general: "Oil cleansers dissolve sunscreen, sebum, and makeup as the first step of a double cleanse, without stripping skin the way a single harsh wash would. Being rinse-off, fragrance in an oil cleanser carries lower risk than in a leave-on product, and lower still at weekly instead of nightly frequency.",
-    alternatives: [{ name: "CeraVe Hydrating Foaming Oil Cleanser", relation: "better", note: "Worth being upfront: most other well-known 'gentle'/'clean' cleansing oils (Dermalogica PreCleanse, Biossance Squalane + Antioxidant, Then I Met You Living Cleansing Balm) still rely on essential oils for scent — not actually fragrance-free despite the marketing. This CeraVe is genuinely fragrance- and essential-oil-free, dermatologist-developed, squalane/ceramide-based. A real formulation upgrade if you want to eliminate the fragrance entirely, though at weekly use the current SKIN1004 is a reasonable keep too." }] },
+    alternatives: [{"name": "CeraVe Hydrating Foaming Oil Cleanser", "relation": "better", "compare": {"this": ["A true cleansing oil — dissolves sunscreen fully before the second cleanse", "Centella extract"], "other": ["Fragrance- and essential-oil-free", "Squalane and ceramides — supports the barrier while it cleans"]}, "note": "Both remove sunscreen. This one carries bergamot, geranium and rose oils plus limonene and linalool, the most common fragrance allergens; the CeraVe does the job without them. At weekly use the difference is small, so finishing this bottle first is reasonable."}] },
   { id: 9, match: ["some by mi"], tag: "good",
     pros: ["Effective multi-acid (glycolic/salicylic/PHA) exfoliating toner", "Broad but relatively mild exfoliation"],
-    cons: ["One of four acid-exfoliant products in your rotation — cumulative exposure across several different acids raises barrier-irritation risk without a proportional benefit over relying on 1–2 used consistently"],
+    cons: ["Tea tree is one of the more common contact allergens — watch for redness or itch", "Acid strengths aren't stated on the label, so its strength is hard to judge"],
     general: "A multi-acid exfoliating toner combining glycolic, salicylic, and gluconolactone (a PHA) for broad but relatively mild exfoliation.",
-    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "better", note: "A more targeted BHA already in your rotation, and one fewer acid product to keep buying — consolidating to 1–2 consistent acids reduces overlap without losing efficacy." }] },
+    alternatives: [{"name": "Caudalie Vinopure Salicylic Serum", "relation": "better", "compare": {"this": ["Three acid types at once, plus 2% niacinamide", "Mild — easy to tolerate"], "other": ["Salicylic acid is oil-soluble, so it works inside the pore where blackheads form", "Single active — easy to tell what's helping or irritating"]}, "note": "Your concerns are blackheads, pores and oil, and that is salicylic acid's job specifically. This toner spreads the same exposure across AHA and PHA, which mostly work on the surface, and adds tea tree, a common contact allergen."}] },
   { id: 10, match: ["vinohydra"], tag: "best",
     pros: ["Hydrating mask that supports combination skin's drier patches", "A supportive, non-active step — no irritation risk"],
     cons: [],
@@ -669,14 +669,14 @@ const RANK_DATA = [
     alternatives: [{ name: "Laneige Water Sleeping Mask", relation: "as-good", note: "A comparable ceramide/hyaluronic hydrating mask — functionally interchangeable with this one." }] },
   { id: 11, match: ["st. tropez"], tag: "good",
     pros: ["No treatment value for your skin concerns, but not counterproductive either — purely cosmetic with no real downside"],
-    cons: ["DHA can react unpredictably if layered with active ingredients the same night (already handled by the app's conflict rules)"],
+    cons: ["DHA can react unpredictably if layered with active ingredients the same night"],
     general: "Self-tanners use DHA to stain the skin's surface layer — purely cosmetic. DHA can react unpredictably if layered with active ingredients the same night, which is why it's already flagged in the app's conflict list.",
     alternatives: [{ name: "Isle of Paradise Self-Tanning Drops", relation: "no-better-option", note: "A comparable gradual-tan DHA product. Cosmetic self-tanners don't have a clinical-efficacy hierarchy the way active ingredients do — there's no verified 'better for your skin' version of this, just alternate scent/finish preferences." }] },
   { id: 12, match: ["mars", "safranal"], tag: "bad",
     pros: ["Saffron extract has some antioxidant/anti-inflammatory marketing backing, though the evidence base is thinner than niacinamide's"],
-    cons: ["A second niacinamide product duplicating Yeouth Niacinamide Serum", "Redundant — the app's own conflict checker already flags niacinamide+niacinamide as duplicated actives"],
+    cons: ["Duplicates the niacinamide in The Ordinary serum", "Burned your skin"],
     general: "Saffron-extract serums are marketed on antioxidant/anti-inflammatory claims from safranal and crocin. The evidence base is thinner than for niacinamide, and commercial formulas like this one are often paired with niacinamide anyway.",
-    alternatives: [{ name: "Yeouth Niacinamide Serum (already in your routine)", relation: "better", note: "Already covers the niacinamide role. If you want extra antioxidant support instead, a plain vitamin C or green tea extract serum would add something Yeouth doesn't already cover, rather than duplicating it." }] },
+    alternatives: [{"name": "The Ordinary Niacinamide 10% + Zinc 1%", "relation": "better", "compare": {"this": ["Adds saffron extract (antioxidant claims)"], "other": ["A disclosed 10% niacinamide plus zinc PCA for oil control", "Well-characterized, fragrance-free formula"]}, "note": "The niacinamide is the active that does the work, and The Ordinary states its dose and adds zinc for oil. Saffron's evidence is thin — and this serum burned your skin."}] },
   { id: 13, match: ["yeouth", "niacinamide"], tag: "best",
     pros: ["Clean, dedicated niacinamide serum", "One of the best-evidenced ingredients for oily, pore-prone, blemish-scarred skin", "Well matched to oiliness and enlarged pores specifically"],
     cons: [],
@@ -684,9 +684,9 @@ const RANK_DATA = [
     alternatives: [{ name: "The Ordinary Niacinamide 10% + Zinc 1%", relation: "as-good", note: "The other commonly-cited benchmark for niacinamide — comparable, not better." }] },
   { id: 14, match: ["vinopure", "salicylic"], tag: "good",
     pros: ["Effective for blackheads and pores", "Concentrated, targeted salicylic-acid format"],
-    cons: ["One of four acid-exfoliant products in your rotation — same cumulative-exposure concern as Some By Mi", "Overlaps with your own Purifying Toner (same active family, just a stronger concentration)"],
+    cons: ["Serum-strength salicylic acid — more drying than a toner, so not for nightly use", "Overlaps with your own Purifying Toner (same active family, just a stronger concentration)"],
     general: "A concentrated salicylic-acid leave-on serum — same active family as the Purifying Toner, just a stronger, more targeted format.",
-    alternatives: [{ name: "Caudalie Vinopure Purifying Toner (already in your routine)", relation: "better", note: "Same active family at a lower, toner-level concentration and one fewer product to manage. Same redundancy note as Some By Mi: you have four acid exfoliants rotating — consolidating to 2–3 consistent ones reduces overlap without losing efficacy." }] },
+    alternatives: [{"name": "Caudalie Vinopure Purifying Toner", "relation": "as-good", "compare": {"this": ["Higher salicylic concentration — stronger per use", "Serum texture, can be applied just where needed"], "other": ["Gentler, toner-strength dose", "Light enough for daily use across the whole face"]}, "note": "Same active, different strength. The serum is the stronger weekly treatment; the toner is the gentle daily maintenance. Neither replaces the other."}] },
   { id: 16, match: ["lip mask"], tag: "best",
     pros: ["Lip-specific overnight hydration and barrier repair", "No conflict with facial actives"],
     cons: [],
@@ -699,9 +699,9 @@ const RANK_DATA = [
     alternatives: [{ name: "Benton Snail Bee High Content Essence", relation: "as-good", note: "A comparable snail-mucin essence — this is already one of the most established options, though." }] },
   { id: 18, match: ["marine hyaluronics"], tag: "good",
     pros: ["Effective, lightweight hydrator"],
-    cons: ["Functionally overlaps with the COSRX Snail Essence already in your PM routine", "No treatment-specific benefit beyond general hydration — the snail essence does the same hydrating job plus barrier/healing support this doesn't"],
+    cons: ["Hydration only — no soothing or repair ingredients", "No treatment-specific benefit beyond general hydration — the snail essence does the same hydrating job plus barrier/healing support this doesn't"],
     general: "A lightweight hyaluronic-acid-based hydrator using marine extracts — a straightforward humectant with no treatment-specific benefit beyond general hydration.",
-    alternatives: [{ name: "COSRX Snail 96 Essence (already in your routine)", relation: "better", note: "Covers the same hydrating-essence role plus barrier-repair/healing support this doesn't — a genuine step up, not just a lateral swap. You likely don't need to repurchase this one once the bottle runs out." }] },
+    alternatives: [{"name": "COSRX Snail 96 Mucin Power Essence", "relation": "better", "compare": {"this": ["Pure hydration in a very light layer", "Hyaluronic acid in several molecule sizes"], "other": ["Hydrates and soothes — snail filtrate contains allantoin and has some wound-healing evidence", "Thicker, more cushioning on dry nights"]}, "note": "Both are fragrance-free hydrators. The snail essence does the same hydration plus soothing and repair, which matters on nights after acids or retinoids; this one only hydrates."}] },
   { id: 19, match: ["red bean water gel"], tag: "best",
     pros: ["Lightweight, non-comedogenic moisturizer", "Good hydration without heaviness — well suited to combination/oily skin"],
     cons: [],
@@ -714,41 +714,46 @@ const RANK_DATA = [
     alternatives: [{ name: "EltaMD UV Clear Broad-Spectrum SPF46", relation: "as-good", note: "A widely dermatologist-recommended comparable SPF — consistency matters more than brand here, though." }] },
   { id: 22, match: ["aha 30"], tag: "good",
     pros: ["Effective as an occasional intensive treatment", "One of the strongest OTC peels available — real efficacy for texture/pores at the right (low) frequency"],
-    cons: ["You already have several other exfoliating products in weekly rotation — cumulative irritation worth monitoring"],
+    cons: ["Peel strength (30% AHA + 2% BHA): 10 minutes maximum, then rinse — never left on, never on a retinoid night"],
     general: "A high-strength, short-contact-time peel meant for occasional (not weekly) intensive exfoliation — one of the strongest OTC peels available.",
-    alternatives: [{ name: "Dr. Dennis Gross Alpha Beta Universal Daily Peel", relation: "better", note: "A milder, lower-irritation peel pad if you want something gentler for frequent use. At monthly frequency alongside 3–4 other standing weekly acid exfoliants, cumulative irritation is worth watching either way." }] },
+    alternatives: [{"name": "Dr. Dennis Gross Alpha Beta Universal Daily Peel", "relation": "as-good", "compare": {"this": ["Much stronger — a real peel for monthly use", "Includes 2% salicylic acid for pores"], "other": ["Far milder pre-soaked pads with a neutralizing second step", "Designed for frequent use, much lower irritation risk"]}, "note": "Different intensity, not better or worse. This is the stronger monthly reset; the pads are the gentler choice if the peel ever proves too much."}] },
   { id: 23, match: ["aztec"], tag: "good",
-    pros: ["Good clay mask for oiliness and blackheads if reactivated", "Effective via absorption for oily T-zones"],
-    cons: ["Overlaps with the other pore/clay masks in your unscheduled list — no reason to run more than one", "Drying with regular use"],
+    pros: ["Strong oil and blackhead absorption", "Effective via absorption for oily T-zones"],
+    cons: ["Pure bentonite with nothing to buffer it — the most drying of your clay masks; mixing it with vinegar adds acid on top"],
     general: "Bentonite clay masks draw out oil and impurities via absorption — effective for blackheads and oily T-zones used occasionally, since they're drying with regular use.",
-    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Already active in your weekly rotation, confirmed fragrance/EO-free, and rated Best — a genuine upgrade over reactivating this one rather than a lateral swap." }] },
+    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "compare": {"this": ["Stronger oil absorption — pure bentonite", "Very cheap per use, fragrance-free"], "other": ["Ready-made cream, no mixing with vinegar", "Blended clay with caffeine and grape — less tightening and redness", "Fragrance- and essential-oil-free (confirmed)"]}, "note": "Pure bentonite is the most drying clay there is, and mixing it with vinegar adds acid on top. On skin that gets acids and retinoids most nights, the gentler blended clay gives you the same oil and pore benefit with less barrier stress."}] },
   { id: 24, match: ["beauty of joseon", "pore mask"], tag: "good",
-    pros: ["Good pore-refining mask if reactivated", "Clay-based, functionally solid for oil/debris absorption"],
+    pros: ["Gentle pore-refining clay mask", "Clay-based, functionally solid for oil/debris absorption"],
     cons: ["Overlaps with Aztec Secret Clay for the same purpose — no reason to run both"],
     general: "A clay-based pore-refining mask, functionally similar to other bentonite/kaolin clay masks — draws out oil and debris with occasional use.",
-    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Already active in your weekly rotation, confirmed fragrance/EO-free, and rated Best — a genuine upgrade over reactivating this one rather than a lateral swap." }] },
+    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "compare": {"this": ["Gentler than pure clay — easy to tolerate", "Ready to use"], "other": ["Caffeine and grape added to the clay", "Fragrance- and essential-oil-free (confirmed)"]}, "note": "Both are ready-made wash-off clay masks for the same job. The Caudalie's full ingredient list was checked and is fragrance-free; this one's wasn't. It's a small edge, not a big gap."}] },
+  { id: 39, match: ["one step peel"], tag: "good",
+    pros: ["Arbutin plus tranexamic acid — two different ways of fading post-acne marks", "Mild mixed-AHA exfoliation (glycolic and lactic) rather than a single strong acid"],
+    cons: ["Ingredients assumed from the US listing — the Israeli packaging wasn't verified", "Also contains niacinamide, duplicating The Ordinary serum", "The label says twice a day, leave-on — far too much acid on top of your other exfoliants; weekly is plenty"],
+    general: "A leave-on exfoliating serum that pairs mild AHAs (glycolic, lactic) with brightening actives — arbutin and tranexamic acid for dark marks, niacinamide, and a peptide. Its distinct value is the pigment-fading pair; the acid part does the same job as your other exfoliants.",
+    alternatives: [] },
   { id: 36, match: ["anua", "hyaluronic"], tag: "good",
     pros: ["Fragrance- and essential-oil-free with mild amino-acid surfactants (cocoyl alaninate, cocoyl glycinate, coco-betaine) — no sulfates", "Squalane, ceramide NP and ectoin add barrier support during the wash, which suits combination skin that also carries retinoid and acid load", "The better evening wash on retinoid and acid nights: it puts no fragrance allergens or exfoliating acids on skin that is about to get a treatment, which the Caudalie gel's six essential oils do"],
-    cons: ["A gentle hydrating wash does nothing for blackheads or enlarged pores, which are your main concerns — the Cetaphil SA cleanser does that work, which is why it keeps every morning", "The eight hyaluronic acids are dosed at parts-per-billion and rinsed off within a minute — a label claim, not a functional hydration boost", "Shares the evening cleanser slot with the Caudalie gel, so the app alternates the two and it lands on about two evenings in three rather than nightly"],
+    cons: ["A gentle hydrating wash does nothing for blackheads or enlarged pores, which are your main concerns", "The eight hyaluronic acids are dosed at parts-per-billion and rinsed off within a minute — a label claim, not a functional hydration boost"],
     general: "A low-foam, fragrance-free gel cleanser built on mild amino-acid surfactants, with squalane, ceramide NP, ectoin and eight forms of hyaluronic acid. It cleans without stripping and is meant for daily use; it is a comfort cleanser, not a treatment one.",
-    alternatives: [{ name: "Cetaphil Gentle Exfoliating SA Cleanser (already in your routine)", relation: "better", note: "Does the pore and blackhead work this one doesn't, so it keeps the morning slot daily. This one is the gentler evening wash, and it is only ahead of the Caudalie gel because it carries no fragrance allergens." }] },
+    alternatives: [{"name": "Cetaphil Gentle Exfoliating SA Cleanser", "relation": "as-good", "compare": {"this": ["No acids — the gentle choice for an evening wash", "Hydrating, low-irritation surfactants"], "other": ["Salicylic and mandelic acid plus PHA — actually works on pores and blackheads", "Fragrance-free"]}, "note": "Different jobs. The Cetaphil treats pores; this one just cleans gently, which is what you want on nights you're also applying acids or a retinoid."}] },
   // Must stay ahead of the generic ["anua"] entry (id 25, the heartleaf
   // toner): getProductRank takes the first entry whose keywords all match.
   { id: 25, match: ["anua"], tag: "best",
-    pros: ["Gentle, soothing, anti-inflammatory botanical (heartleaf)", "Would genuinely complement an actives-heavy routine as a calming buffer, if reactivated"],
+    pros: ["Gentle, soothing, anti-inflammatory botanical (heartleaf)", "A calming buffer for an actives-heavy routine — useful on the nights after acids or a retinoid"],
     cons: [],
     general: "Heartleaf (houttuynia cordata) is a soothing, anti-inflammatory botanical extract — good for calming redness and irritation, especially useful as a buffer on nights with strong actives.",
     alternatives: [{ name: "Klairs Supple Preparation Toner", relation: "as-good", note: "The other commonly-cited benchmark for this soothing-toner role — comparable." }] },
   { id: 26, match: ["cosrx", "aha/bha"], tag: "bad",
     pros: ["A legitimate multi-acid exfoliating toner in isolation"],
-    cons: ["Redundant with the acid toners already active in your routine (Some By Mi, Vinopure Salicylic)", "Adds no new capability, only more cumulative acid exposure"],
+    cons: ["Low-strength acids — less effect per use than a direct salicylic acid treatment", "Adds no new capability, only more cumulative acid exposure"],
     general: "Another multi-acid exfoliating toner, functionally similar to Some By Mi's AHA.BHA.PHA Toner.",
-    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "better", note: "You already have multiple standing acid exfoliants; relying on this one instead wouldn't leave you covering anything less than adding a new product would." }] },
+    alternatives: [{"name": "Caudalie Vinopure Salicylic Serum", "relation": "better", "compare": {"this": ["Two acids (AHA plus a salicylate) in one step"], "other": ["Salicylic acid itself rather than a weaker salicylate derivative", "One clear, targeted active for blackheads and pores"]}, "note": "This toner's acids are low-strength and spread across two types; for pores and blackheads a direct salicylic acid treatment is more effective per use."}] },
   { id: 27, match: ["ginseng"], tag: "good",
     pros: ["Gentle hydrating essence-toner", "Antioxidant/anti-aging marketing claims layered onto a basic hydrating base"],
-    cons: ["Overlaps in purpose with the COSRX Snail Essence already active — ginseng essence adds nothing beyond hydration that snail mucin doesn't already cover"],
+    cons: ["Ginseng's antioxidant and anti-aging claims have thin evidence — in practice this is a hydrator"],
     general: "A ginseng-based hydrating essence-toner, marketed on antioxidant and anti-aging claims layered onto a basic hydrating base.",
-    alternatives: [{ name: "COSRX Snail 96 Essence (already in your routine)", relation: "better", note: "Already covers hydration and adds barrier-repair/healing support this doesn't — a genuine step up, not just a lateral swap." }] },
+    alternatives: [{"name": "COSRX Snail 96 Mucin Power Essence", "relation": "better", "compare": {"this": ["Ginseng adds antioxidant claims", "Watery and very light"], "other": ["Hydration plus soothing and repair (allantoin, wound-healing evidence)", "Simpler formula, fragrance-free"]}, "note": "Both are hydrating essences. Snail filtrate's soothing and repair evidence is stronger than ginseng's antioxidant claims, which matters on your active nights."}] },
   { id: 28, match: ["thermal spring water"], tag: "good",
     pros: ["Soothing, nice for calming or a midday refresh"],
     cons: ["Essentially no active ingredients beyond mineral content — not essential"],
@@ -758,14 +763,14 @@ const RANK_DATA = [
     pros: ["Fills the AM+PM cleanser gap you didn't have covered", "Effective gel-cleanser texture, standard second-cleanse/standalone-AM step"],
     cons: ["Contains six separate essential oils (lavender, peppermint, rosemary, lemongrass, geranium, melissa) plus isolated allergens — meaningful given this runs twice daily, not just weekly like your oil cleanser"],
     general: "A gentle foaming or gel cleanser is the standard second step of a double cleanse (after oil), or a standalone AM cleanse — removes water-based residue without over-stripping.",
-    alternatives: [{ name: "CeraVe Foaming Facial Cleanser", relation: "better", note: "Genuinely fragrance-free (verified against the full ingredient list, no essential oils), dermatologist-developed, non-comedogenic — the real upgrade path if you want to cut fragrance from a step you're doing twice a day, every day." }] },
+    alternatives: [{"name": "CeraVe Foaming Facial Cleanser", "relation": "better", "compare": {"this": ["Pleasant texture, cleans well"], "other": ["Fragrance-free, no essential oils", "Ceramides, niacinamide and hyaluronic acid — supports the barrier"]}, "note": "This gel contains six essential oils (lavender, peppermint, rosemary, lemongrass, geranium, melissa) in a step you'd use often. The CeraVe cleans just as well without any of them."}] },
   { id: 30, match: ["ordinary", "glycolic"], tag: "good",
     pros: ["Effective glycolic exfoliant for blackheads, pores, and texture", "Folded into your existing exfoliant rotation rather than adding extra weekly exposure"],
     cons: ["Glycolic is the smallest, fastest-penetrating AHA — the highest irritation potential of the acid family on combination or sensitive-leaning skin"],
     general: "Glycolic acid is the smallest AHA molecule, so it penetrates fastest and exfoliates most aggressively of the common AHAs — effective for texture and blackheads, but the highest irritation potential of the acid family on combination or sensitive-leaning skin.",
-    alternatives: [{ name: "Some By Mi AHA.BHA.PHA Toner (already in your rotation)", relation: "no-better-option", note: "Both share the same exfoliant rotation pool by design — there's no 'upgrade' between rotation-mates, just rotation. If irritation shows up, this gentler PHA-inclusive blend is the fallback within the same pool." }] },
+    alternatives: [{"name": "Some By Mi AHA.BHA.PHA 30 Days Miracle Toner", "relation": "as-good", "compare": {"this": ["Glycolic is the fastest, most effective AHA for texture", "Disclosed 7% strength"], "other": ["Gentler — includes PHA, the slowest, mildest acid", "Adds salicylic acid for pores"]}, "note": "Glycolic works faster on texture; the Some By Mi is gentler and covers pores too. If this one ever stings or reddens, the Some By Mi is the softer step down."}] },
   { id: 31, match: ["caudalie", "instant d"], tag: "best",
-    pros: ["A purifying clay mask (clay + caffeine + grape) squarely targeting oiliness, blackheads, and enlarged pores", "Same clinical-tier Caudalie line as your Vinopure toner/serum, with no fragrance or essential-oil red flags", "Makes Aztec Secret Clay and Beauty of Joseon Pore Mask fully redundant if either is ever reactivated"],
+    pros: ["A purifying clay mask (clay + caffeine + grape) squarely targeting oiliness, blackheads, and enlarged pores", "No fragrance or essential oils (confirmed against the full ingredient list)", "Blended clays with caffeine — less tightening and redness than pure bentonite"],
     cons: [],
     general: "Clay draws out excess oil and impurities by absorption; caffeine adds a mild tightening/de-puffing effect; grape polyphenols contribute antioxidant support. A once-weekly purifying mask like this is a standard, low-irritation way to keep pores and oil under control between actives nights.",
     alternatives: [{ name: "Kiehl's Rare Earth Deep Pore Cleansing Masque", relation: "as-good", note: "The other commonly-cited benchmark clay mask — comparable, not better." }] },
@@ -773,12 +778,12 @@ const RANK_DATA = [
     pros: ["Legitimate K-beauty cosmeceutical brand, not a novelty knockoff", "Charcoal (35,000ppm) for sebum absorption fits your oiliness/blackheads/pores concerns"],
     cons: ["Contains added Fragrance and Lavender Flower Extract (confirmed via the brand's own full INCI, not a retailer listing) — the same EO-derived-content pattern already flagged in Caudalie's gel cleanser", "The '4 types of peptides' are dosed at 0.3ppb each — parts per billion, a trace/marketing-level amount with no realistic firming effect", "The fourth pore-purifying clay mask in your library — you only need one in weekly rotation"],
     general: "The charcoal-for-sebum and clay/tannin-for-pore-tightening mechanisms are what's actually doing the work here; the peptide claim is decorative at this concentration.",
-    alternatives: [{ name: "Caudalie Masque Instant Détox (already scheduled)", relation: "better", note: "Same purifying-clay-mask role, already in your weekly rotation, and confirmed fragrance/EO-free — a genuine upgrade, not a lateral swap." }] },
+    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "compare": {"this": ["Same oil-absorbing clay job"], "other": ["Fragrance- and essential-oil-free (confirmed)", "No lavender, which is a known skin sensitizer"]}, "note": "Same clay-mask job; the Caudalie does it without the added fragrance and lavender, and this one's peptides are at trace levels that do nothing."}] },
   { id: 33, match: ["yeouth", "glycolic acid 30"], tag: "good",
     pros: ["A legitimate 30% glycolic peel with a clean, no-fragrance ingredient list", "Real efficacy at peel-strength concentration"],
-    cons: ["Functionally redundant with The Ordinary AHA30+BHA2 Peeling Solution already in your routine — same occasional-intensive-peel role", "Quietly adds retinyl palmitate on top of the glycolic acid, straddling your exfoliant and retinoid categories at once — a contribution the app's dedicated tretinoin/retinol slots don't track", "30% is peel-strength — must not run at the weekly cadence your gentler exfoliants use; monthly-or-less only if used at all"],
-    general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than the retinol or tretinoin already in your routine, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
-    alternatives: [{ name: "The Ordinary AHA30+BHA2 Peeling Solution (already scheduled)", relation: "better", note: "Already in your routine at the correct occasional cadence — one less peel to manage, and you're not missing any capability by skipping this one." }] },
+    cons: ["Same peel-strength role as The Ordinary AHA 30% + BHA 2%, without the salicylic acid", "Quietly adds retinyl palmitate on top of the glycolic acid — a retinoid hidden inside an acid peel, stacking with your tretinoin", "30% is peel-strength — must not run at the weekly cadence your gentler exfoliants use; monthly-or-less only if used at all"],
+    general: "At 30% concentration, glycolic acid is peel-strength, not a leave-on daily/weekly product — the brand's own directions specify a timed application (well under a minute for beginners) followed by neutralizing and rinsing, similar to a monthly in-office-style peel rather than a nightly exfoliant. Retinyl palmitate is the weakest, least-irritating ester form of vitamin A — much milder than retinol or tretinoin, included here more as a marketing add-on than a meaningful active at typical peel-formula concentrations.",
+    alternatives: [{"name": "The Ordinary AHA 30% + BHA 2% Peeling Solution", "relation": "better", "compare": {"this": ["Gel texture — easier to apply evenly"], "other": ["Adds 2% salicylic acid, which works inside pores", "No retinyl palmitate hidden in an acid peel"]}, "note": "Same 30% AHA peel strength. The Ordinary adds salicylic acid for your pores; this one adds a retinoid instead, which stacks on top of your tretinoin without the app being able to account for it."}] },
   { id: 35, match: ["cetaphil", "sa cleanser"], tag: "best",
     pros: ["Fragrance- and essential-oil-free, unlike both of your other cleansers", "A rinse-off acid step — short contact time, so meaningfully gentler than a leave-on acid at the same strength", "Salicylic acid is oil-soluble, which suits your blackheads and oiliness better than an AHA would", "Mandelic acid and PHA are the two largest, slowest-penetrating acids, so this is a mild multi-acid rather than an aggressive one"],
     // Judged on the formula. An earlier version of this entry listed the
@@ -791,9 +796,9 @@ const RANK_DATA = [
     alternatives: [{ name: "CeraVe SA Smoothing Cleanser", relation: "as-good", note: "The other commonly-cited salicylic cleanser at this tier — comparable formulation and price, no reason to switch between them." }] },
   { id: 34, match: ["paula", "skin perfecting"], tag: "good",
     pros: ["Genuinely fragrance-free 2% salicylic acid (BHA) — minimal 8-ingredient formula, no parabens/sulfates/silicones, widely regarded as one of the gold-standard BHA exfoliants", "Oil-soluble BHA penetrates into pores rather than just working on the surface — well matched to blackheads and enlarged pores"],
-    cons: ["A third salicylic-acid product alongside Caudalie Vinopure Purifying Toner and Vinopure Salicylic Serum — same active, different concentrations, real overlap", "Now a fifth candidate sharing your 2x/week exfoliant rotation slot, meaning each individual exfoliant gets served less often — the category's total exfoliation frequency doesn't change, but any one product's turn comes up less"],
+    cons: ["A third salicylic-acid product alongside Caudalie Vinopure Purifying Toner and Vinopure Salicylic Serum — same active, different concentrations, real overlap"],
     general: "Salicylic acid (BHA) is oil-soluble, so unlike a water-soluble AHA it can actually penetrate into the pore itself — effective for blackheads and oil control, and gentler on the surface than a glycolic acid at comparable strength.",
-    alternatives: [{ name: "Caudalie Vinopure Salicylic Serum (already in your routine)", relation: "no-better-option", note: "Same active at a comparable concentration — this isn't an upgrade over what you already have, just another well-formulated option in the same lane. Worth considering whether you need three salicylic-acid products rather than which one is best." }] },
+    alternatives: [{"name": "Caudalie Vinopure Salicylic Serum", "relation": "no-better-option", "compare": {"this": ["2% salicylic acid, disclosed, fragrance-free, minimal formula", "The reference product other BHAs get compared to"], "other": ["Serum texture"]}, "note": "This is the benchmark salicylic exfoliant — nothing in the same lane is clearly better. The real question is whether you need three salicylic products, not which one wins."}] },
   { id: 37, match: ["ordinary", "niacinamide"], tag: "best",
     pros: ["Same 10% niacinamide + zinc PCA formula that already stood as your benchmark alternative to the Yeouth serum — fragrance and essential-oil free, no parabens", "Zinc PCA adds mild oil control alongside the niacinamide, useful for combination/oily pore-prone skin", "A clean gel serum with no shimmer or cosmetic fillers — a direct swap into the exact niacinamide role Yeouth held"],
     cons: ["Its thickening-gum base (tamarindus, carrageenan, acacia, xanthan) can pill under some moisturizers or SPF — apply on fully dry skin and give it a minute before the next step"],
@@ -801,9 +806,9 @@ const RANK_DATA = [
     alternatives: [] },
   { id: 38, match: ["trader joe", "dewy"], tag: "good",
     pros: ["Niacinamide sits third on the ingredient list — a real, meaningful dose, not a trace amount", "Fragrance-free, and its several hyaluronic-acid forms add genuine surface hydration"],
-    cons: ["Duplicates the niacinamide active now coming from The Ordinary serum — the app won't schedule both the same night, so this would only ever run when the Ordinary is skipped", "Also overlaps the existing hydrating-essence step (Snail 96 / Marine Hyaluronics) on the hyaluronic-acid side", "Contains titanium dioxide, mica and tin oxide — cosmetic shimmer pigments for a 'dewy glow' finish, not treatment ingredients; it's formulated closer to a tinted glow serum than a plain niacinamide treatment"],
+    cons: ["Duplicates the niacinamide in The Ordinary serum, at a dose the label doesn't state", "Also overlaps the existing hydrating-essence step (Snail 96 / Marine Hyaluronics) on the hyaluronic-acid side", "Contains titanium dioxide, mica and tin oxide — cosmetic shimmer pigments for a 'dewy glow' finish, not treatment ingredients; it's formulated closer to a tinted glow serum than a plain niacinamide treatment"],
     general: "A niacinamide + multi-form hyaluronic-acid serum with added shimmer pigments (titanium dioxide, mica, tin oxide) for a dewy-glow finish.",
-    alternatives: [{ name: "The Ordinary Niacinamide 10% + Zinc 1% (already in your routine)", relation: "better", note: "Does the same niacinamide job without competing for the same active slot or adding shimmer pigments — the reason this one stays in the library rather than scheduled." }] },
+    alternatives: [{"name": "The Ordinary Niacinamide 10% + Zinc 1%", "relation": "better", "compare": {"this": ["Niacinamide plus hyaluronic acid in one step", "Gives a dewy, glowy finish"], "other": ["A disclosed 10% niacinamide plus zinc for oil", "No shimmer pigments — a treatment, not a finish"]}, "note": "For oil and pores the dose matters, and The Ordinary states its 10% and adds zinc. This serum's glow comes from titanium dioxide and mica, which are cosmetic."}] },
 
 ];
 const getProductRank = p => {
@@ -3916,6 +3921,27 @@ const ProductUsagePanel = ({ profile, p }) => {
     // as the "why this step" modal, so the two never disagree.
     h(ProductInsight, { p }));
 };
+// Head-to-head for a suggested alternative: what THIS product does better,
+// what the alternative does better, then the verdict. An alternative used to
+// be a name plus one sentence, and that sentence was often just "it's
+// already in your routine" — which says nothing about which is the better
+// product. qa/reviews.test.js now rejects that kind of reasoning.
+const AltComparison = ({ alt, compact }) => {
+  const h = React.createElement;
+  const font = "'Inter',sans-serif";
+  const fs = compact ? 12.5 : 13;
+  const c = alt.compare || {};
+  const side = (title, items, color, key) => items && items.length ? h("div", { key, style: { marginTop: 6 } },
+    h("div", { style: { fontSize: 11, fontWeight: 700, color, fontFamily: font, marginBottom: 2 } }, title),
+    items.map((t, i) => h("div", { key: i, style: { display: "flex", gap: 6, fontSize: fs, lineHeight: 1.45, color: T.text, fontFamily: font } },
+      h("span", { style: { color, fontWeight: 700, flexShrink: 0 } }, "+"), h("span", { style: { flex: 1, minWidth: 0 } }, t)))) : null;
+  return h("div", { "data-testid": "alt-comparison" },
+    h("div", { style: { fontSize: fs + 0.5, fontWeight: 700, color: T.text, fontFamily: font } }, alt.name),
+    side("This one", c.this, T.muted, "this"),
+    side(alt.name.length > 34 ? "The alternative" : alt.name, c.other, T.blue, "other"),
+    alt.note && h("div", { style: { marginTop: 7, fontSize: fs, lineHeight: 1.5, color: T.text, fontFamily: font } },
+      h("b", null, alt.relation === "better" ? "Why it's better: " : alt.relation === "no-better-option" ? "Verdict: " : "Bottom line: "), alt.note));
+};
 const ProductInsight = ({ p }) => {
   const h = React.createElement;
   const rank = getProductRank(p);
@@ -3935,7 +3961,7 @@ const ProductInsight = ({ p }) => {
   if (stepInfo) blocks.push(block("step", [label(`Why it sits here \u2014 ${stepInfo.name}`, null), h("div", { style: body }, stepInfo.desc)]));
   if (pros.length) blocks.push(block("pros", [label("Why it works for you", T.green), list(pros, "+", T.green)]));
   if (cons.length) blocks.push(block("cons", [label("Watch for", T.red), list(cons, "!", T.red)]));
-  if (better) blocks.push(block("alt", [label("Better option", T.blue), h("div", { style: body }, h("b", null, better.name), better.note ? ` \u2014 ${better.note}` : "")]));
+  if (better) blocks.push(block("alt", [label("Better option", T.blue), h(AltComparison, { alt: better, compact: true })]));
   if (!blocks.length) return null;
   const rs = RANK_STYLE[rank.tag];
   return h("div", { "data-testid": "product-insight", style: { marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.border}` } },
@@ -6211,11 +6237,7 @@ const ProductDetailModal = ({ product, onClose }) => {
       style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }
     }, /*#__PURE__*/React.createElement("span", {
       style: { fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: style.color }
-    }, style.label), /*#__PURE__*/React.createElement("span", {
-      style: { fontSize: 13, fontWeight: 600, color: T.text }
-    }, alt.name)), alt.note && /*#__PURE__*/React.createElement("div", {
-      style: { fontSize: 12, color: T.muted, lineHeight: 1.4 }
-    }, alt.note));
+    }, style.label)), /*#__PURE__*/React.createElement(AltComparison, { alt }));
   });
 
   const altSection = alternatives.length > 0 && /*#__PURE__*/React.createElement("div", null,
