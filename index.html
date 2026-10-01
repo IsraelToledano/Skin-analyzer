@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-01.4";
+const APP_VERSION = "2026-10-01.5";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -6754,14 +6754,40 @@ function App() {
   // APP_VERSION so at least there's a visible, honest signal instead of
   // silently running stale code indefinitely.
   const [newerVersion, setNewerVersion] = useState(null);
-  useEffect(() => {
+  const [refreshing, setRefreshing] = useState(false);
+  const checkForUpdate = useCallback(() => {
     fetch(location.pathname + "?_v=" + Date.now(), {
       cache: "no-store"
     }).then(r => r.text()).then(html => {
       const m = html.match(/const APP_VERSION = "([^"]+)"/);
-      if (m && m[1] !== APP_VERSION) setNewerVersion(m[1]);
+      setNewerVersion(m && m[1] !== APP_VERSION ? m[1] : null);
     }).catch(() => {});
   }, []);
+  useEffect(() => {
+    checkForUpdate();
+    // Re-check when the app comes back to the foreground — a home-screen
+    // app is usually resumed, not relaunched, so a check at launch alone
+    // could miss a push for days.
+    const onVisible = () => { if (document.visibilityState === "visible") checkForUpdate(); };
+    document.addEventListener("visibilitychange", onVisible);
+    // A refresh lands on "?r=<time>" to force a fresh copy; tidy the URL
+    // back so the next relaunch starts from the plain address.
+    if (/[?&]r=\d+/.test(location.search)) history.replaceState(null, "", location.pathname);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [checkForUpdate]);
+  // Loads the latest deployed code without closing the app. A plain
+  // reload (the old banner used location.reload(true), whose argument
+  // browsers ignore) can be served the cached page again, so this first
+  // re-fetches the page past the cache, then opens it at a unique address
+  // the cache can't answer. Your data lives in localStorage and is saved on
+  // every change, so nothing is lost.
+  const hardRefresh = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    fetch(location.pathname, { cache: "reload" }).catch(() => {}).then(() => {
+      location.replace(location.pathname + "?r=" + Date.now());
+    });
+  };
   const skinImgs = profile.skinImgs || [];
   const setSkinImgs = fn => {
     update({
@@ -7148,8 +7174,28 @@ function App() {
       fontFamily: "'Inter',sans-serif",
       whiteSpace: "nowrap"
     }
-  }, "⇄ Sync"))), newerVersion && /*#__PURE__*/React.createElement("div", {
-    onClick: () => location.reload(true),
+  }, "⇄ Sync"), /*#__PURE__*/React.createElement("button", {
+    onClick: hardRefresh,
+    "data-testid": "refresh-app",
+    title: "Load the latest version",
+    "aria-label": "Load the latest version",
+    style: {
+      width: 34,
+      height: 32,
+      flexShrink: 0,
+      borderRadius: 100,
+      border: `1.5px solid ${newerVersion ? T.accent : T.border}`,
+      background: newerVersion ? T.accent : "transparent",
+      color: newerVersion ? "#fff" : T.muted,
+      fontSize: 15,
+      lineHeight: 1,
+      padding: 0,
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: { display: "inline-block", animation: refreshing ? "spin 0.8s linear infinite" : "none" }
+  }, "\u27f3")))), newerVersion && /*#__PURE__*/React.createElement("div", {
+    onClick: hardRefresh,
     style: {
       background: T.accent,
       color: "#fff",
