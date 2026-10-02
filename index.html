@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-01.6";
+const APP_VERSION = "2026-10-03.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3702,7 +3702,18 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           };
         }).sort((a, b) => a.served / a.weight - b.served / b.weight || (a.p.stepOrder || 0) - (b.p.stepOrder || 0) || String(a.p.id).localeCompare(String(b.p.id)));
         if (!candidates.length) return;
-        const winner = candidates[0].p;
+        // A pool member's own frequency still applies. The pool used to pick
+        // purely on weighted servedCount, so a "weekly" exfoliant that was
+        // ahead of its peers (Microfoliant carries weight 2) could win the
+        // Wednesday slot AND the Friday slot two days later. Members that
+        // were placed within their own interval sit out; only if every
+        // candidate is still inside its interval does the slot fall back to
+        // the full list, so a slot is never dropped.
+        const ready = candidates.filter(c => {
+          const last = lastServed[c.p.id];
+          return !last || daysBetween(last, ds) >= (FREQ_DAYS[c.p.frequency] || 1);
+        });
+        const winner = (ready.length ? ready : candidates)[0].p;
         if (conflictsWithToday(winner)) return;
         // Procedure recovery window: never place an active on a night
         // inside a microneedling block (see procedureBlocksActives).
