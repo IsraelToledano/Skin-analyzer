@@ -1,7 +1,8 @@
 // Simulates "+ Add step" for every product in the library, on every day and
-// session for the next N days, through the app's own add path (pin +
-// computeAddStepBumps skip logs), rebuilds the schedule, and checks the
-// resulting day — and the next day, where a bumped step carries over.
+// session for the next N days, through the app's own add path (a pin that
+// carries computeAddStepBumps' bumps), rebuilds the schedule, and checks the
+// resulting day — and that the next 7 days are exactly what they were
+// without the add (an added step changes only its own routine).
 const {load,seedProfile}=require('./sim');const {checkDay}=require('./audit');
 const DAYS=+(process.argv.find(a=>/^--days=/.test(a))||'--days=60').split('=')[1];
 const get=load();const base=seedProfile(get);
@@ -10,7 +11,7 @@ const build=(prof,toDs,session)=>get('buildSessionSchedule')(prof.products,prof.
 const dayList=(prof,sched,d,session)=>get('sortForDay')(get('queueFor')(sched,prof.products,get('parseDate')(d)),prof,d,session);
 const fits=(p,s)=>{const sess=p.scheduled?p.session:get('suggestSchedule')(p).session;return sess===s||sess==='both';};
 const issues={};let sims=0;const t0=Date.now();
-const full={am:build(base,add(T,DAYS),'am'),pm:build(base,add(T,DAYS),'pm')};
+const full={am:build(base,add(T,DAYS+7),'am'),pm:build(base,add(T,DAYS+7),'pm')};
 for(let i=0;i<DAYS;i++){
   const d=add(T,i);
   for(const s of ['am','pm']){
@@ -19,16 +20,18 @@ for(let i=0;i<DAYS;i++){
     for(const p of candidates){
       sims++;
       const bumps=get('computeAddStepBumps')(p,'add',null,list,{session:s,ds:d,profile:base});
-      const prof={...base,pins:[...(base.pins||[]),{id:1,date:d,session:s,productId:p.id}],
-        logs:[...(base.logs||[]),...bumps.map((id,k)=>({id:'b'+k,date:d,productId:id,session:s,done:false,skipped:true}))]};
-      const sched=build(prof,add(d,1),s);
-      [d,add(d,1)].forEach((dd,j)=>{
-        const after=dayList(prof,sched,dd,s);
-        const shown=after.filter(x=>!bumps.includes(x.id)||dd!==d); // bumped = skipped today, not applied
-        const record=(sev,key,msg)=>{const k=`${sev} | ${msg.replace(/"[^"]*" \(([a-z_]+)\)/g,'$1').replace(/"[^"]*"/g,'…')}`;(issues[k]=issues[k]||[]).push(`${p.genericName.slice(0,24)} → ${dd}:${s}${j?' (next day)':''}`)};
-        checkDay(get,`${dd}:${s}`,shown,record);
-        if(j===0&&!after.some(x=>x.id===p.id))record('high','',`added step "${p.genericName}" is missing from the day`);
-      });
+      const prof={...base,pins:[...(base.pins||[]),{id:1,date:d,session:s,productId:p.id,bumps}]};
+      const sched=build(prof,add(d,7),s);
+      const record=(dd,j)=>(sev,key,msg)=>{const k=`${sev} | ${msg.replace(/"[^"]*" \(([a-z_]+)\)/g,'$1').replace(/"[^"]*"/g,'…')}`;(issues[k]=issues[k]||[]).push(`${p.genericName.slice(0,24)} → ${dd}:${s}${j?` (+${j}d)`:''}`)};
+      const after=dayList(prof,sched,d,s);
+      checkDay(get,`${d}:${s}`,after,record(d,0));
+      if(!after.some(x=>x.id===p.id))record(d,0)('high','',`added step "${p.genericName}" is missing from the day`);
+      bumps.forEach(id=>{if(after.some(x=>x.id===id))record(d,0)('high','',`bumped step is still on the day`)});
+      for(let j=1;j<=7;j++){
+        const dd=add(d,j);
+        const a=dayList(prof,sched,dd,s).map(x=>x.id).join(','),b=dayList(base,full[s],dd,s).map(x=>x.id).join(',');
+        if(a!==b)record(dd,j)('high','',`another day's routine changed after an add`);
+      }
     }
   }
 }

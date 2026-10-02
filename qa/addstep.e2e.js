@@ -16,6 +16,8 @@ const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.pus
 await page.goto('http://localhost:8143/');await page.waitForSelector('[data-testid=usage-toggle]');
 const names=async()=>page.evaluate(()=>[...document.querySelectorAll('[data-testid=usage-toggle]')].map(b=>b.closest('div[style*="flex-wrap"]').querySelector('span[style*="font-weight: 600"]').innerText.replace(/^\d+\.\s*/,'').split(' · ')[0].trim()));
 const before=await names();console.log('   before:',before.join(' → '));
+const go=async sym=>{await page.getByRole('button',{name:sym==='›'?'Next day':'Previous day'}).click();await page.waitForTimeout(150);};
+await go('›');const tomorrowBefore=await names();await go('‹');
 ok(before.some(n=>/Retinoid/.test(n)),'tretinoin is on tonight');
 await page.getByText('+ Add step').first().click();
 await page.waitForSelector('[data-testid=picker-row]');
@@ -32,11 +34,26 @@ const retRow=page.locator('div[style*="flex-wrap"]',{has:page.locator('span:has-
 const retTxt=await retRow.count()?await retRow.innerText():'';
 ok(!retTxt||/Skipped|skipped/.test(retTxt),'tretinoin is no longer an active step tonight');
 await page.screenshot({path:'addstep.png'});
-// Update routine reports the change
-await page.locator('[data-testid=update-routine]').click();
-const rep=(await page.locator('[data-testid=update-report]').innerText()).replace(/\s+/g,' ');
-ok(/Clay Face Mask/.test(rep),'Update routine report lists the added step');
-await page.reload();await page.waitForSelector('[data-testid=usage-toggle]');
-const persisted=await names();ok(persisted.some(n=>/Clay Face Mask/.test(n)),'survives a reload');
+// The added step updates tonight's routine only — tomorrow is unchanged
+await go('›');const tomorrowAfter=await names();await go('‹');
+ok(JSON.stringify(tomorrowAfter)===JSON.stringify(tomorrowBefore),'tomorrow\'s routine is unchanged by the add ('+tomorrowAfter.join(' → ')+')');
+ok(!tomorrowAfter.some(n=>/Clay Face Mask/.test(n)),'the added step does not spill into tomorrow');
+ok(await page.locator('[data-testid=update-routine]').count()===0,'the Update routine button is gone');
+// A skipped step counts as handled
+const header=async()=>(await page.locator('span',{hasText:'Evening Routine'}).first().innerText()).replace(/\s+/g,' ');
+const total=after.length;
+const essRow=page.locator('div[style*="flex-wrap"]',{has:page.locator('span:has-text("Snail 96")')}).last();
+await essRow.getByRole('button',{name:'Skip',exact:true}).click();await page.waitForTimeout(150);
+ok(new RegExp(`1/${total}`).test(await header()),'a skipped step counts toward progress ('+(await header())+')');
+await page.getByRole('button',{name:'Mark All Done'}).last().click();await page.waitForTimeout(150);
+ok(new RegExp(`${total}/${total}`).test(await header()),'all steps handled → full count');
+ok(await page.getByRole('button',{name:'✓ All Done'}).count()===1,'All Done shows with a skipped step in the routine');
+const logs=await page.evaluate(()=>JSON.parse(localStorage.getItem('skinritual_v4')).profile.logs);
+const essLog=logs.find(l=>l.productId===17);
+ok(essLog&&essLog.skipped&&!essLog.done,'Mark All Done leaves the skip as a skip');
+await page.reload();await page.waitForSelector('text=Evening Routine');
+ok(/4\/4/.test(await header()),'progress survives a reload ('+(await header())+')');
+await page.locator('span',{hasText:'Evening Routine'}).first().click();await page.waitForSelector('[data-testid=usage-toggle]');
+const persisted=await names();ok(persisted.some(n=>/Clay Face Mask/.test(n))&&!persisted.some(n=>/Retinoid/.test(n)),'the updated routine survives a reload');
 ok(errors.length===0,'no page errors '+(errors[0]||''));
 await b.close();server.close();console.log(fails?`\n${fails} FAILED`:'\nadd-step e2e passed');process.exit(fails?1:0);})().catch(e=>{console.error('CRASH',e.message);process.exit(2)});

@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-03.1";
+const APP_VERSION = "2026-10-03.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1101,7 +1101,12 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
   if (mode !== "add") return [];
   const others = prods.filter(p => p.id !== newProduct.id);
   const newGroups = classifySingletonGroups(newProduct);
+  // A step already marked done this session already happened — it is never
+  // the one taken out (it still counts toward the cap).
+  const dayLogs = ((profile || {}).logs || []).filter(l => l && l.date === ds && l.session === session);
+  const isDone = p => dayLogs.some(l => l.productId === p.id && l.done);
   others.forEach(other => {
+    if (isDone(other)) return;
     const hardConflict = productsConflict(newProduct, other);
     const singletonClash = classifySingletonGroups(other).some(g => newGroups.includes(g));
     if (hardConflict || singletonClash) bumpIds.add(other.id);
@@ -1116,7 +1121,7 @@ const computeAddStepBumps = (newProduct, mode, excludeProduct, prods, ctx) => {
     // cleanse with no water cleanse after it. If only foundation steps are
     // left, nothing is bumped and the day runs one step over the cap.
     const FOUNDATION = new Set(["cleanser", "cleanser_oil", "moisturizer", "spf"]);
-    const weakest = remaining.filter(countsTowardCap).filter(p => !FOUNDATION.has(detectType(p))).map(p => ({
+    const weakest = remaining.filter(countsTowardCap).filter(p => !FOUNDATION.has(detectType(p)) && !isDone(p)).map(p => ({
       p,
       score: scoreCandidate(p, {
         session,
@@ -1423,9 +1428,8 @@ const EMPTY_PROFILE = {
   analysisGaps: [],
   logs: [],
   skinImgs: [],
-  pins: [], // manual per-day swap/add overrides — see buildSessionSchedule step 1b
+  pins: [], // manual per-day swap/add overrides { date, session, productId, bumps? } — see buildSessionSchedule step 4
   breakouts: [], // { id, date, locations, severity, notes } — see analyzeBreakoutTriggers
-  routineSync: null, // { on, snapshot } — baseline for the Update routine button, see analyzeRoutine
   removedProducts: [] // soft-deleted products, newest first — see removeProduct/TRASH_LIMIT
 };
 
@@ -2758,6 +2762,16 @@ const MIGRATIONS = [{
       products: products.map(p => targetIds.has(p.id) ? { ...p, notes: p.notes ? `${p.notes} ${note}` : note } : p)
     };
   }
+}, {
+  id: "drop_routine_sync_v1",
+  // The Update routine button is gone (an added step now updates its own
+  // routine directly — see buildSessionSchedule step 4), so its comparison
+  // baseline is dead data.
+  apply: profile => {
+    if (!profile || !("routineSync" in profile)) return profile;
+    const { routineSync, ...rest } = profile;
+    return rest;
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -3395,6 +3409,8 @@ const groupRotating = rotating => {
   return Object.values(groups);
 };
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = [], procedures = []) => {
+  logs = (logs || []).filter(Boolean);
+  pins = (pins || []).filter(Boolean);
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
   // Rotation-pool members (see ROTATION_CATEGORY_ROLES / step 2d below) are
   // scheduled exclusively through the dedicated pool logic — excluding
@@ -3482,27 +3498,13 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         placedIds.add(p.id);
       }
     });
-    // 1b. Manual pins — explicit Swap/Add-step overrides for this exact
-    // date+session, created by the routine UI. Independent of the pinned
-    // product's own scheduling config (never mutates it), and always shown
-    // like the one-offs above, regardless of remaining budget.
-    pins.forEach(pin => {
-      if (pin && pin.date === ds && pin.session === session && !placedIds.has(pin.productId)) {
-        dayList.push({
-          productId: pin.productId,
-          carried: false,
-          pinned: true
-        });
-        lastServed[pin.productId] = ds;
-        servedCount[pin.productId] = (servedCount[pin.productId] || 0) + 1;
-        placedIds.add(pin.productId);
-      }
-    });
+    // Manual pins (Swap / Add step) are NOT placed here: they are an overlay
+    // applied to the finished day in step 4 below, so they never touch the
+    // rotation state (lastServed / servedCount / rest-night tracking) and an
+    // added step changes only the routine it was added to.
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
-    // Except onto a day where a step the user added (pin) or a one-off
-    // clashes with it: then it waits another day instead of stacking with
-    // the step that was deliberately added (e.g. a carried retinoid onto a
-    // night a clay mask was added).
+    // Except onto a day where a one-off clashes with it: then it waits
+    // another day instead of stacking with it.
     const carriedIds = new Set(pendingCarry);
     const deferredCarry = new Set();
     const pinnedProds = Array.from(placedIds).map(id => products.find(p => p.id === id)).filter(Boolean);
@@ -3847,6 +3849,40 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         }
       });
     }
+    // 4. Manual pins, as an overlay on the finished day. A step added (or
+    // swapped in) by hand changes exactly one routine — this date and
+    // session — and nothing else: the rotation state above was computed as
+    // if the pin didn't exist, so every other day and session is identical
+    // with or without it. On this routine, the added step takes the place of
+    // anything it conflicts with or duplicates the role of, plus whatever
+    // the add recorded in pin.bumps (the swapped-out step, or the step cut
+    // to stay under the cap). A step already marked done is never removed —
+    // it already happened. Removed steps don't carry to tomorrow; removing
+    // the pin brings them straight back.
+    const doneHere = id => logs.some(l => l && l.date === ds && l.session === session && l.productId === id && l.done);
+    const pinnedHere = new Set();
+    const overlayRemoved = new Set();
+    pins.forEach(pin => {
+      if (!pin || pin.date !== ds || pin.session !== session) return;
+      const q = byId.get(pin.productId);
+      if (!q || pinnedHere.has(q.id)) return;
+      const bumps = new Set(Array.isArray(pin.bumps) ? pin.bumps : []);
+      const qGroups = classifySingletonGroups(q);
+      for (let i = dayList.length - 1; i >= 0; i--) {
+        const id = dayList[i].productId;
+        if (id === q.id || pinnedHere.has(id) || doneHere(id)) continue;
+        const x = byId.get(id);
+        const clash = x && (productsConflict(q, x) || classifySingletonGroups(x).some(g => qGroups.includes(g)));
+        if (clash || bumps.has(id)) {
+          overlayRemoved.add(id);
+          dayList.splice(i, 1);
+        }
+      }
+      const existing = dayList.find(e => e.productId === q.id);
+      if (existing) existing.pinned = true;
+      else dayList.push({ productId: q.id, carried: false, pinned: true });
+      pinnedHere.add(q.id);
+    });
     dayList.sort((a, b) => {
       const pa = products.find(p => p.id === a.productId);
       const pb = products.find(p => p.id === b.productId);
@@ -3855,8 +3891,10 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     schedule[ds] = dayList;
     // If ANY member of a linked group is skipped, carry the WHOLE group
     // forward so they land back together tomorrow rather than splitting.
+    // Only steps the schedule itself placed carry: a step that exists today
+    // only because it was added by hand doesn't spill into tomorrow.
     const skippedToday = new Set();
-    dayList.forEach(({
+    dayList.filter(e => !(e.pinned && !placedIds.has(e.productId))).forEach(({
       productId
     }) => {
       const log = logs.find(l => l.date === ds && l.productId === productId && l.session === session);
@@ -4043,22 +4081,7 @@ const unscheduledReason = p => {
     fix: "Tap Schedule above, or use Auto-Schedule to do it for you."
   };
 };
-// ─── UPDATE ROUTINE ─────────────────────────────────────────────────────────
-// The schedule is a pure function of the profile (products, logs, pins,
-// procedures) and is recomputed on every render, so a newly added step or
-// logged treatment already reflows the plan by itself. What the Update
-// routine button adds is the part that was invisible: (1) it shows exactly
-// what changed in the coming week since the last time it was pressed,
-// (2) it confirms which treatment windows are now holding actives back, and
-// (3) it lists steps that were added for a day but never made part of the
-// routine, with an explicit per-product "Add to routine" (never automatic —
-// a Swap also creates a pin, and a one-off try shouldn't silently become a
-// standing weekly step).
-// routineSync = { on, snapshot } is only a comparison baseline: it never
-// feeds the scheduler, so it cannot change what the schedule produces.
-const SYNC_HORIZON_DAYS = 7;
-const ADD_LOOKBACK_DAYS = 7;
-// Bulk-schedule eligibility, shared by Auto-Schedule and Update routine: a
+// Bulk-schedule eligibility for Auto-Schedule: a
 // "bad"-tagged product is never scheduled automatically, and a "good" one
 // whose own review calls out overlap/redundancy needs a manual decision.
 const isBulkSchedulable = p => {
@@ -4068,121 +4091,6 @@ const isBulkSchedulable = p => {
   if (r.tag === "good" && (r.cons || []).some(c => /overlap|redundan/i.test(c))) return false;
   return true;
 };
-// Product ids per "YYYY-MM-DD:session" for the next `days` days, sorted so
-// two snapshots compare by membership, not order. Uses computeEpoch like the
-// real views — a simulation from epoch = today would diverge from production.
-const routineSnapshot = (profile, fromDs, days = SYNC_HORIZON_DAYS) => {
-  const prods = profile.products || [];
-  const toDs = addDaysStr(fromDs, days - 1);
-  const snap = {};
-  ["am", "pm"].forEach(session => {
-    const sched = buildSessionSchedule(prods, profile.logs || [], session, computeEpoch(prods, session), toDs, SESSION_CAP, profile.pins || [], profile.procedures || []);
-    for (let d = fromDs; d <= toDs; d = addDaysStr(d, 1)) {
-      snap[`${d}:${session}`] = (sched[d] || []).map(e => String(e.productId)).sort();
-    }
-  });
-  return snap;
-};
-// Day/session slots whose membership differs. Days present in only one
-// snapshot (they slid into or out of the window) are not changes.
-const diffRoutineSnapshots = (prev, next, products) => {
-  const nameOf = id => {
-    const p = (products || []).find(x => String(x.id) === id);
-    return p ? p.genericName : "a removed product";
-  };
-  const changes = [];
-  Object.keys(next).sort().forEach(key => {
-    const before = prev && prev[key];
-    if (!Array.isArray(before) || !Array.isArray(next[key])) return;
-    const added = next[key].filter(id => !before.includes(id));
-    const removed = before.filter(id => !next[key].includes(id));
-    if (!added.length && !removed.length) return;
-    const [date, session] = key.split(":");
-    changes.push({
-      date,
-      session,
-      added: added.map(nameOf),
-      removed: removed.map(nameOf)
-    });
-  });
-  return changes;
-};
-// Everything the button reports, computed without mutating anything.
-const analyzeRoutine = (profile, todayDs) => {
-  const prods = profile.products || [];
-  const snapshot = routineSnapshot(profile, todayDs);
-  const rs = profile.routineSync;
-  const prevSnap = rs && typeof rs.snapshot === "object" && rs.snapshot ? rs.snapshot : null;
-  const changes = prevSnap ? diffRoutineSnapshots(prevSnap, snapshot, prods) : [];
-  // Treatment windows still ahead of (or covering) today.
-  const treatments = [];
-  (profile.procedures || []).forEach(x => {
-    const def = PROCEDURE_TYPES[x.type];
-    if (!def || !x.date || !/^\d{4}-\d{2}-\d{2}$/.test(x.date)) return;
-    if (def.blockNights) {
-      const dates = [];
-      for (let i = 0; i < def.blockNights; i++) {
-        const d = addDaysStr(x.date, i);
-        if (d >= todayDs) dates.push(d);
-      }
-      if (dates.length) treatments.push({ label: def.label, date: x.date, blockedDates: dates });
-    } else if (x.date >= todayDs) {
-      treatments.push({ label: def.label, date: x.date, blockedDates: [] });
-    }
-  });
-  // Steps added to a day (pinned) whose product isn't part of the routine.
-  const cutoff = addDaysStr(todayDs, -ADD_LOOKBACK_DAYS);
-  const seen = new Set();
-  const adds = [];
-  (profile.pins || []).forEach(pin => {
-    if (!pin || !pin.date || pin.date < cutoff || seen.has(pin.productId)) return;
-    const p = prods.find(x => x.id === pin.productId);
-    if (!p || p.scheduled) return;
-    seen.add(pin.productId);
-    adds.push({
-      id: p.id,
-      name: p.genericName,
-      schedulable: isBulkSchedulable(p),
-      suggestion: suggestSchedule(p)
-    });
-  });
-  return { snapshot, changes, treatments, adds, first: !prevSnap };
-};
-// The button press: record the new baseline. Deliberately touches nothing
-// but routineSync — scheduling a product is a separate, explicit action.
-const computeRoutineUpdate = (profile, todayDs) => {
-  const a = analyzeRoutine(profile, todayDs);
-  return {
-    patch: { routineSync: { on: todayDs, snapshot: a.snapshot } },
-    report: a
-  };
-};
-// Explicit "Add to routine" for one added step. Returns null when the
-// product is gone, already scheduled, or flagged Bad/overlapping (those keep
-// needing a manual decision in Products). `ripple` is the exact effect of
-// this one product on the coming week, measured against a fresh snapshot.
-const scheduleAddedProduct = (profile, productId, todayDs) => {
-  const prods = profile.products || [];
-  const p = prods.find(x => x.id === productId);
-  if (!p || p.scheduled || !isBulkSchedulable(p)) return null;
-  const s = suggestSchedule(p);
-  const products = prods.map(x => x.id === productId ? {
-    ...x,
-    session: s.session,
-    frequency: s.frequency,
-    stepOrder: s.stepOrder,
-    nextDate: x.nextDate || todayDs,
-    scheduled: true
-  } : x);
-  const before = routineSnapshot(profile, todayDs);
-  const after = routineSnapshot({ ...profile, products }, todayDs);
-  return {
-    patch: { products, routineSync: { on: todayDs, snapshot: after } },
-    ripple: diffRoutineSnapshots(before, after, products),
-    schedule: s
-  };
-};
-
 // ─── ROUTINE BLOCK ──────────────────────────────────────────────────────────
 // Shared AM/PM checklist block used by the
 // inline Day view. Each row supports Done (checkbox) and Skip (carries the
@@ -4525,7 +4433,13 @@ const RoutineBlock = ({
   allLogs,
   profile
 }) => {
-  const allDone = prods.length > 0 && prods.every(p => logs.find(l => l.productId === p.id && l.session === session)?.done);
+  // A skipped step is a decision made, not an open step: it counts toward
+  // the session's progress and toward "All Done" exactly like a done one.
+  const isHandled = id => {
+    const l = logs.find(x => x && x.productId === id && x.session === session);
+    return !!(l && (l.done || l.skipped));
+  };
+  const allDone = prods.length > 0 && prods.every(p => isHandled(p.id));
   const [collapsed, setCollapsed] = useState(() => sessionDefaultCollapsed(session, date || appToday(), allDone));
   const [picker, setPicker] = useState(null); // { mode: "swap"|"add", excludeProduct } | null
   const [detailProduct, setDetailProduct] = useState(null); // rank badge tap → "why this step" modal
@@ -4669,9 +4583,9 @@ const RoutineBlock = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragId]);
-  // Swap: pins the chosen product in for today and marks the outgoing
-  // product skipped (so its own rotation still carries forward normally).
-  // Add: pins the chosen product in AND adjusts the rest of today's list so
+  // Swap: pins the chosen product in for this routine in place of the
+  // outgoing one (recorded on the pin as a bump).
+  // Add: pins the chosen product in AND adjusts the rest of this routine so
   // it stays internally consistent — same rules buildSessionSchedule
   // already enforces for the auto-generated routine, applied retroactively
   // to a manual addition instead of silently letting it violate them:
@@ -4686,24 +4600,36 @@ const RoutineBlock = ({
   //      scoring the picker itself sorts by) is bumped to make room, so a
   //      manual add can't silently blow past the cap the rest of the app
   //      enforces everywhere else.
-  // A bumped product is never removed from the schedule — just skipped for
-  // today, exactly like an explicit Swap-out, so its own rotation timing is
-  // untouched and it reappears on its normal next-due date.
+  // A bumped product leaves this one routine only: its own rotation timing
+  // is untouched (pins never feed the rotation state) and it reappears on
+  // its normal next-due date, not tomorrow.
   const applySwap = newProduct => {
     if (!picker) return;
     const {
       mode,
       excludeProduct
     } = picker;
-    const newPins = [...(profile.pins || [])];
-    if (!newPins.some(pin => pin.date === ds && pin.session === session && pin.productId === newProduct.id)) {
-      newPins.push({
-        id: Date.now() + Math.random(),
-        date: ds,
-        session,
-        productId: newProduct.id
-      });
-    }
+    // The steps this add/swap takes out of THIS routine are recorded on the
+    // pin itself (buildSessionSchedule step 4 applies them), not written as
+    // skip logs — a skip carries to tomorrow, and an added step must not
+    // change any routine but its own. Removing the pin restores them.
+    const bumpIds = computeAddStepBumps(newProduct, mode, excludeProduct, prods, {
+      session,
+      ds,
+      profile
+    });
+    const samePin = pin => pin && pin.date === ds && pin.session === session && pin.productId === newProduct.id;
+    const existingPin = (profile.pins || []).find(samePin);
+    const newPins = existingPin ? (profile.pins || []).map(pin => samePin(pin) ? {
+      ...pin,
+      bumps: Array.from(new Set([...(Array.isArray(pin.bumps) ? pin.bumps : []), ...bumpIds]))
+    } : pin) : [...(profile.pins || []), {
+      id: Date.now() + Math.random(),
+      date: ds,
+      session,
+      productId: newProduct.id,
+      bumps: bumpIds
+    }];
     const patch = {
       pins: newPins
     };
@@ -4716,30 +4642,6 @@ const RoutineBlock = ({
         ...pr,
         stepOrder: recommendStepOrder(pr)
       } : pr);
-    }
-    const bumpIds = computeAddStepBumps(newProduct, mode, excludeProduct, prods, {
-      session,
-      ds,
-      profile
-    });
-    if (bumpIds.length) {
-      let nextLogs = allLogs.slice();
-      bumpIds.forEach(id => {
-        const ex = allLogs.find(l => l.date === ds && l.productId === id && l.session === session);
-        nextLogs = ex ? nextLogs.map(l => l.date === ds && l.productId === id && l.session === session ? {
-          ...l,
-          skipped: true,
-          done: false
-        } : l) : [...nextLogs, {
-          id: Date.now() + Math.random(),
-          date: ds,
-          productId: id,
-          session,
-          done: false,
-          skipped: true
-        }];
-      });
-      patch.logs = nextLogs;
     }
     if (mode === "add") setAddNotice({ added: newProduct.genericName, removed: explainAddStepBumps(newProduct, bumpIds, prods) });
     onUpdate(patch);
@@ -4795,8 +4697,11 @@ const RoutineBlock = ({
   };
   const markAll = (prodList, session) => {
     let newLogs = [...allLogs];
+    // Mark All Done fills in the open steps only — it never turns a skip
+    // into a done.
     prodList.forEach(p => {
       const ex = newLogs.find(l => l.date === ds && l.productId === p.id && l.session === session);
+      if (ex && ex.skipped && !ex.done) return;
       if (ex) newLogs = newLogs.map(l => l.date === ds && l.productId === p.id && l.session === session ? {
         ...l,
         done: true,
@@ -4813,7 +4718,7 @@ const RoutineBlock = ({
       logs: newLogs
     });
   };
-  const doneCount = prods.filter(p => logs.find(l => l.productId === p.id && l.session === session)?.done).length;
+  const doneCount = prods.filter(p => isHandled(p.id)).length;
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.faint,
@@ -5607,81 +5512,6 @@ const RoutineListView = ({ profile, onOpenDay }) => {
   })));
 };
 
-// ─── UPDATE ROUTINE BUTTON ─────────────────────────────────────────────────
-const FREQ_LABEL = { daily: "daily", weekly: "weekly", "twice-weekly": "2×/week" };
-const fmtSlot = (date, session) => `${DAYS[parseDate(date).getDay()]} ${Number(date.slice(8))} ${session.toUpperCase()}`;
-const fmtDay = date => `${DAYS[parseDate(date).getDay()]} ${Number(date.slice(8))}`;
-const RoutineUpdateBar = ({ profile, onUpdate }) => {
-  const h = React.createElement;
-  const todayDs = todayStr();
-  const [report, setReport] = useState(null);
-  const [added, setAdded] = useState([]); // [{ name, schedule, ripple }] added via the report card
-  // Dot on the button: the coming week differs from the last baseline.
-  const pending = useMemo(() => {
-    const a = analyzeRoutine(profile, todayDs);
-    return a.changes.length > 0;
-  }, [profile.products, profile.logs, profile.pins, profile.procedures, profile.routineSync, todayDs]);
-  const press = () => {
-    const { patch, report: r } = computeRoutineUpdate(profile, todayDs);
-    onUpdate(patch);
-    setReport(r);
-    setAdded([]);
-  };
-  const addToRoutine = add => {
-    const res = scheduleAddedProduct(profile, add.id, todayDs);
-    if (!res) return;
-    onUpdate(res.patch);
-    setAdded(a => [...a, { name: add.name, schedule: res.schedule, ripple: res.ripple }]);
-    setReport(r => r ? { ...r, adds: r.adds.filter(x => x.id !== add.id) } : r);
-  };
-  const small = { fontSize: 12, color: T.text, fontFamily: "'Inter',sans-serif", lineHeight: 1.5 };
-  const head = txt => h("div", { style: { fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px", fontFamily: "'Inter',sans-serif" } }, txt);
-  const changeRow = (c, key) => h("div", { key, style: small }, h("b", null, fmtSlot(c.date, c.session)), c.added.length ? "  + " + c.added.join(", ") : "", c.removed.length ? "  − " + c.removed.join(", ") : "");
-  const nothing = report && !report.changes.length && !report.treatments.length && !report.adds.length && !added.length;
-  // A small pill at the bottom of the Calendar tab, below the routines: it's
-  // an occasional check-in, not something that should sit above today's
-  // steps. The report still opens directly beneath it.
-  return h("div", { style: { marginTop: 4, marginBottom: 12, display: "flex", flexDirection: "column", alignItems: "center" } },
-    h("button", {
-      onClick: press,
-      "data-testid": "update-routine",
-      style: {
-        height: 30,
-        padding: "0 14px",
-        borderRadius: 100,
-        border: `1px solid ${pending ? T.accent : T.border}`,
-        background: pending ? T.accentSoft : "transparent",
-        color: pending ? T.accent : T.muted,
-        fontSize: 11,
-        fontWeight: 600,
-        cursor: "pointer",
-        fontFamily: "'Inter',sans-serif"
-      }
-    }, pending ? "↻ Update routine •" : "↻ Update routine"),
-    report && h("div", {
-      "data-testid": "update-report",
-      style: { alignSelf: "stretch", marginTop: 8, padding: "10px 12px", borderRadius: 10, border: `1px solid ${T.border}`, background: T.card }
-    },
-      h("div", { style: { ...small, fontWeight: 700 } }, nothing ? "Routine is up to date" : "Routine updated"),
-      report.first && h("div", { style: { ...small, color: T.muted, marginTop: 2 } }, "Baseline saved — next time I'll show what your adds and treatments changed."),
-      report.treatments.length > 0 && head("Treatments"),
-      report.treatments.map((t, i) => h("div", { key: "t" + i, style: small }, t.blockedDates.length ? `${t.label}: retinoids and acid exfoliants paused ${t.blockedDates.map(fmtDay).join(", ")}` : `${t.label}: tracked only — routine unchanged`)),
-      report.changes.length > 0 && head("Next 7 days, since last update"),
-      report.changes.map((c, i) => changeRow(c, "c" + i)),
-      added.map((a, i) => h("div", { key: "a" + i }, head(`${a.name} added to routine`), h("div", { style: small }, `${a.schedule.session === "both" ? "AM + PM" : a.schedule.session.toUpperCase()} · ${FREQ_LABEL[a.schedule.frequency] || a.schedule.frequency}`), a.ripple.map((c, j) => changeRow(c, "r" + j)))),
-      report.adds.length > 0 && head("Added to a day, not in your routine"),
-      report.adds.map(a => h("div", { key: "p" + a.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "4px 0" } },
-        h("div", { style: { ...small, flex: 1, minWidth: 0 } }, a.name, a.schedulable ? h("span", { style: { color: T.muted } }, ` · ${a.suggestion.session === "both" ? "AM + PM" : a.suggestion.session.toUpperCase()} ${FREQ_LABEL[a.suggestion.frequency] || a.suggestion.frequency}`) : h("span", { style: { color: T.muted } }, " · flagged — decide in Products")),
-        a.schedulable && h("button", {
-          onClick: () => addToRoutine(a),
-          style: { border: `1px solid ${T.border}`, background: "transparent", color: T.accent, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
-        }, "Add to routine"))),
-      h("button", {
-        onClick: () => setReport(null),
-        style: { border: "none", background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "8px 0 0", fontFamily: "'Inter',sans-serif" }
-      }, "Dismiss")));
-};
-
 // ─── CALENDAR ──────────────────────────────────────────────────────────────────
 const CalendarTab = ({
   profile,
@@ -5802,9 +5632,6 @@ const CalendarTab = ({
   }) : /*#__PURE__*/React.createElement(RoutineListView, {
     profile: profile,
     onOpenDay: openDay
-  }), /*#__PURE__*/React.createElement(RoutineUpdateBar, {
-    profile: profile,
-    onUpdate: onUpdate
   }));
 };
 

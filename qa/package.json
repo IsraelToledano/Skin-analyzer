@@ -3,7 +3,7 @@
   "private": true,
   "description": "Behavioral tests and the 30-day routine audit for index.html",
   "scripts": {
-    "test": "node syntax.js && node smoke.test.js && node order.test.js && node fixes.test.js && node reviews.test.js && node addstep.test.js && node pool-spacing.test.js && node run-audit.js && node run-audit.js --days=60 && node sweep.js && node add-sweep.js --days=60 && node order.e2e.js && node layout.e2e.js && node reviews.e2e.js && node addstep.e2e.js && node refresh.e2e.js",
+    "test": "node syntax.js && node smoke.test.js && node order.test.js && node fixes.test.js && node reviews.test.js && node addstep.test.js && node pool-spacing.test.js && node pin-overlay.test.js && node run-audit.js && node run-audit.js --days=60 && node sweep.js && node add-sweep.js --days=60 && node order.e2e.js && node layout.e2e.js && node reviews.e2e.js && node addstep.e2e.js && node refresh.e2e.js",
     "audit": "node run-audit.js --show"
   },
   "devDependencies": {
