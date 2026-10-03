@@ -1,8 +1,8 @@
 // Simulates "+ Add step" for every product in the library, on every day and
 // session for the next N days, through the app's own add path (a pin that
 // carries computeAddStepBumps' bumps), rebuilds the schedule, and checks the
-// resulting day — and that the next 7 days are exactly what they were
-// without the add (an added step changes only its own routine).
+// resulting day and the 7 days after it, which reflow around the add (and
+// never run another same-role rotation step the very next night).
 const {load,seedProfile}=require('./sim');const {checkDay}=require('./audit');
 const DAYS=+(process.argv.find(a=>/^--days=/.test(a))||'--days=60').split('=')[1];
 const get=load();const base=seedProfile(get);
@@ -27,10 +27,11 @@ for(let i=0;i<DAYS;i++){
       checkDay(get,`${d}:${s}`,after,record(d,0));
       if(!after.some(x=>x.id===p.id))record(d,0)('high','',`added step "${p.genericName}" is missing from the day`);
       bumps.forEach(id=>{if(after.some(x=>x.id===id))record(d,0)('high','',`bumped step is still on the day`)});
+      const role=get('rotationRoleFor')(p);
       for(let j=1;j<=7;j++){
-        const dd=add(d,j);
-        const a=dayList(prof,sched,dd,s).map(x=>x.id).join(','),b=dayList(base,full[s],dd,s).map(x=>x.id).join(',');
-        if(a!==b)record(dd,j)('high','',`another day's routine changed after an add`);
+        const dd=add(d,j);const day=dayList(prof,sched,dd,s);
+        checkDay(get,`${dd}:${s}`,day,record(dd,j));
+        if(j===1&&role&&day.some(x=>get('rotationRoleFor')(x)===role))record(dd,j)('high','',`another ${role} the night after an added one`);
       }
     }
   }

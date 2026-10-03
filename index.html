@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-03.2";
+const APP_VERSION = "2026-10-03.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1428,7 +1428,7 @@ const EMPTY_PROFILE = {
   analysisGaps: [],
   logs: [],
   skinImgs: [],
-  pins: [], // manual per-day swap/add overrides { date, session, productId, bumps? } — see buildSessionSchedule step 4
+  pins: [], // manual per-day swap/add overrides { date, session, productId, bumps? } — see buildSessionSchedule step 1b
   breakouts: [], // { id, date, locations, severity, notes } — see analyzeBreakoutTriggers
   removedProducts: [] // soft-deleted products, newest first — see removeProduct/TRASH_LIMIT
 };
@@ -2765,7 +2765,7 @@ const MIGRATIONS = [{
 }, {
   id: "drop_routine_sync_v1",
   // The Update routine button is gone (an added step now updates its own
-  // routine directly — see buildSessionSchedule step 4), so its comparison
+  // routine and the ones after it directly — buildSessionSchedule step 1b), so its comparison
   // baseline is dead data.
   apply: profile => {
     if (!profile || !("routineSync" in profile)) return profile;
@@ -3446,6 +3446,10 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // which is its own irritation/barrier-repair concern for compromised-
   // barrier skin, independent of same-night stacking.
   let lastActiveDate = null;
+  // Last date a hand-added step of each rotation role (exfoliant, mask,
+  // tretinoin, retinol) was pinned — the next same-role rotation night
+  // right after it moves to its following slot (step 2d).
+  const pinnedRoleOn = {};
   // A product counts toward the rest-night cooldown if it carries a
   // retinoid or an acid/mechanical exfoliant active (classifyActiveGroups'
   // "retinoid" and "acid-exfoliant" groups) — clay masks, hydrating
@@ -3498,17 +3502,55 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         placedIds.add(p.id);
       }
     });
-    // Manual pins (Swap / Add step) are NOT placed here: they are an overlay
-    // applied to the finished day in step 4 below, so they never touch the
-    // rotation state (lastServed / servedCount / rest-night tracking) and an
-    // added step changes only the routine it was added to.
+    // 1b. Manual pins — steps added (or swapped in) by hand for this exact
+    // date+session. They count as that product's use (lastServed /
+    // servedCount / rest-night tracking), so the routines after it reflow:
+    // a weekly product added early isn't repeated on its old day, and the
+    // next same-role rotation night right after an added one moves to its
+    // following slot (see pinnedRoleOn / step 2d).
+    // The steps an add took out of this routine (pin.bumps, and anything
+    // that clashes with the added step) are kept off this day and NOT
+    // counted as used, so they come back on their next eligible night.
+    // A step already marked done this session is locked in first — it
+    // already happened, so an add can never remove it.
+    const excludedToday = new Set();
+    const dayPins = pins.filter(pin => pin.date === ds && pin.session === session && byId.has(pin.productId));
+    if (dayPins.length) {
+      logs.forEach(l => {
+        if (l.date !== ds || l.session !== session || !l.done || placedIds.has(l.productId)) return;
+        if (!sessionProducts.some(p => p.id === l.productId) && !dayPins.some(pin => pin.productId === l.productId)) return;
+        dayList.push({ productId: l.productId, carried: false });
+        lastServed[l.productId] = ds;
+        servedCount[l.productId] = (servedCount[l.productId] || 0) + 1;
+        placedIds.add(l.productId);
+      });
+    }
+    dayPins.forEach(pin => {
+      (Array.isArray(pin.bumps) ? pin.bumps : []).forEach(id => {
+        if (!placedIds.has(id)) excludedToday.add(id);
+      });
+      if (!placedIds.has(pin.productId)) {
+        dayList.push({ productId: pin.productId, carried: false, pinned: true });
+        lastServed[pin.productId] = ds;
+        servedCount[pin.productId] = (servedCount[pin.productId] || 0) + 1;
+        placedIds.add(pin.productId);
+      } else {
+        const e = dayList.find(x => x.productId === pin.productId);
+        if (e) e.pinned = true;
+      }
+      const role = rotationRoleFor(byId.get(pin.productId));
+      if (role) pinnedRoleOn[role] = ds;
+    });
+    excludedToday.forEach(id => { if (placedIds.has(id)) excludedToday.delete(id); });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
-    // Except onto a day where a one-off clashes with it: then it waits
-    // another day instead of stacking with it.
+    // Except onto a day where a step the user added (pin) or a one-off
+    // clashes with it, or that the add took it out of: then it waits
+    // another day instead of stacking with the step that was deliberately
+    // added (e.g. a carried retinoid onto a night a clay mask was added).
     const carriedIds = new Set(pendingCarry);
     const deferredCarry = new Set();
     const pinnedProds = Array.from(placedIds).map(id => products.find(p => p.id === id)).filter(Boolean);
-    const clashesWithPinned = p => pinnedProds.some(q => q.id !== p.id && (productsConflict(p, q) || classifySingletonGroups(p).some(g => classifySingletonGroups(q).includes(g))));
+    const clashesWithPinned = p => excludedToday.has(p.id) || pinnedProds.some(q => q.id !== p.id && (productsConflict(p, q) || classifySingletonGroups(p).some(g => classifySingletonGroups(q).includes(g))));
     groups.forEach(group => {
       if (group.some(p => carriedIds.has(p.id))) {
         if (group.some(clashesWithPinned)) {
@@ -3571,7 +3613,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       if (capUsed() >= cap) return;
       if (placedGroups.has(`layer:${cat}`)) return;
       const isCat = p => detectType(p) === cat || cat === "cleanser" && detectType(p) === "cleanser_oil";
-      const due = rotating.filter(p => isCat(p) && !placedIds.has(p.id)).map(p => {
+      const due = rotating.filter(p => isCat(p) && !placedIds.has(p.id) && !excludedToday.has(p.id)).map(p => {
         const iv = FREQ_DAYS[p.frequency] || 1;
         const last = lastServed[p.id];
         const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
@@ -3605,7 +3647,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         };
         const winnerGroup = groups.find(g => g.some(p => p.id === winner.id)) || [winner];
         winnerGroup.forEach(p => {
-          if (placedIds.has(p.id)) return;
+          if (placedIds.has(p.id) || excludedToday.has(p.id)) return;
           if (p.id !== winner.id && !isDueToday(p)) return;
           dayList.push({
             productId: p.id,
@@ -3632,7 +3674,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         const oilPlaced = dayList.some(e => detectType(byId.get(e.productId) || {}) === "cleanser_oil");
         const waterPlaced = dayList.some(e => detectType(byId.get(e.productId) || {}) === "cleanser");
         if (cat === "cleanser" && oilPlaced && !waterPlaced) {
-          const waters = rotating.filter(p => detectType(p) === "cleanser" && !placedIds.has(p.id)).map(p => {
+          const waters = rotating.filter(p => detectType(p) === "cleanser" && !placedIds.has(p.id) && !excludedToday.has(p.id)).map(p => {
             const iv3 = FREQ_DAYS[p.frequency] || 1;
             const last3 = lastServed[p.id];
             const since3 = last3 ? daysBetween(last3, ds) : daysBetween(p.nextDate, ds);
@@ -3695,7 +3737,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // "exfoliant" role, split across three products) — "tretinoin" and
         // "mask" currently have one scheduled member each, so this is a
         // no-op for them until that changes.
-        const candidates = poolMembers.filter(p => rotationRoleFor(p) === slot.role && !placedIds.has(p.id)).map(p => {
+        const candidates = poolMembers.filter(p => rotationRoleFor(p) === slot.role && !placedIds.has(p.id) && !excludedToday.has(p.id)).map(p => {
           const weight = poolWeightFor(p);
           return {
             p,
@@ -3717,6 +3759,12 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         });
         const winner = (ready.length ? ready : candidates)[0].p;
         if (conflictsWithToday(winner)) return;
+        // A hand-added step of this same role today or last night takes
+        // this slot's turn: the rotation night moves to its next slot
+        // instead of running the same kind of step two nights in a row
+        // (or twice in one night).
+        if (pinnedRoleOn[slot.role] && daysBetween(pinnedRoleOn[slot.role], ds) <= 1) return;
+        if (classifySingletonGroups(winner).some(g => placedGroups.has(g))) return;
         // Procedure recovery window: never place an active on a night
         // inside a microneedling block (see procedureBlocksActives).
         if (isActiveIngredient(winner) && procedureBlocksActives(ds)) return;
@@ -3814,7 +3862,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         // existing overdue/served tiebreak naturally rotates which one
         // wins on subsequent days instead of one permanently starving
         // the other.
-        const groupClash = c.members.some(p => classifySingletonGroups(p).some(g => placedGroups.has(g)) || conflictsWithToday(p));
+        const groupClash = c.members.some(p => excludedToday.has(p.id) || classifySingletonGroups(p).some(g => placedGroups.has(g)) || conflictsWithToday(p));
         if (groupClash) return;
         // Rest-night cooldown: same reasoning as the rotation-pool slots
         // above — if this group carries an active ingredient and an active
@@ -3849,40 +3897,6 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         }
       });
     }
-    // 4. Manual pins, as an overlay on the finished day. A step added (or
-    // swapped in) by hand changes exactly one routine — this date and
-    // session — and nothing else: the rotation state above was computed as
-    // if the pin didn't exist, so every other day and session is identical
-    // with or without it. On this routine, the added step takes the place of
-    // anything it conflicts with or duplicates the role of, plus whatever
-    // the add recorded in pin.bumps (the swapped-out step, or the step cut
-    // to stay under the cap). A step already marked done is never removed —
-    // it already happened. Removed steps don't carry to tomorrow; removing
-    // the pin brings them straight back.
-    const doneHere = id => logs.some(l => l && l.date === ds && l.session === session && l.productId === id && l.done);
-    const pinnedHere = new Set();
-    const overlayRemoved = new Set();
-    pins.forEach(pin => {
-      if (!pin || pin.date !== ds || pin.session !== session) return;
-      const q = byId.get(pin.productId);
-      if (!q || pinnedHere.has(q.id)) return;
-      const bumps = new Set(Array.isArray(pin.bumps) ? pin.bumps : []);
-      const qGroups = classifySingletonGroups(q);
-      for (let i = dayList.length - 1; i >= 0; i--) {
-        const id = dayList[i].productId;
-        if (id === q.id || pinnedHere.has(id) || doneHere(id)) continue;
-        const x = byId.get(id);
-        const clash = x && (productsConflict(q, x) || classifySingletonGroups(x).some(g => qGroups.includes(g)));
-        if (clash || bumps.has(id)) {
-          overlayRemoved.add(id);
-          dayList.splice(i, 1);
-        }
-      }
-      const existing = dayList.find(e => e.productId === q.id);
-      if (existing) existing.pinned = true;
-      else dayList.push({ productId: q.id, carried: false, pinned: true });
-      pinnedHere.add(q.id);
-    });
     dayList.sort((a, b) => {
       const pa = products.find(p => p.id === a.productId);
       const pb = products.find(p => p.id === b.productId);
@@ -3891,10 +3905,8 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     schedule[ds] = dayList;
     // If ANY member of a linked group is skipped, carry the WHOLE group
     // forward so they land back together tomorrow rather than splitting.
-    // Only steps the schedule itself placed carry: a step that exists today
-    // only because it was added by hand doesn't spill into tomorrow.
     const skippedToday = new Set();
-    dayList.filter(e => !(e.pinned && !placedIds.has(e.productId))).forEach(({
+    dayList.forEach(({
       productId
     }) => {
       const log = logs.find(l => l.date === ds && l.productId === productId && l.session === session);
@@ -4600,19 +4612,20 @@ const RoutineBlock = ({
   //      scoring the picker itself sorts by) is bumped to make room, so a
   //      manual add can't silently blow past the cap the rest of the app
   //      enforces everywhere else.
-  // A bumped product leaves this one routine only: its own rotation timing
-  // is untouched (pins never feed the rotation state) and it reappears on
-  // its normal next-due date, not tomorrow.
+  // A bumped product isn't counted as used that night, so the schedule
+  // brings it back on its next eligible night; the added step counts as
+  // used, so the routines after it reflow around it (buildSessionSchedule
+  // step 1b).
   const applySwap = newProduct => {
     if (!picker) return;
     const {
       mode,
       excludeProduct
     } = picker;
-    // The steps this add/swap takes out of THIS routine are recorded on the
-    // pin itself (buildSessionSchedule step 4 applies them), not written as
-    // skip logs — a skip carries to tomorrow, and an added step must not
-    // change any routine but its own. Removing the pin restores them.
+    // The steps this add/swap takes out of the routine are recorded on the
+    // pin itself (buildSessionSchedule step 1b applies them) rather than
+    // written as skip logs, so they aren't shown as open steps tonight and
+    // the scheduler reschedules them. Removing the pin restores them.
     const bumpIds = computeAddStepBumps(newProduct, mode, excludeProduct, prods, {
       session,
       ds,

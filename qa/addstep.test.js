@@ -43,18 +43,16 @@ t('a second water cleanser still replaces the first (same role, not the cap)',()
   const b=A.computeAddStepBumps(P(44,'Foaming Cleanser','pm','daily'),'add',null,[cl,ess,mo],ctx);assert.deepStrictEqual(b,[1]);
 });
 console.log('carry-over vs an added step');
-t('a carried step that clashes with an added step leaves that night only — the next night is untouched',()=>{
+t('a skipped step carried into a night with a clashing added step waits another day',()=>{
   const ret2={...P(60,'Retinol Serum','pm','weekly'),rotationRole:'none'};
   const prods=[cl,mo,ret2,{...clay,rotationRole:'none'}];
   const d1=A.addDaysStr(T,1),d2=A.addDaysStr(T,2);
   const logs=[{date:T,session:'pm',productId:60,done:false,skipped:true}];
   const pins=[{date:d1,session:'pm',productId:23}];
   const sc=A.buildSessionSchedule(prods,logs,'pm',T,A.addDaysStr(T,4),A.SESSION_CAP,pins,[]);
-  const base=A.buildSessionSchedule(prods,logs,'pm',T,A.addDaysStr(T,4),A.SESSION_CAP,[],[]);
   assert.ok(sc[T].some(e=>e.productId===60),'retinol not on day 0');
   assert.ok(!sc[d1].some(e=>e.productId===60),'carried retinol stacked onto the clay night');
-  assert.ok(sc[d1].some(e=>e.productId===23&&e.pinned),'clay mask missing');
-  [d2,A.addDaysStr(T,3),A.addDaysStr(T,4)].forEach(d=>assert.deepStrictEqual(sc[d],base[d],d));
+  assert.ok(sc[d2].some(e=>e.productId===60&&e.carried),'carried retinol did not arrive the day after');
 });
 console.log('failure cases');
 t('explain handles unknown ids and empty input',()=>{assert.deepStrictEqual(A.explainAddStepBumps(clay,[999],[cl]),[]);assert.deepStrictEqual(A.explainAddStepBumps(null,[1],[cl]),[]);assert.deepStrictEqual(A.explainAddStepBumps(clay,null,null),[])});

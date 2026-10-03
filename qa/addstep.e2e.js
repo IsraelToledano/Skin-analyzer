@@ -36,8 +36,9 @@ ok(!retTxt||/Skipped|skipped/.test(retTxt),'tretinoin is no longer an active ste
 await page.screenshot({path:'addstep.png'});
 // The added step updates tonight's routine only — tomorrow is unchanged
 await go('›');const tomorrowAfter=await names();await go('‹');
-ok(JSON.stringify(tomorrowAfter)===JSON.stringify(tomorrowBefore),'tomorrow\'s routine is unchanged by the add ('+tomorrowAfter.join(' → ')+')');
-ok(!tomorrowAfter.some(n=>/Clay Face Mask/.test(n)),'the added step does not spill into tomorrow');
+console.log('   tomorrow before:',tomorrowBefore.join(' → '),'| after:',tomorrowAfter.join(' → '));
+ok(!tomorrowBefore.some(n=>/Retinoid/.test(n))&&tomorrowAfter.some(n=>/Retinoid/.test(n)),'tomorrow reflows: the retinoid the clay mask took out moves to tomorrow');
+ok(!tomorrowAfter.some(n=>/Clay Face Mask/.test(n)),'the added step does not repeat tomorrow');
 ok(await page.locator('[data-testid=update-routine]').count()===0,'the Update routine button is gone');
 // A skipped step counts as handled
 const header=async()=>(await page.locator('span',{hasText:'Evening Routine'}).first().innerText()).replace(/\s+/g,' ');
