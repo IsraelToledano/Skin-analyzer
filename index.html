@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-03.3";
+const APP_VERSION = "2026-10-08.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2308,6 +2308,32 @@ const MIGRATIONS = [{
     return {
       ...profile,
       products: [...products, newProduct]
+    };
+  }
+}, {
+  id: "schedule_cosrx_aha_bha_toner_v1",
+  // Explicit request (2026-10-08): put the COSRX AHA/BHA Clarifying
+  // Treatment Toner (RANK_DATA id 26) into the routine. Its rank stays
+  // "bad" — that judges the formula, and the ⚠ Bad badge keeps showing in
+  // the daily view — but he chose to use it, so it is scheduled PM weekly
+  // like the other exfoliants and auto-joins the exfoliant rotation pool by
+  // category (two acid nights a week, shared across the pool). Only ever
+  // turns it ON, once: a session/frequency set by hand later stays as set,
+  // and removing it again afterwards is never undone by this migration.
+  apply: profile => {
+    const isCosrxAhaBha = p => /cosrx/i.test([p.genericName, p.brandName].join(" ")) && /aha\s*[/.]?\s*bha/i.test([p.genericName, p.brandName].join(" "));
+    const target = (profile.products || []).find(p => isCosrxAhaBha(p) && !p.scheduled);
+    if (!target) return profile;
+    return {
+      ...profile,
+      products: profile.products.map(p => p.id === target.id ? {
+        ...p,
+        scheduled: true,
+        session: "pm",
+        frequency: "weekly",
+        stepOrder: 40,
+        nextDate: todayStr()
+      } : p)
     };
   }
 }, {
