@@ -32,4 +32,17 @@ t('his real export: scheduled after migrations, other products untouched',()=>{
   assert.ok(after.products.find(x=>x.id===26).scheduled);
   after.products.filter(x=>x.id!==26).forEach(x=>assert.deepStrictEqual(x,before.products.find(y=>y.id===x.id)));
 },);
+t('Bad rank means a smaller share: it runs less often than every Good acid, about half as often (6 months)',()=>{
+  const prof=seedProfile(get);const prods=prof.products;const rr=get('rotationRoleFor');const T=get('todayStr')();
+  const sc=get('buildSessionSchedule')(prods,[],'pm',get('computeEpoch')(prods,'pm'),get('addDaysStr')(T,181),get('SESSION_CAP'),[],[]);
+  const c={};Object.keys(sc).filter(d=>d>=T).forEach(d=>sc[d].forEach(e=>{const p=prods.find(x=>x.id===e.productId);if(p&&rr(p)==='exfoliant')c[p.id]=(c[p.id]||0)+1}));
+  const good=prods.filter(p=>p.scheduled&&rr(p)==='exfoliant'&&get('getProductRank')(p).tag==='good'&&get('FREQ_DAYS')[p.frequency]===7).map(p=>c[p.id]||0);
+  const avg=good.reduce((a,b)=>a+b,0)/good.length;
+  assert.ok((c[26]||0)>=2,'COSRX dropped out: '+JSON.stringify(c));
+  assert.ok(good.every(n=>n>(c[26]||0)),'a Good acid ran no more than COSRX: '+JSON.stringify(c));
+  assert.ok(c[26]<=avg*0.7,`COSRX ${c[26]} vs Good avg ${avg.toFixed(1)}`);
+});
+t('a Good product\'s pool weight is unchanged, Bad is half',()=>{
+  assert.strictEqual(get('RANK_WEIGHT').good,1);assert.strictEqual(get('RANK_WEIGHT').bad,0.5);assert.strictEqual(get('RANK_WEIGHT').best,2);
+});
 console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);

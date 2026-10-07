@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-08.1";
+const APP_VERSION = "2026-10-08.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -858,10 +858,10 @@ const RANK_STYLE = {
 // of the shared weekly slots as a "good"-tagged one, not split them evenly.
 // servedCount is divided by this weight before comparison (see
 // buildSessionSchedule step 2d), so a higher weight makes each real serve
-// count for less, letting that product win ties more often. "bad" is
-// included only for completeness — bad-tagged products are auto-
-// unscheduled elsewhere and shouldn't reach the pool at all.
-const RANK_WEIGHT = { best: 2, good: 1, bad: 1 };
+// count for less, letting that product win ties more often. A "bad"-tagged
+// member he chose to keep scheduled anyway (e.g. the COSRX AHA/BHA toner)
+// gets half a "good" one's share: it stays in the rotation, just less often.
+const RANK_WEIGHT = { best: 2, good: 1, bad: 0.5 };
 
 
 // ─── RULE-BASED AUTO-SCHEDULER (no AI) ─────────────────────────────────────
