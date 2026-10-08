@@ -44,7 +44,7 @@ t('a step the add took out comes back the next eligible night',()=>{
   const sc=build([cl,ess,tretD,mo,clay],[],[{date:T,session:'pm',productId:23,bumps:[4]}],'pm',4);
   assert.ok(!ids(sc,T).includes(4));assert.ok(ids(sc,add(T,1)).includes(4),'retinoid did not come back');
 });
-t('nothing before the add, and nothing in the other session, changes',()=>{
+t('nothing before the add changes, and the other session only from the next morning on',()=>{
   const prof=seedProfile(get);const prods=prof.products;const base=snap(prods,[],[],24);let n=0;
   for(let i=0;i<10;i++){const d=add(T,i);
     for(const s of ['am','pm']){
@@ -52,7 +52,12 @@ t('nothing before the add, and nothing in the other session, changes',()=>{
       prods.filter(p=>!list.some(x=>x.id===p.id)).slice(0,12).forEach(p=>{
         const bumps=get('computeAddStepBumps')(p,'add',null,list,{session:s,ds:d,profile:prof});
         const after=snap(prods,[],[{id:1,date:d,session:s,productId:p.id,bumps}],24);n++;
-        Object.keys(base).forEach(k=>{const [kd,ks]=k.split(':');if(ks!==s||kd<d)assert.strictEqual(after[k],base[k],`${p.genericName} on ${d}:${s} changed ${k}`)});
+        // Evenings never depend on mornings; a morning can depend on the
+        // evening before it (a product that ran at night sits out the next
+        // morning), so an evening add may reflow the mornings after it.
+        Object.keys(base).forEach(k=>{const [kd,ks]=k.split(':');
+          const mustHold=kd<d||(ks!==s&&(s==='am'||kd<=d));
+          if(mustHold)assert.strictEqual(after[k],base[k],`${p.genericName} on ${d}:${s} changed ${k}`)});
       });
     }}
   assert.ok(n>100,`only ${n} adds simulated`);

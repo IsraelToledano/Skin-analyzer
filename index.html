@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-08.2";
+const APP_VERSION = "2026-10-08.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3434,9 +3434,18 @@ const groupRotating = rotating => {
   });
   return Object.values(groups);
 };
+// A product that ran in the evening doesn't run again the next morning —
+// except the steps every routine is built on (cleansing, moisturizer,
+// sunscreen), which belong in every session.
+const MORNING_AFTER_EXEMPT_TYPES = new Set(["cleanser", "cleanser_oil", "moisturizer", "spf"]);
+const blockedMorningAfter = p => !!p && !MORNING_AFTER_EXEMPT_TYPES.has(detectType(p));
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = [], procedures = []) => {
   logs = (logs || []).filter(Boolean);
   pins = (pins || []).filter(Boolean);
+  // The morning plan needs the evening plan: whatever (non-foundation) ran
+  // the night before sits out the next morning. Built with the same epoch
+  // the evening view uses, so both agree on what ran.
+  const pmPlan = session === "am" ? buildSessionSchedule(products, logs, "pm", computeEpoch(products || [], "pm"), toDate, cap, pins, procedures) : null;
   const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
   // Rotation-pool members (see ROTATION_CATEGORY_ROLES / step 2d below) are
   // scheduled exclusively through the dedicated pool logic — excluding
@@ -3567,6 +3576,11 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       const role = rotationRoleFor(byId.get(pin.productId));
       if (role) pinnedRoleOn[role] = ds;
     });
+    if (pmPlan) {
+      (pmPlan[addDaysStr(ds, -1)] || []).forEach(e => {
+        if (!placedIds.has(e.productId) && blockedMorningAfter(byId.get(e.productId))) excludedToday.add(e.productId);
+      });
+    }
     excludedToday.forEach(id => { if (placedIds.has(id)) excludedToday.delete(id); });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
     // Except onto a day where a step the user added (pin) or a one-off
@@ -6590,6 +6604,188 @@ const ProductsTab = ({
 };
 
 // ─── MAIN APP ───────────────────────────────────────────────────────────────────
+// ─── REPORT TO CLAUDE ──────────────────────────────────────────────────────
+// One tap from anywhere in the app: captures what's on screen (an image
+// rendered from the page — nothing is saved to the phone's photos) plus the
+// current data, and opens the share sheet so both go straight into a Claude
+// chat. The data file is what makes a screenshot answerable: it carries the
+// logs, added steps, procedures and product settings behind what's shown.
+const REPORT_CAPTURE_LIB = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+let captureLibPromise = null;
+const loadCaptureLib = () => {
+  if (typeof window !== "undefined" && window.html2canvas) return Promise.resolve(window.html2canvas);
+  if (!captureLibPromise) captureLibPromise = new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = REPORT_CAPTURE_LIB;
+    el.async = true;
+    el.onload = () => window.html2canvas ? resolve(window.html2canvas) : reject(new Error("capture library missing"));
+    el.onerror = () => {
+      captureLibPromise = null;
+      reject(new Error("capture library failed to load"));
+    };
+    document.head.appendChild(el);
+  });
+  return captureLibPromise;
+};
+// The data half of a report, as text. Same {v, profile} shape as Sync's
+// export (plain JSON, not base64) plus what was on screen. Skin photos are
+// left out — they're large, private, and never needed to debug a routine.
+const buildReportData = (profile, meta = {}) => {
+  const { skinImgs, ...rest } = profile || {};
+  return JSON.stringify({
+    kind: "skinritual-report",
+    v: 4,
+    appVersion: APP_VERSION,
+    capturedAt: new Date().toISOString(),
+    today: todayStr(),
+    meta: meta || {},
+    skinImgCount: Array.isArray(skinImgs) ? skinImgs.length : 0,
+    profile: rest
+  });
+};
+const reportStamp = (d = new Date()) => {
+  const z = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+};
+// The visible part of the page as a PNG. The report button itself is left
+// out of the picture.
+const captureScreen = async () => {
+  const h2c = await loadCaptureLib();
+  const canvas = await h2c(document.body, {
+    x: window.scrollX,
+    y: window.scrollY,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    windowWidth: document.documentElement.clientWidth,
+    scale: Math.min(2, window.devicePixelRatio || 1),
+    backgroundColor: T.bg,
+    logging: false,
+    useCORS: true,
+    ignoreElements: el => !!(el && el.getAttribute && el.getAttribute("data-report-ui") === "1")
+  });
+  return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error("empty capture")), "image/png"));
+};
+// Screen image (when the capture works) + data file. A failed capture never
+// blocks the report — the data still goes.
+const prepareReportFiles = async (profile, meta, capture = captureScreen) => {
+  const stamp = reportStamp();
+  const files = [];
+  const m = { ...(meta || {}) };
+  try {
+    const png = await capture();
+    files.push(new File([png], `skin-ritual-screen-${stamp}.png`, { type: "image/png" }));
+  } catch (e) {
+    m.captureError = String(e && e.message || e);
+  }
+  files.push(new File([buildReportData(profile, m)], `skin-ritual-data-${stamp}.txt`, { type: "text/plain" }));
+  return files;
+};
+// Opens the share sheet. Returns what happened, so the button can react:
+// "shared" | "shared-data-only" | "cancelled" | "needs-tap" (the browser
+// wants a fresh tap before sharing) | "unsupported" | "failed".
+const shareReport = async (files, nav = navigator) => {
+  if (!nav || typeof nav.share !== "function" || !Array.isArray(files) || !files.length) return "unsupported";
+  const can = list => typeof nav.canShare !== "function" || !!nav.canShare({ files: list });
+  let list = files;
+  if (!can(list)) {
+    list = files.filter(f => f && f.type === "text/plain");
+    if (!list.length || !can(list)) return "unsupported";
+  }
+  try {
+    await nav.share({ files: list, title: "Skin Ritual report" });
+    return list.length === files.length ? "shared" : "shared-data-only";
+  } catch (e) {
+    const name = e && e.name;
+    if (name === "AbortError") return "cancelled";
+    if (name === "NotAllowedError") return "needs-tap";
+    return "failed";
+  }
+};
+const ReportButton = ({ profile, tabName }) => {
+  const h = React.createElement;
+  const [status, setStatus] = useState("idle"); // idle | working | ready
+  const [msg, setMsg] = useState("");
+  const pending = useRef(null);
+  // Load the capture library in the background so the tap is fast — a slow
+  // first tap risks the browser no longer counting it as a tap by the time
+  // the share sheet opens.
+  useEffect(() => {
+    const t = setTimeout(() => { loadCaptureLib().catch(() => {}); }, 2500);
+    return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    if (!msg) return;
+    const t = setTimeout(() => setMsg(""), 4000);
+    return () => clearTimeout(t);
+  }, [msg]);
+  const copyFallback = async files => {
+    const data = files.find(f => f.type === "text/plain");
+    try {
+      await navigator.clipboard.writeText(await data.text());
+      setMsg("Copied — paste it into the Claude chat");
+    } catch (e) {
+      setMsg("Couldn't share or copy the report on this device");
+    }
+  };
+  const handle = async (result, files) => {
+    if (result === "needs-tap") {
+      pending.current = files;
+      setStatus("ready");
+      return;
+    }
+    pending.current = null;
+    setStatus("idle");
+    if (result === "shared-data-only") setMsg("Sent the data — the screen image isn't supported here");
+    if (result === "unsupported" || result === "failed") await copyFallback(files);
+  };
+  const onTap = async () => {
+    if (status === "working") return;
+    if (status === "ready" && pending.current) {
+      const files = pending.current;
+      setStatus("working");
+      return handle(await shareReport(files), files);
+    }
+    setStatus("working");
+    const dateEl = document.querySelector("[data-testid=calendar-date]");
+    const meta = {
+      tab: tabName || null,
+      screenDate: dateEl ? dateEl.textContent : null,
+      viewport: { w: window.innerWidth, h: window.innerHeight, scrollY: Math.round(window.scrollY) }
+    };
+    const files = await prepareReportFiles(profile, meta);
+    return handle(await shareReport(files), files);
+  };
+  return h("div", {
+    "data-report-ui": "1",
+    style: { position: "fixed", left: 10, bottom: "calc(14px + env(safe-area-inset-bottom))", zIndex: 1000, display: "flex", alignItems: "center", gap: 8, pointerEvents: "none" }
+  },
+    h("button", {
+      onClick: onTap,
+      "data-testid": "report-button",
+      "aria-label": "Report to Claude",
+      title: "Report to Claude",
+      style: {
+        pointerEvents: "auto",
+        height: 38,
+        minWidth: 38,
+        padding: status === "ready" ? "0 14px" : 0,
+        borderRadius: 100,
+        border: `1.5px solid ${T.accent}`,
+        background: status === "ready" ? T.accent : "rgba(255,255,255,0.92)",
+        color: status === "ready" ? "#fff" : T.accent,
+        boxShadow: "0 2px 10px rgba(44,36,32,0.15)",
+        fontSize: status === "ready" ? 12 : 17,
+        fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif",
+        lineHeight: 1
+      }
+    }, status === "working" ? "…" : status === "ready" ? "Tap to send" : "🐞"),
+    msg && h("div", {
+      "data-testid": "report-msg",
+      style: { pointerEvents: "auto", background: T.text, color: "#fff", fontSize: 12, padding: "7px 11px", borderRadius: 10, maxWidth: 240, fontFamily: "'Inter',sans-serif" }
+    }, msg));
+};
 function App() {
   const [profile, setProfile] = useState(() => {
     const s = load();
@@ -6973,7 +7169,10 @@ function App() {
       background: T.bg,
       fontFamily: "'Inter',sans-serif"
     }
-  }, /*#__PURE__*/React.createElement("style", null, `
+  }, /*#__PURE__*/React.createElement(ReportButton, {
+    profile: profile,
+    tabName: TABS[activeTab]
+  }), /*#__PURE__*/React.createElement("style", null, `
         input:focus,select:focus{border-color:${T.accent}!important;box-shadow:0 0 0 3px ${T.accentSoft}!important;}
         button:hover:not(:disabled){opacity:0.88;transform:translateY(-1px);}
         button:active:not(:disabled){transform:translateY(0);}

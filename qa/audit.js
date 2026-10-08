@@ -102,6 +102,13 @@ function audit(get,profile,planObj,days){
     });
     ['am','pm'].forEach(s=>{if(!sessions.includes(s)&&(c[s]||0)>0)add('high',`freq:${s}`,`"${nameOf(p)}" appears in ${s.toUpperCase()} but is scheduled ${p.session}`)});
   });
+  // R11 no product runs one evening and again the next morning, except the
+  // foundation steps (cleanser, moisturizer, sunscreen)
+  const amKeys=Object.keys(planObj).filter(k=>k.endsWith(':am')).sort();
+  amKeys.forEach(k=>{
+    const d=k.split(':')[0];const prev=get('addDaysStr')(d,-1)+':pm';if(!planObj[prev])return;
+    planObj[k].filter(p=>!['cleanser','cleanser_oil','moisturizer','spf'].includes(get('detectType')(p))).forEach(p=>{if(planObj[prev].some(q=>q.id===p.id))add('high',k,`"${nameOf(p)}" runs in the evening and again the next morning`)});
+  });
   // R10 leave-on active nights back to back (info)
   const keys=Object.keys(planObj).filter(k=>k.endsWith(':pm')).sort();
   let b2b=0;for(let i=1;i<keys.length;i++){const act=k=>planObj[k].some(p=>!RINSE_OFF(p)&&get('conflictGroupsFor')(p).some(g=>g==='retinoid'||g==='acid-exfoliant'));if(act(keys[i])&&act(keys[i-1]))b2b++;}
