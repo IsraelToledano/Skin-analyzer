@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-10.1";
+const APP_VERSION = "2026-10-10.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -617,7 +617,8 @@ const CATEGORY_COLORS = {
 // formula or its fit for combination/oily, blackhead- and scarring-prone
 // skin — not just swap brands — cost at most 2x the product it replaces,
 // and be buyable in Israel, from iHerb, or abroad. A product he already
-// owns qualifies at no extra cost. Each "better" alternative carries
+// owns qualifies at no extra cost — and when one does the job, it is the
+// pick over anything he'd have to buy. Each "better" alternative carries
 // `price` (with his product's price for reference) and `where`; "as-good"
 // is a lateral swap and "no-better-option" records that the market was
 // checked. All fields feed the product detail view and the daily view.
@@ -631,7 +632,7 @@ const RANK_DATA = [
     pros: ["Well-suited retinoid for blackheads, pores, and scarring", "0.3% retinol with 2% niacinamide and 10% glycerin — a gentle, well-tolerated formula", "Speeds cell turnover and evens texture/scarring with consistent use"],
     cons: ["Retinol must be converted twice in the skin before it acts, so per use it is the slowest form of vitamin A for pores and scarring"],
     general: "Over-the-counter retinol (a vitamin A derivative) speeds cell turnover, unclogs pores, and evens texture and scarring over months of consistent use. It needs gradual introduction and daily SPF to avoid irritation and sun sensitivity.",
-    alternatives: [{"name": "Medik8 Crystal Retinal 6", "relation": "better", "price": "~$56 (yours ~$45–70)", "where": "medik8.com, Lookfantastic", "compare": {"this": ["Gentle, cushioned formula with niacinamide", "Cheaper in some pharmacies"], "other": ["Retinaldehyde: one step from the active form, so it works faster than retinol per use", "Retinal also acts against acne bacteria — relevant to blackheads and breakouts", "Stable formula with a clear strength ladder (1→3→6→10) to step up later"]}, "note": "Same job, a more direct route: retinal skips the slowest conversion step that limits retinol, and adds an antibacterial effect retinol lacks — for a similar price."}, {"name": "Differin Gel (adapalene 0.1%)", "relation": "as-good", "note": "Same mechanism and strength tier, widely available OTC — switching to it wouldn't change your results."}] },
+    alternatives: [{"name": "Ret-Avit Tretinoin 0.05%", "relation": "better", "price": "You own it", "where": "Your prescription", "compare": {"this": ["Gentle, cushioned formula with niacinamide", "Over the counter"], "other": ["Tretinoin is the active form itself — retinol and retinal both have to be converted into it", "The best-evidenced topical for blackheads, pores and acne scarring"]}, "note": "With prescription tretinoin on hand, no over-the-counter retinoid adds anything: retinol is a weaker route to the same molecule. When this bottle runs out, it doesn't need replacing."}, {"name": "Differin Gel (adapalene 0.1%)", "relation": "as-good", "note": "Same mechanism and strength tier, widely available OTC — switching to it wouldn't change your results."}] },
   { id: 3, match: ["a313"], tag: "bad",
     pros: ["A genuine retinoid-family ingredient (vitamin A palmitate) with real efficacy for scarring/keratosis on its own"],
     cons: ["A third retinoid product on top of your existing retinol AND tretinoin — pure redundancy", "Raises irritation risk without adding any benefit over what you already have"],
@@ -646,7 +647,7 @@ const RANK_DATA = [
     pros: ["20% L-ascorbic acid with vitamin E and ferulic acid — the proven antioxidant trio for marks and brightening", "Fragrance-free and inexpensive"],
     cons: ["118 ml dropper bottle: L-ascorbic acid oxidizes within a few months of opening, long before the bottle is finished", "Contains witch hazel (astringent) and a little retinol — neither belongs in a morning vitamin C", "20% L-ascorbic acid can sting combination skin"],
     general: "L-ascorbic acid is the most-studied form of vitamin C for brightening and post-acne marks; vitamin E and ferulic acid stabilise it and boost its antioxidant effect. Once opened it oxidizes (turns orange) and loses strength within months.",
-    alternatives: [{"name": "Timeless 20% Vitamin C + E Ferulic Acid", "relation": "better", "price": "~$28 / 30 ml (yours ~$17 / 118 ml)", "where": "iHerb", "compare": {"this": ["Cheaper per bottle", "Same core actives"], "other": ["Same 20% L-ascorbic acid + E + ferulic, with no witch hazel or retinol added", "30 ml — used up while it still works, instead of oxidizing in a big bottle"]}, "note": "A modest but real upgrade: the same proven trio in a clean formula and a size you finish before it oxidizes, so every drop is still active."}] },
+    alternatives: [{"name": "Trader Joe's Vitamin C Serum", "relation": "better", "price": "You own it", "where": "Your shelf", "compare": {"this": ["Cheaper per ml", "Same three actives"], "other": ["15% L-ascorbic acid + 1% vitamin E + 0.5% ferulic — the exact ratio of the most-studied vitamin C serum", "15% is the effective dose with less sting than 20%", "Fragrance-free, no witch hazel or retinol, and a 30 ml bottle you finish before it oxidizes"]}, "note": "It matches the best-evidenced vitamin C formula ratio for ratio, at a gentler strength, without the extras in this one — and you already have it."}] },
   { id: 6, match: ["dermalogica", "microfoliant"], tag: "best",
     pros: ["Gentle enzyme/physical exfoliant well suited to blackheads and pores", "Short contact time (rinse-off, activated with water) limits irritation compared to a leave-on acid"],
     cons: [],
@@ -656,7 +657,7 @@ const RANK_DATA = [
     pros: ["Salicylic acid (BHA) — oil-soluble, so it reaches into pores", "Aimed at oiliness and blackheads"],
     cons: ["Alcohol is the second ingredient — drying for a daily step", "Six essential oils (peppermint, lemongrass, rosemary, geranium, lavender, lemon balm) plus fragrance allergens — irritation risk every morning"],
     general: "A salicylic-acid (BHA) toner in an alcohol and essential-oil base. BHA is oil-soluble, so it penetrates into pores; the alcohol and essential oils are what make it feel fresh, and also what can irritate with daily use.",
-    alternatives: [{"name": "Paula's Choice Skin Balancing Pore-Reducing Toner", "relation": "better", "price": "~$27 / 190 ml (yours ~$30–35 / 200 ml)", "where": "paulaschoice.com, Lookfantastic", "compare": {"this": ["Salicylic acid in the toner itself", "Fresh, astringent feel"], "other": ["Fragrance-free and alcohol-free", "Niacinamide high in the list, plus ceramides — oil and pore control while protecting the barrier", "Your morning SA cleanser delivers the salicylic acid, so the toner doesn't need to"]}, "note": "Same daily role without the daily irritants: drops the alcohol and six essential oils, and adds niacinamide and ceramides that work on oil and pores without drying."}] },
+    alternatives: [{"name": "Anua Heartleaf 77% Soothing Toner", "relation": "better", "price": "You own it", "where": "Your shelf", "compare": {"this": ["Salicylic acid in the toner itself", "Fresh, astringent feel"], "other": ["Fragrance-free and alcohol-free, calms rather than dries", "Your morning SA cleanser already delivers the salicylic acid, so the toner doesn't need to"]}, "note": "The salicylic acid in this toner is a second dose on top of your morning SA cleanser, delivered with alcohol and six essential oils. The Anua does the toner's real job — hydrating and calming — without any of them."}] },
   { id: 8, match: ["skin1004", "cleansing oil"], tag: "good",
     pros: ["Good deep-clean texture for combination skin", "Rinse-off and weekly (not nightly) use meaningfully lowers fragrance-exposure risk"],
     cons: ["Contains fragrance: bergamot, geranium, and rose oils, plus the isolated allergens limonene and linalool"],
@@ -737,6 +738,11 @@ const RANK_DATA = [
     cons: ["Ingredients assumed from the US listing — the Israeli packaging wasn't verified", "Also contains niacinamide, duplicating The Ordinary serum", "The label says twice a day, leave-on — far too much acid on top of your other exfoliants; weekly is plenty"],
     general: "A leave-on exfoliating serum that pairs mild AHAs (glycolic, lactic) with brightening actives — arbutin and tranexamic acid for dark marks, niacinamide, and a peptide. Its distinct value is the pigment-fading pair; the acid part does the same job as your other exfoliants.",
     alternatives: [] },
+  { id: 40, match: ["trader joe", "vitamin c"], tag: "best",
+    pros: ["15% L-ascorbic acid + 1% vitamin E + 0.5% ferulic acid — the same ratio as the most-studied vitamin C serum", "Fragrance-free, with panthenol and hyaluronic acid", "Small 30 ml bottle, used up before it oxidizes"],
+    cons: ["L-ascorbic acid still oxidizes once opened — keep it closed, cool and out of light"],
+    general: "A 15% L-ascorbic acid serum with vitamin E and ferulic acid in the classic 15/1/0.5 ratio, the combination with the strongest evidence for brightening and fading post-acne marks.",
+    alternatives: [{"name": "SkinCeuticals C E Ferulic", "relation": "no-better-option", "compare": {"this": ["Same 15/1/0.5 actives", "A fraction of the price"], "other": ["The original formula, with years of published data"]}, "note": "Same actives in the same ratio; at well over 2x the price the original adds a brand, not a better formula."}] },
   { id: 36, match: ["anua", "hyaluronic"], tag: "good",
     pros: ["Fragrance- and essential-oil-free with mild amino-acid surfactants (cocoyl alaninate, cocoyl glycinate, coco-betaine) — no sulfates", "Squalane, ceramide NP and ectoin add barrier support during the wash, which suits combination skin that also carries retinoid and acid load", "The better evening wash on retinoid and acid nights: it puts no fragrance allergens or exfoliating acids on skin that is about to get a treatment, which the Caudalie gel's six essential oils do"],
     cons: ["A gentle hydrating wash does nothing for blackheads or enlarged pores, which are your main concerns", "The eight hyaluronic acids are dosed at parts-per-billion and rinsed off within a minute — a label claim, not a functional hydration boost"],

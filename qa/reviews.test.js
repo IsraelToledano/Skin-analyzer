@@ -65,4 +65,12 @@ t('re-ranked products: retinol, purifying toner and sun serum have a market upgr
   [2,7,21].forEach(id=>{const r=R.find(x=>x.id===id);assert.strictEqual(r.tag,'good',`#${id}`);assert.ok(r.alternatives.some(a=>a.relation==='better'),`#${id}`)});
   assert.strictEqual(R.find(x=>x.id===34).tag,'best');
 });
+t('when he owns something that does the job, that is the pick (retinol → his tretinoin, vitamin C → his Trader Joe\'s, toner → his Anua)',()=>{
+  [[2,/Ret-Avit/],[5,/Trader Joe's Vitamin C/],[7,/Anua Heartleaf/]].forEach(([id,re])=>{const a=R.find(x=>x.id===id).alternatives.find(x=>x.relation==='better');assert.ok(re.test(a.name),`#${id} → ${a.name}`);assert.ok(/own it/i.test(a.price),`#${id} price`)});
+});
+t('his Trader Joe\'s vitamin C gets its own review, separate from the Trader Joe\'s Dewy serum',()=>{
+  const rank=(g,b)=>get('getProductRank')({id:'x',genericName:g,brandName:b});
+  assert.strictEqual(rank('Vitamin C Serum',"Trader Joe's").id,40);assert.strictEqual(rank('Dewy Skin Serum',"Trader Joe's").id,38);
+  assert.strictEqual(rank('Vitamin C Serum',"Trader Joe's").tag,'best');assert.ok(/15%/.test(JSON.stringify(R.find(x=>x.id===40))));
+});
 console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);
