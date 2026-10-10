@@ -39,7 +39,30 @@ t('each of his scheduled products resolves to a review that has content',()=>{
   prof.products.filter(p=>p.scheduled).forEach(p=>{const r=get('getProductRank')(p);if(!r||!r.id||!(r.general||'').length)missing.push(p.genericName)});
   assert.deepStrictEqual(missing,[]);
 });
-t('Silymarin CF is described with its real 15% vitamin C',()=>{
-  const r=R.find(x=>x.id===5);const a=r.alternatives[0];assert.ok(/15%/.test(JSON.stringify(a))&&!/\b5% L-ascorbic/.test(JSON.stringify(a)));
+console.log('market-relative ranks (2026-10-10)');
+const inLibrary=()=>{const prof=seedProfile(get);return prof.products.map(p=>get('getProductRank')(p)).filter(r=>r&&r.id);};
+const nums=x=>(String(x).match(/\$(\d+(?:\.\d+)?)/g)||[]).map(v=>+v.slice(1));
+t('every "better" pick for a product in his library says what it costs and where to buy it',()=>{
+  const bad=[];inLibrary().forEach(r=>(r.alternatives||[]).filter(a=>a.relation==='better').forEach(a=>{if(!a.price||!a.where)bad.push(`#${r.id} → ${a.name}`)}));
+  assert.deepStrictEqual(bad,[]);
+});
+t('no "better" pick costs more than 2x the product it replaces',()=>{
+  const bad=[];R.forEach(r=>(r.alternatives||[]).filter(a=>a.relation==='better'&&a.price&&!/own it/i.test(a.price)).forEach(a=>{
+    const [alt]=nums(a.price.split('(')[0]);const yours=nums((a.price.split('(')[1]||''));
+    if(!alt||!yours.length)bad.push(`#${r.id} → ${a.name}: unreadable price "${a.price}"`);
+    else if(alt>2*Math.max(...yours))bad.push(`#${r.id} → ${a.name}: $${alt} vs yours $${Math.max(...yours)}`)}));
+  assert.deepStrictEqual(bad,[]);
+});
+t('a "best" product never has a "better" alternative (best means best on the market)',()=>{
+  const bad=R.filter(r=>r.tag==='best'&&(r.alternatives||[]).some(a=>a.relation==='better')).map(r=>`#${r.id}`);
+  assert.deepStrictEqual(bad,[]);
+});
+t('the clinic-price vitamin C pick is gone; the replacement keeps L-ascorbic acid + ferulic',()=>{
+  const r=R.find(x=>x.id===5);assert.ok(!/silymarin/i.test(JSON.stringify(r)));
+  const a=r.alternatives.find(x=>x.relation==='better');assert.ok(/ferulic/i.test(JSON.stringify(a))&&/L-ascorbic/.test(JSON.stringify(a)));
+});
+t('re-ranked products: retinol, purifying toner and sun serum have a market upgrade; the 2% BHA is best',()=>{
+  [2,7,21].forEach(id=>{const r=R.find(x=>x.id===id);assert.strictEqual(r.tag,'good',`#${id}`);assert.ok(r.alternatives.some(a=>a.relation==='better'),`#${id}`)});
+  assert.strictEqual(R.find(x=>x.id===34).tag,'best');
 });
 console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);
