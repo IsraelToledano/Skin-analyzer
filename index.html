@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-10.2";
+const APP_VERSION = "2026-10-12.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -265,6 +265,12 @@ const classifySingletonGroups = p => {
   const type = detectType(p);
   if (LAYER_SINGLETON_TYPES.has(type)) {
     groups.push(`layer:${type}`);
+    // A leave-on hydrating mask (cream, sleeping or sheet mask — anything
+    // not washed off, with no treatment active) is the night's hydration
+    // layer: a hydrating essence/serum under it does the same job twice.
+    // It shares the essence's one-per-night slot, so the essence sits out
+    // on mask nights and an added mask takes its place.
+    if (type === "mask" && !isWashOffMask(p) && !groups.some(g => !g.startsWith("layer:"))) groups.push("layer:essence");
   } else if (type === "mist") {
     // A thermal-water/mist spray (detectType checks "thermal|spring
     // water|mist|spray" BEFORE the plain "toner" keyword match, so a

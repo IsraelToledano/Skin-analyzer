@@ -82,7 +82,10 @@ function audit(get,profile,planObj,days){
     Object.entries(groups).filter(([,m])=>m.length>1).forEach(([g,m])=>{
       const c=m.map(p=>(counts[p.id]||{})[s]||0);const tot=c.reduce((a,b)=>a+b,0);
       info.push(`${s.toUpperCase()} ${g}: ${m.map((p,i)=>`${p.genericName.slice(0,18)} ${c[i]}`).join(', ')}`);
-      if(tot<days*0.9)add('med',`freq:${s}`,`${g} slot filled only ${tot}/${days} ${s.toUpperCase()}s`);
+      // the slot counts as filled by anything that holds it that night (a
+      // leave-on hydrating mask fills the essence slot)
+      const filled=Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('classifySingletonGroups')(p).includes(g))).length;
+      if(filled<days*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days} ${s.toUpperCase()}s`);
       if(Math.max(...c)-Math.min(...c)>Math.max(3,tot/m.length*0.35))add('med',`freq:${s}`,`${g} alternation uneven: ${c.join('/')}`);
     });
   });

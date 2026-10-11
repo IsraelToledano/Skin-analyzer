@@ -54,6 +54,25 @@ t('a skipped step carried into a night with a clashing added step waits another 
   assert.ok(!sc[d1].some(e=>e.productId===60),'carried retinol stacked onto the clay night');
   assert.ok(sc[d2].some(e=>e.productId===60&&e.carried),'carried retinol did not arrive the day after');
 });
+console.log('leave-on hydrating mask');
+t('a leave-on hydrating mask takes the essence step\'s place; a clay mask does not',()=>{
+  const hyal=P(18,'Hydrating Serum','pm','daily',{brandName:'The Ordinary Marine Hyaluronics'});
+  assert.deepStrictEqual(A.computeAddStepBumps(cream,'add',null,[cl,hyal,mo],ctx),[18]);
+  assert.deepStrictEqual(A.computeAddStepBumps(cream,'add',null,[cl,ess,mo],ctx),[17]);
+  assert.deepStrictEqual(A.computeAddStepBumps(clay,'add',null,[cl,ess,mo],ctx),[]);
+});
+t('the scheduler never puts an essence on a hydrating-mask night',()=>{
+  const prods=[cl,ess,mo,{...cream,frequency:'weekly',rotationRole:'none'}];
+  const sc=A.buildSessionSchedule(prods,[],'pm',T,A.addDaysStr(T,27),A.SESSION_CAP,[],[]);
+  const nights=Object.keys(sc).filter(d=>sc[d].some(e=>e.productId===10));
+  assert.ok(nights.length>=3,'mask nights: '+nights.length);
+  nights.forEach(d=>assert.ok(!sc[d].some(e=>e.productId===17),'essence with the mask on '+d));
+  assert.ok(Object.keys(sc).filter(d=>!nights.includes(d)).every(d=>sc[d].some(e=>e.productId===17)),'essence missing on a non-mask night');
+});
+t('lip masks and treatment masks are not counted as the hydration layer',()=>{
+  assert.ok(!A.classifySingletonGroups(P(16,'overnight lip sleeping mask','pm','daily',{brandName:'Petitfée Oil Blossom Lip Mask'})).includes('layer:essence'));
+  [clay,P(32,'Masque Instant Détox','pm','weekly',{brandName:'Caudalie'}),P(24,'Clay/Pore Cleansing Mask','pm','weekly',{brandName:'Beauty of Joseon Red Bean Refreshing Pore Mask'})].forEach(p=>assert.ok(!A.classifySingletonGroups(p).includes('layer:essence'),p.genericName));
+});
 console.log('failure cases');
 t('explain handles unknown ids and empty input',()=>{assert.deepStrictEqual(A.explainAddStepBumps(clay,[999],[cl]),[]);assert.deepStrictEqual(A.explainAddStepBumps(null,[1],[cl]),[]);assert.deepStrictEqual(A.explainAddStepBumps(clay,null,null),[])});
 t('bumps on an empty day',()=>assert.deepStrictEqual(A.computeAddStepBumps(clay,'add',null,[],ctx),[]));
