@@ -40,6 +40,25 @@ t('a step added by hand in the evening also sits out the next morning',()=>{
   const pins=[{date:y,session:'pm',productId:7}];
   assert.ok(has(build(busy,'pm',20,pins),y,7));assert.ok(!has(build(busy,'am',20,pins),add(y,1),7),'still on the next morning');
 });
+t('a logged evening counts what actually ran: on the plan but not used → it can run this morning',()=>{
+  const busy=[...prods,P(20,'Peptide Serum','pm','daily'),P(21,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'}),P(22,'Squalane Face Oil','pm','daily')];
+  const pm=build(busy,'pm',20);const y=Object.keys(pm).sort().find(d=>d>=T&&has(pm,d,7));assert.ok(y);const d=add(y,1);
+  const notUsed=[{date:y,session:'pm',productId:1,done:true},{date:y,session:'pm',productId:5,done:true}];
+  assert.ok(has(build(busy,'am',20,[],notUsed),d,7),'still kept out although it never ran');
+  const skipped=[...notUsed,{date:y,session:'pm',productId:7,done:false,skipped:true}];
+  assert.ok(has(build(busy,'am',20,[],skipped),d,7),'kept out after being skipped');
+  const used=[...notUsed,{date:y,session:'pm',productId:7,done:true}];
+  assert.ok(!has(build(busy,'am',20,[],used),d,7),'ran last night and again this morning');
+  assert.ok(!has(build(busy,'am',20,[],[]),d,7),'an unlogged night should go by the plan');
+});
+t('his morning of Oct 12: niacinamide is back after a mask night it never ran on',()=>{
+  const ess=P(17,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'});
+  const mask=P(10,'hydrating cream mask','pm','weekly',{brandName:'Caudalie VinoHydra Masque-Crème Hydratant',rotationRole:'none',scheduled:false,nextDate:''});
+  const lib=[cl,mo,spf,nia,ess,mask,P(20,'Peptide Serum','pm','daily'),P(22,'Squalane Face Oil','pm','daily')];
+  const y=add(T,3),d=add(T,4);const pins=[{date:y,session:'pm',productId:10,bumps:[]}];
+  const logs=[1,5,10].map(id=>({date:y,session:'pm',productId:id,done:true}));
+  assert.ok(has(build(lib,'am',8,pins,logs),d,7));
+});
 t('his library: the 30-day plan has no evening-then-morning repeat and passes the audit',()=>{
   const prof=seedProfile(get);const pl=plan(get,prof,30);const r=audit(get,prof,pl,30);
   assert.deepStrictEqual(r.issues.filter(i=>i.sev==='high').map(i=>i.msg),[]);

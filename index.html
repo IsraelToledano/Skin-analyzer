@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-12.1";
+const APP_VERSION = "2026-10-12.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3586,8 +3586,16 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       if (role) pinnedRoleOn[role] = ds;
     });
     if (pmPlan) {
-      (pmPlan[addDaysStr(ds, -1)] || []).forEach(e => {
-        if (!placedIds.has(e.productId) && blockedMorningAfter(byId.get(e.productId))) excludedToday.add(e.productId);
+      // What actually ran last night, when that night was logged: a step
+      // that was on the plan but never used (skipped, or added to the plan
+      // after the evening was done) doesn't keep it out of this morning.
+      // An unlogged night (the future, or a night not ticked off) goes by
+      // the plan.
+      const prevPm = addDaysStr(ds, -1);
+      const prevLogs = logs.filter(l => l.date === prevPm && l.session === "pm");
+      const ranLastNight = prevLogs.length ? new Set(prevLogs.filter(l => l.done).map(l => l.productId)) : new Set((pmPlan[prevPm] || []).map(e => e.productId));
+      ranLastNight.forEach(id => {
+        if (!placedIds.has(id) && blockedMorningAfter(byId.get(id))) excludedToday.add(id);
       });
     }
     excludedToday.forEach(id => { if (placedIds.has(id)) excludedToday.delete(id); });
