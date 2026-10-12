@@ -29,9 +29,9 @@ t('the evening plan is unchanged by the rule (it only looks backwards from the m
   assert.deepStrictEqual(pm,pm2);
 });
 t('a step added by hand to the morning still shows, even after it ran the night before',()=>{
-  const pm=build(prods,'pm',5);const y=Object.keys(pm).sort().find(d=>d>=T&&has(pm,d,7));assert.ok(y);
-  const d=add(y,1);const am=build(prods,'am',8,[{date:d,session:'am',productId:7}]);
-  assert.ok(has(am,d,7));
+  const pm=build(prods,'pm',5);const y=Object.keys(pm).sort().find(d=>d>=T&&has(pm,d,2));assert.ok(y);
+  const d=add(y,1);const am=build(prods,'am',8,[{date:d,session:'am',productId:2}]);
+  assert.ok(has(am,d,2));
 });
 t('a step added by hand in the evening also sits out the next morning',()=>{
   const busy=[...prods,P(20,'Peptide Serum','pm','daily'),P(21,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'}),P(22,'Squalane Face Oil','pm','daily')];
@@ -41,15 +41,17 @@ t('a step added by hand in the evening also sits out the next morning',()=>{
   assert.ok(has(build(busy,'pm',20,pins),y,7));assert.ok(!has(build(busy,'am',20,pins),add(y,1),7),'still on the next morning');
 });
 t('a logged evening counts what actually ran: on the plan but not used → it can run this morning',()=>{
+  // evenings in the past (today is later than all of them)
+  const gL=require('./sim').load([2026,11,1]);const build=(prods,s,days=30,pins=[],logs=[])=>gL('buildSessionSchedule')(prods,logs,s,gL('computeEpoch')(prods,s),add(T,days-1),cap,pins,[]);
   const busy=[...prods,P(20,'Peptide Serum','pm','daily'),P(21,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'}),P(22,'Squalane Face Oil','pm','daily')];
-  const pm=build(busy,'pm',20);const y=Object.keys(pm).sort().find(d=>d>=T&&has(pm,d,7));assert.ok(y);const d=add(y,1);
+  const pm=build(busy,'pm',20);const y=Object.keys(pm).sort().find(d=>d>=T&&has(pm,d,2));assert.ok(y);const d=add(y,1);
   const notUsed=[{date:y,session:'pm',productId:1,done:true},{date:y,session:'pm',productId:5,done:true}];
-  assert.ok(has(build(busy,'am',20,[],notUsed),d,7),'still kept out although it never ran');
-  const skipped=[...notUsed,{date:y,session:'pm',productId:7,done:false,skipped:true}];
-  assert.ok(has(build(busy,'am',20,[],skipped),d,7),'kept out after being skipped');
-  const used=[...notUsed,{date:y,session:'pm',productId:7,done:true}];
-  assert.ok(!has(build(busy,'am',20,[],used),d,7),'ran last night and again this morning');
-  assert.ok(!has(build(busy,'am',20,[],[]),d,7),'an unlogged night should go by the plan');
+  assert.ok(has(build(busy,'am',20,[],notUsed),d,2),'still kept out although it never ran');
+  const skipped=[...notUsed,{date:y,session:'pm',productId:2,done:false,skipped:true}];
+  assert.ok(has(build(busy,'am',20,[],skipped),d,2),'kept out after being skipped');
+  const used=[...notUsed,{date:y,session:'pm',productId:2,done:true}];
+  assert.ok(!has(build(busy,'am',20,[],used),d,2),'ran last night and again this morning');
+  assert.ok(!has(build(busy,'am',20,[],[]),d,2),'an unlogged night should go by the plan');
 });
 t('his morning of Oct 12: niacinamide is back after a mask night it never ran on',()=>{
   const ess=P(17,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'});
@@ -58,6 +60,29 @@ t('his morning of Oct 12: niacinamide is back after a mask night it never ran on
   const y=add(T,3),d=add(T,4);const pins=[{date:y,session:'pm',productId:10,bumps:[]}];
   const logs=[1,5,10].map(id=>({date:y,session:'pm',productId:id,done:true}));
   assert.ok(has(build(lib,'am',8,pins,logs),d,7));
+});
+t('a treatment serum set to both sessions runs once a day — mornings — never morning and evening',()=>{
+  const am=build(prods,'am',30),pm=build(prods,'pm',30);
+  for(let i=0;i<30;i++){const d=add(T,i);assert.ok(!has(pm,d,7),'niacinamide in the evening '+d)}
+  assert.ok(Object.keys(am).filter(d=>d>=T&&has(am,d,7)).length>=25,'niacinamide missing from most mornings');
+  assert.ok(Object.keys(pm).some(d=>has(pm,d,2)),'a both-session toner still runs in the evening');
+});
+t('niacinamide_once_a_day_v1 moves a both-session niacinamide to mornings, once, and leaves others alone',()=>{
+  const m=get('MIGRATIONS').find(x=>x.id==='niacinamide_once_a_day_v1');
+  const out=m.apply({products:[nia,ton,mo]});assert.strictEqual(out.products[0].session,'am');assert.strictEqual(out.products[1].session,'both');assert.strictEqual(out.products[2].session,'both');
+  assert.strictEqual(m.apply(out),out);const pmOnly={products:[{...nia,session:'pm'}]};assert.strictEqual(m.apply(pmOnly),pmOnly);const e={};assert.strictEqual(m.apply(e),e);
+});
+t('the audit flags a treatment active running morning and evening the same day',()=>{
+  const fake={[`${T}:am`]:[cl,nia,mo,spf],[`${T}:pm`]:[cl,nia,mo]};
+  assert.ok(audit(get,{products:prods},fake,1).issues.some(i=>/morning and again that evening/.test(i.msg)));
+});
+t('tonight, half ticked off, still keeps tonight\'s steps out of tomorrow morning',()=>{
+  const g2=require('./sim').load([2026,8,22]);const today=g2('todayStr')();const tomorrow=g2('addDaysStr')(today,1);
+  const b=(lg)=>g2('buildSessionSchedule')(prods,lg,'am',g2('computeEpoch')(prods,'am'),g2('addDaysStr')(today,3),g2('SESSION_CAP'),[],[]);
+  const pmP=g2('buildSessionSchedule')(prods,[],'pm',g2('computeEpoch')(prods,'pm'),g2('addDaysStr')(today,3),g2('SESSION_CAP'),[],[]);
+  assert.ok((pmP[today]||[]).some(e=>e.productId===2),'fixture: toner tonight');
+  const partly=[{date:today,session:'pm',productId:1,done:true}];
+  assert.ok(!(b(partly)[tomorrow]||[]).some(e=>e.productId===2),'toner tomorrow morning after tonight');
 });
 t('his library: the 30-day plan has no evening-then-morning repeat and passes the audit',()=>{
   const prof=seedProfile(get);const pl=plan(get,prof,30);const r=audit(get,prof,pl,30);

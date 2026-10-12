@@ -114,6 +114,11 @@ function audit(get,profile,planObj,days){
     const skippedPm=id=>(profile.logs||[]).some(l=>l&&l.date===prev.split(':')[0]&&l.session==='pm'&&l.productId===id&&l.skipped&&!l.done);
     planObj[k].filter(p=>!['cleanser','cleanser_oil','moisturizer','spf'].includes(get('detectType')(p))&&!skippedPm(p.id)).forEach(p=>{if(planObj[prev].some(q=>q.id===p.id))add('high',k,`"${nameOf(p)}" runs in the evening and again the next morning`)});
   });
+  // R12 a leave-on treatment active runs at most once a day
+  amKeys.forEach(k=>{
+    const d=k.split(':')[0];const pm=planObj[d+':pm'];if(!pm)return;
+    planObj[k].filter(p=>!RINSE_OFF(p)&&get('classifyActiveGroups')(p).length>0).forEach(p=>{if(pm.some(q=>q.id===p.id))add('high',k,`"${nameOf(p)}" runs in the morning and again that evening`)});
+  });
   // R10 leave-on active nights back to back (info)
   const keys=Object.keys(planObj).filter(k=>k.endsWith(':pm')).sort();
   let b2b=0;for(let i=1;i<keys.length;i++){const act=k=>planObj[k].some(p=>!RINSE_OFF(p)&&get('conflictGroupsFor')(p).some(g=>g==='retinoid'||g==='acid-exfoliant'));if(act(keys[i])&&act(keys[i-1]))b2b++;}

@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-12.5";
+const APP_VERSION = "2026-10-12.7";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2817,6 +2817,20 @@ const MIGRATIONS = [{
     };
   }
 }, {
+  id: "niacinamide_once_a_day_v1",
+  // 2026-10-12: The Ordinary Niacinamide ran in the morning and again the
+  // same evening. A treatment serum runs once a day; with "no evening step
+  // repeats the next morning" also in force, the only steady pattern is one
+  // fixed session. Mornings: the evening is already at its step cap, and
+  // niacinamide rests on the two vitamin C mornings a week. Only changes a
+  // niacinamide product still set to "both"; a session set by hand stays.
+  apply: profile => {
+    const isNiacinamide = p => /niacinamide/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+    const ids = new Set((profile.products || []).filter(p => p.scheduled && p.session === "both" && isNiacinamide(p) && detectType(p) === "niacinamide").map(p => p.id));
+    if (!ids.size) return profile;
+    return { ...profile, products: profile.products.map(p => ids.has(p.id) ? { ...p, session: "am" } : p) };
+  }
+}, {
   id: "drop_routine_sync_v1",
   // The Update routine button is gone (an added step now updates its own
   // routine and the ones after it directly — buildSessionSchedule step 1b), so its comparison
@@ -3474,7 +3488,12 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // the night before sits out the next morning. Built with the same epoch
   // the evening view uses, so both agree on what ran.
   const pmPlan = session === "am" ? buildSessionSchedule(products, logs, "pm", computeEpoch(products || [], "pm"), toDate, cap, pins, procedures) : null;
-  const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both"));
+  // A leave-on treatment active (niacinamide, vitamin C, retinoid, acid)
+  // runs once a day. Set to "both" sessions, it would run morning and
+  // evening the same day — and the evening run then keeps it out of the
+  // next morning — so it belongs to the morning only.
+  const onceADayActive = p => p.session === "both" && !isRinseOffProduct(p) && classifyActiveGroups(p).length > 0;
+  const sessionProducts = products.filter(p => p.scheduled && (p.session === session || p.session === "both" && !(session === "pm" && onceADayActive(p))));
   // Rotation-pool members (see ROTATION_CATEGORY_ROLES / step 2d below) are
   // scheduled exclusively through the dedicated pool logic — excluding
   // them here stops them from ALSO being picked up by the normal
@@ -3615,7 +3634,10 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       const prevLogs = logs.filter(l => l.date === prevPm && l.session === "pm");
       const doneLastNight = prevLogs.filter(l => l.done).map(l => l.productId);
       const skippedLastNight = new Set(prevLogs.filter(l => l.skipped && !l.done).map(l => l.productId));
-      const ranLastNight = doneLastNight.length ? new Set(doneLastNight) : new Set((pmPlan[prevPm] || []).map(e => e.productId).filter(id => !skippedLastNight.has(id)));
+      // Tonight's evening is still in progress until the day is over, so
+      // its ticks so far don't yet say what will run: it goes by the plan.
+      const eveningOver = prevPm < todayStr();
+      const ranLastNight = eveningOver && doneLastNight.length ? new Set(doneLastNight) : new Set((pmPlan[prevPm] || []).map(e => e.productId).filter(id => !skippedLastNight.has(id)));
       ranLastNight.forEach(id => {
         if (!placedIds.has(id) && blockedMorningAfter(byId.get(id))) excludedToday.add(id);
       });
