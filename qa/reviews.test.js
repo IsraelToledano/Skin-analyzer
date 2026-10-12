@@ -73,4 +73,9 @@ t('his Trader Joe\'s vitamin C gets its own review, separate from the Trader Joe
   assert.strictEqual(rank('Vitamin C Serum',"Trader Joe's").id,40);assert.strictEqual(rank('Dewy Skin Serum',"Trader Joe's").id,38);
   assert.strictEqual(rank('Vitamin C Serum',"Trader Joe's").tag,'best');assert.ok(/15%/.test(JSON.stringify(R.find(x=>x.id===40))));
 });
+t('the Red Bean pore mask review reflects its checked INCI (fragrance-free, kaolin)',()=>{
+  const r=R.find(x=>x.id===24);assert.strictEqual(r.tag,'best');assert.ok(/fragrance/i.test(r.pros.join(' '))&&/kaolin/i.test(r.general));
+  assert.ok(!(r.alternatives||[]).some(a=>a.relation==='better'));
+  assert.strictEqual(get('getProductRank')({id:'x',genericName:'Clay/Pore Cleansing Mask',brandName:'Beauty of Joseon Red Bean Refreshing Pore Mask'}).id,24);
+});
 console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);

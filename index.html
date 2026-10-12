@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-12.4";
+const APP_VERSION = "2026-10-12.5";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -734,11 +734,11 @@ const RANK_DATA = [
     cons: ["Pure bentonite with nothing to buffer it — the most drying of your clay masks", "The jar says to mix it with apple cider vinegar — don't: that puts acid on your skin on the mask night. Mix it with plain water"],
     general: "Bentonite clay masks draw out oil and impurities via absorption — effective for blackheads and oily T-zones used occasionally, since they're drying with regular use.",
     alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "price": "You own it", "where": "Your shelf", "compare": {"this": ["Stronger oil absorption — pure bentonite", "Very cheap per use, fragrance-free"], "other": ["Ready-made cream, nothing to mix", "Blended clay with caffeine and grape — less tightening and redness", "Fragrance- and essential-oil-free (confirmed)"]}, "note": "Pure bentonite is the most drying clay there is. On skin that gets acids and retinoids most nights, the gentler blended clay gives you the same oil and pore benefit with less barrier stress."}] },
-  { id: 24, match: ["beauty of joseon", "pore mask"], tag: "good",
-    pros: ["Gentle pore-refining clay mask", "Clay-based, functionally solid for oil/debris absorption"],
-    cons: ["Overlaps with Aztec Secret Clay for the same purpose — no reason to run both"],
-    general: "A clay-based pore-refining mask, functionally similar to other bentonite/kaolin clay masks — draws out oil and debris with occasional use.",
-    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "better", "price": "You own it", "where": "Your shelf", "compare": {"this": ["Gentler than pure clay — easy to tolerate", "Ready to use"], "other": ["Caffeine and grape added to the clay", "Fragrance- and essential-oil-free (confirmed)"]}, "note": "Both are ready-made wash-off clay masks for the same job. The Caudalie's full ingredient list was checked and is fragrance-free; this one's wasn't. It's a small edge, not a big gap."}] },
+  { id: 24, match: ["beauty of joseon", "pore mask"], tag: "best",
+    pros: ["Fragrance-, essential-oil- and alcohol-free (full INCI checked)", "Kaolin plus fine red bean powder — absorbs oil and gently polishes in one rinse-off step", "Glycerin-rich base, so it doesn't leave combination skin tight the way pure clay does"],
+    cons: ["Kaolin only, no bentonite — absorbs less oil per use than a stronger clay"],
+    general: "A wash-off kaolin clay mask with red bean (adzuki) powder and extract in a glycerin-rich, fragrance-free base. It draws oil and debris from pores and lightly buffs the surface while staying gentle enough for combination skin.",
+    alternatives: [{"name": "Caudalie Masque Instant Détox", "relation": "as-good", "compare": {"this": ["Gentle buffing from red bean powder", "Cheaper per use"], "other": ["Pink clay with caffeine and grape", "Also fragrance-free"]}, "note": "Two fragrance-free wash-off clay masks for the same job — different textures, same result. Nothing in the market at up to twice the price is clearly better for oily, pore-prone skin without being harsher."}] },
   { id: 39, match: ["one step peel"], tag: "good",
     pros: ["Arbutin plus tranexamic acid — two different ways of fading post-acne marks", "Mild mixed-AHA exfoliation (glycolic and lactic) rather than a single strong acid"],
     cons: ["Ingredients assumed from the US listing — the Israeli packaging wasn't verified", "Also contains niacinamide, duplicating The Ordinary serum", "The label says twice a day, leave-on — far too much acid on top of your other exfoliants; weekly is plenty"],
