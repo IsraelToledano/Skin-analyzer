@@ -110,7 +110,9 @@ function audit(get,profile,planObj,days){
   const amKeys=Object.keys(planObj).filter(k=>k.endsWith(':am')).sort();
   amKeys.forEach(k=>{
     const d=k.split(':')[0];const prev=get('addDaysStr')(d,-1)+':pm';if(!planObj[prev])return;
-    planObj[k].filter(p=>!['cleanser','cleanser_oil','moisturizer','spf'].includes(get('detectType')(p))).forEach(p=>{if(planObj[prev].some(q=>q.id===p.id))add('high',k,`"${nameOf(p)}" runs in the evening and again the next morning`)});
+    // a step skipped that evening never ran, so it may run the next morning
+    const skippedPm=id=>(profile.logs||[]).some(l=>l&&l.date===prev.split(':')[0]&&l.session==='pm'&&l.productId===id&&l.skipped&&!l.done);
+    planObj[k].filter(p=>!['cleanser','cleanser_oil','moisturizer','spf'].includes(get('detectType')(p))&&!skippedPm(p.id)).forEach(p=>{if(planObj[prev].some(q=>q.id===p.id))add('high',k,`"${nameOf(p)}" runs in the evening and again the next morning`)});
   });
   // R10 leave-on active nights back to back (info)
   const keys=Object.keys(planObj).filter(k=>k.endsWith(':pm')).sort();

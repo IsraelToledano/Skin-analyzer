@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-12.2";
+const APP_VERSION = "2026-10-12.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2798,6 +2798,25 @@ const MIGRATIONS = [{
     };
   }
 }, {
+  id: "finish_caudalie_purifying_toner_v1",
+  // Explicit request (2026-10-12): the Caudalie Vinopure Purifying Toner is
+  // used up. Removed for real, once, and kept in removedProducts with its
+  // usage history — same pattern as finish_yeouth_niacinamide_v1. Mornings
+  // fall to the Anua Heartleaf toner (already scheduled both sessions),
+  // which is the product's own "better" pick; the salicylic acid it carried
+  // still comes from the morning SA cleanser.
+  apply: profile => {
+    const isTarget = p => /caudalie/i.test([p.genericName, p.brandName].join(" ")) && /purifying toner/i.test([p.genericName, p.brandName].join(" "));
+    const products = profile.products || [];
+    const victim = products.find(isTarget);
+    if (!victim) return profile;
+    return {
+      ...profile,
+      products: products.filter(p => p.id !== victim.id),
+      removedProducts: [{ ...victim, removedAt: todayStr() }, ...(profile.removedProducts || []).filter(p => p.id !== victim.id)].slice(0, TRASH_LIMIT)
+    };
+  }
+}, {
   id: "drop_routine_sync_v1",
   // The Update routine button is gone (an added step now updates its own
   // routine and the ones after it directly — buildSessionSchedule step 1b), so its comparison
@@ -3586,14 +3605,17 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       if (role) pinnedRoleOn[role] = ds;
     });
     if (pmPlan) {
-      // What actually ran last night, when that night was logged: a step
-      // that was on the plan but never used (skipped, or added to the plan
-      // after the evening was done) doesn't keep it out of this morning.
-      // An unlogged night (the future, or a night not ticked off) goes by
-      // the plan.
+      // What actually ran last night. When steps were ticked off that night,
+      // the ticked ones are what ran — a step on the plan that was never
+      // used (added to the plan after the evening was done, or left
+      // unticked) doesn't keep it out of this morning. A night with nothing
+      // ticked (the future, or not tracked) goes by the plan, minus any
+      // step explicitly skipped.
       const prevPm = addDaysStr(ds, -1);
       const prevLogs = logs.filter(l => l.date === prevPm && l.session === "pm");
-      const ranLastNight = prevLogs.length ? new Set(prevLogs.filter(l => l.done).map(l => l.productId)) : new Set((pmPlan[prevPm] || []).map(e => e.productId));
+      const doneLastNight = prevLogs.filter(l => l.done).map(l => l.productId);
+      const skippedLastNight = new Set(prevLogs.filter(l => l.skipped && !l.done).map(l => l.productId));
+      const ranLastNight = doneLastNight.length ? new Set(doneLastNight) : new Set((pmPlan[prevPm] || []).map(e => e.productId).filter(id => !skippedLastNight.has(id)));
       ranLastNight.forEach(id => {
         if (!placedIds.has(id) && blockedMorningAfter(byId.get(id))) excludedToday.add(id);
       });
