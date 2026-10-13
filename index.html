@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-12.7";
+const APP_VERSION = "2026-10-14.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2831,6 +2831,19 @@ const MIGRATIONS = [{
     return { ...profile, products: profile.products.map(p => ids.has(p.id) ? { ...p, session: "am" } : p) };
   }
 }, {
+  id: "ginseng_bigger_share_v1",
+  // Explicit request (2026-10-14): use the Beauty of Joseon Ginseng Essence
+  // Water more often. It shares the one-per-night essence slot with the
+  // Snail 96 Essence and Marine Hyaluronics; a share weight of 2 gives it
+  // about half of those nights instead of a third. All three stay in the
+  // rotation. Only sets the weight where none was set by hand.
+  apply: profile => {
+    const isGinseng = p => /ginseng/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+    const target = (profile.products || []).find(p => isGinseng(p) && p.shareWeight === undefined);
+    if (!target) return profile;
+    return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, shareWeight: 2 } : p) };
+  }
+}, {
   id: "drop_routine_sync_v1",
   // The Update routine button is gone (an added step now updates its own
   // routine and the ones after it directly — buildSessionSchedule step 1b), so its comparison
@@ -3481,6 +3494,7 @@ const groupRotating = rotating => {
 // sunscreen), which belong in every session.
 const MORNING_AFTER_EXEMPT_TYPES = new Set(["cleanser", "cleanser_oil", "moisturizer", "spf"]);
 const blockedMorningAfter = p => !!p && !MORNING_AFTER_EXEMPT_TYPES.has(detectType(p));
+const shareWeightOf = p => typeof p.shareWeight === "number" && p.shareWeight > 0 ? p.shareWeight : 1;
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = [], procedures = []) => {
   logs = (logs || []).filter(Boolean);
   pins = (pins || []).filter(Boolean);
@@ -3930,10 +3944,13 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
             // and can go unscheduled far longer than intended. A ratio
             // means "half again as overdue as your own interval" scores
             // the same whether that's a weekly or a monthly product.
-            bestOverdue = Math.max(bestOverdue, (since - iv) / iv);
+            // shareWeight > 1 gives a product a bigger share of a slot it
+            // shares with others (e.g. the essence rotation): its wait
+            // counts for more and its uses for less.
+            bestOverdue = Math.max(bestOverdue, (since - iv) / iv * shareWeightOf(p));
           }
           minStepOrder = Math.min(minStepOrder, p.stepOrder || 0);
-          minServedCount = Math.min(minServedCount, servedCount[p.id] || 0);
+          minServedCount = Math.min(minServedCount, (servedCount[p.id] || 0) / shareWeightOf(p));
         });
         return anyDue ? {
           members,

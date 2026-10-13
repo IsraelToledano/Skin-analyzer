@@ -86,7 +86,10 @@ function audit(get,profile,planObj,days){
       // leave-on hydrating mask fills the essence slot)
       const filled=Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('classifySingletonGroups')(p).includes(g))).length;
       if(filled<days*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days} ${s.toUpperCase()}s`);
-      if(Math.max(...c)-Math.min(...c)>Math.max(3,tot/m.length*0.35))add('med',`freq:${s}`,`${g} alternation uneven: ${c.join('/')}`);
+      // fair turns are judged per unit of share: a product with shareWeight 2
+      // is meant to get about twice the nights of its peers
+      const w=m.map(p=>get('shareWeightOf')(p)),wt=w.reduce((a,b)=>a+b,0),n=c.map((x,i)=>x/w[i]*wt/m.length);
+      if(Math.max(...n)-Math.min(...n)>Math.max(3,tot/m.length*0.35))add('med',`freq:${s}`,`${g} alternation uneven: ${c.join('/')}`);
     });
   });
   // c) everything else: its own frequency
