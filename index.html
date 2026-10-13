@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-14.1";
+const APP_VERSION = "2026-10-14.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -237,7 +237,9 @@ const productsConflict = (p1, p2) => groupsConflict(conflictGroupsFor(p1), confl
 // They alternate through the existing fairness tiebreak instead.
 // "mask": one mask per session. The add-step simulation found adding a clay
 // mask on the hydrating-mask night left two masks in the same evening.
-const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer", "cleanser", "mask"]);
+// selftan: two self-tanners on one night just double the colour, so they
+// take turns (added with the Tan-Luxe drops, 2026-10-14).
+const LAYER_SINGLETON_TYPES = new Set(["toner", "essence", "moisturizer", "cleanser", "mask", "selftan"]);
 // A "serum" that carries no treatment active of its own — just a
 // humectant/hydrator — is functionally an essence wearing a different
 // label. COSRX Snail 96 Essence and The Ordinary Marine Hyaluronics do
@@ -744,6 +746,11 @@ const RANK_DATA = [
     cons: ["Ingredients assumed from the US listing — the Israeli packaging wasn't verified", "Also contains niacinamide, duplicating The Ordinary serum", "The label says twice a day, leave-on — far too much acid on top of your other exfoliants; weekly is plenty"],
     general: "A leave-on exfoliating serum that pairs mild AHAs (glycolic, lactic) with brightening actives — arbutin and tranexamic acid for dark marks, niacinamide, and a peptide. Its distinct value is the pigment-fading pair; the acid part does the same job as your other exfoliants.",
     alternatives: [] },
+  { id: 41, match: ["tan-luxe", "the face"], tag: "good",
+    pros: ["Mixes into the moisturizer you already use, so it adds no extra layer", "DHA plus erythrulose gives a more even, gradual colour than DHA alone", "Adjustable: the number of drops sets the depth"],
+    cons: ["Contains fragrance (parfum plus limonene, geraniol, hexyl cinnamal, benzyl salicylate) and denatured alcohol high in the list — can irritate and dry", "Raspberry seed oil and polysorbate 80 are flagged as not safe for fungal acne"],
+    general: "A clear self-tan concentrate: DHA and erythrulose stain the top layer of skin, with raspberry seed oil, aloe and vitamin E in a water-alcohol base. Purely cosmetic. Like any self-tan, it fades faster and patchier on nights with retinoids or acids, so it gets its own active-free night.",
+    alternatives: [{ name: "St. Tropez Purity Vitamins Bronzing Water Serum", relation: "as-good", price: "You own it", where: "Your shelf", note: "Same job, same mix-into-moisturizer use. The two take turns on self-tan nights; neither is clearly better for your skin." }] },
   { id: 40, match: ["trader joe", "vitamin c"], tag: "best",
     pros: ["15% L-ascorbic acid + 1% vitamin E + 0.5% ferulic acid — the same ratio as the most-studied vitamin C serum", "Fragrance-free, with panthenol and hyaluronic acid", "Small 30 ml bottle, used up before it oxidizes"],
     cons: ["L-ascorbic acid still oxidizes once opened — keep it closed, cool and out of light"],
@@ -2842,6 +2849,33 @@ const MIGRATIONS = [{
     const target = (profile.products || []).find(p => isGinseng(p) && p.shareWeight === undefined);
     if (!target) return profile;
     return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, shareWeight: 2 } : p) };
+  }
+}, {
+  id: "add_tan_luxe_the_face_v1",
+  // Explicit request (2026-10-14): add Tan-Luxe THE FACE Illuminating
+  // Self-Tan Drops. Mixed into the evening moisturizer (step 75, same as the
+  // St. Tropez serum), weekly, on its own active-free night — the self-tan
+  // conflict rules keep retinoids, acids and vitamin C off that night, and
+  // "layer:selftan" keeps the two self-tans off the same night. Takes the
+  // next free numeric id. No-op if any Tan-Luxe product is already there.
+  apply: profile => {
+    const products = profile.products || [];
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    if (products.concat(profile.removedProducts || []).some(p => /tan.?luxe/.test(hay(p)))) return profile;
+    const used = products.concat(profile.removedProducts || []).map(p => p.id).filter(id => typeof id === "number");
+    const id = Math.max(40, ...used) + 1;
+    return { ...profile, products: [...products, {
+      id,
+      genericName: "Illuminating Self-Tan Drops",
+      brandName: "Tan-Luxe THE FACE",
+      notes: "Mix 2-4 drops into your evening moisturizer and wash your hands after. More drops = deeper colour. Develops in 4-8 hours.",
+      session: "pm",
+      frequency: "weekly",
+      stepOrder: 75,
+      nextDate: todayStr(),
+      isOneOff: false,
+      scheduled: true
+    }] };
   }
 }, {
   id: "drop_routine_sync_v1",
