@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-14.2";
+const APP_VERSION = "2026-10-15.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2851,6 +2851,19 @@ const MIGRATIONS = [{
     return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, shareWeight: 2 } : p) };
   }
 }, {
+  id: "aha30_mostly_spot_v1",
+  // Explicit request (2026-10-15): the Ordinary AHA 30% + BHA 2% peel is
+  // used mostly as a spot treatment and only rarely on the whole face. The
+  // routine schedules the whole-face use, now every 8 weeks; spot use is
+  // added by hand when needed (an added step counts as a use).
+  apply: profile => {
+    const isPeel = p => /aha 30%/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+    const target = (profile.products || []).find(p => isPeel(p) && p.frequency !== "8-weekly" && !p.spotTreatment);
+    if (!target) return profile;
+    const note = "Mostly a spot treatment: dab on the spot, 10 minutes max, rinse. Whole face only every ~8 weeks (that's what the routine schedules). Not on the same spot as a retinoid that night.";
+    return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, frequency: "8-weekly", spotTreatment: true, notes: note } : p) };
+  }
+}, {
   id: "add_tan_luxe_the_face_v1",
   // Explicit request (2026-10-14): add Tan-Luxe THE FACE Illuminating
   // Self-Tan Drops. Mixed into the evening moisturizer (step 75, same as the
@@ -4047,6 +4060,23 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           });
           remaining -= cost;
         }
+      });
+    }
+    // A finished evening/morning is what actually happened: a step logged
+    // done on a past day counts as used even when today's plan for that
+    // day has something else (the plan for past days is rebuilt each time,
+    // so it can drift from what ran then). Without this, a monthly peel
+    // done on Oct 9 came back on Oct 14 — the rebuilt plan never saw it.
+    if (ds < todayStr()) {
+      logs.forEach(l => {
+        if (l.date !== ds || l.session !== session || !l.done || placedIds.has(l.productId)) return;
+        const prod = sessionProducts.find(p => p.id === l.productId);
+        if (!prod) return;
+        dayList.push({ productId: prod.id, carried: false, logged: true });
+        lastServed[prod.id] = ds;
+        servedCount[prod.id] = (servedCount[prod.id] || 0) + 1;
+        placedIds.add(prod.id);
+        registerPlaced(prod);
       });
     }
     dayList.sort((a, b) => {
