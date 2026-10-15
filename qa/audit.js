@@ -85,7 +85,9 @@ function audit(get,profile,planObj,days){
       // the slot counts as filled by anything that holds it that night (a
       // leave-on hydrating mask fills the essence slot)
       const filled=Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('classifySingletonGroups')(p).includes(g))).length;
-      if(filled<days*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days} ${s.toUpperCase()}s`);
+      // tretinoin nights deliberately leave the essence slot empty (lean nights)
+      const lean=g==='layer:essence'?Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('rotationRoleFor')(p)==='tretinoin')).length:0;
+      if(filled<(days-lean)*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days-lean} ${s.toUpperCase()}s`);
       // fair turns are judged per unit of share: a product with shareWeight 2
       // is meant to get about twice the nights of its peers
       const w=m.map(p=>get('shareWeightOf')(p)),wt=w.reduce((a,b)=>a+b,0),n=c.map((x,i)=>x/w[i]*wt/m.length);
