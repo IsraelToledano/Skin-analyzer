@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-15.2";
+const APP_VERSION = "2026-10-16.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2851,6 +2851,17 @@ const MIGRATIONS = [{
     return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, shareWeight: 2 } : p) };
   }
 }, {
+  id: "vitc_wait_note_v1",
+  // Explicit request (2026-10-16): a note on the vitamin C serum, shown when
+  // the step is expanded, on waiting after the toner. Only fills an empty
+  // waitInstruction, so a note he writes himself is never replaced.
+  apply: profile => {
+    const target = (profile.products || []).find(p => productCategories(p).has("vitaminc") && detectType(p) !== "selftan" && !p.waitInstruction);
+    if (!target) return profile;
+    const note = "Wait 1-2 minutes after the toner, until your skin isn't wet (on wet skin a 20% vitamin C stings more). Then give it about a minute to sink in before the moisturizer.";
+    return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, waitInstruction: note } : p) };
+  }
+}, {
   id: "aha30_mostly_spot_v1",
   // Explicit request (2026-10-15): the Ordinary AHA 30% + BHA 2% peel is
   // used mostly as a spot treatment and only rarely on the whole face. The
@@ -4194,6 +4205,12 @@ const ProductUsagePanel = ({ profile, p }) => {
     onClick: e => e.stopPropagation(),
     style: { flexBasis: "100%", width: "100%", boxSizing: "border-box", margin: "8px 0 2px", padding: "12px 14px", borderRadius: 12, background: T.card, border: `1px solid ${T.border}`, boxShadow: "inset 0 1px 2px rgba(44,36,32,0.03)" }
   },
+    // How-to note for this step (e.g. how long to wait before it), shown
+    // first so it's the thing you see when you open the step mid-routine.
+    typeof p.waitInstruction === "string" && p.waitInstruction.trim() && h("div", {
+      "data-testid": "wait-note",
+      style: { display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 8px", padding: "8px 10px", borderRadius: 10, background: T.accentSoft, color: T.text, fontSize: 13, lineHeight: 1.45, fontFamily: "'Inter',sans-serif" }
+    }, h("span", { "aria-hidden": "true", style: { flexShrink: 0 } }, "\u23f1"), h("span", { style: { flex: 1, minWidth: 0 } }, p.waitInstruction.trim())),
     row("Last used", u.lastApplied ? usagePhrase(u.lastApplied, todayDs) : "Never", u.lastApplied ? null : T.red),
     missed && row(missed.outcome === "skipped" ? "Skipped" : "Missed", usagePhrase(missed, todayDs), T.muted),
     row("Next", u.nextScheduled ? usagePhrase(u.nextScheduled, todayDs) : "Not scheduled"),
@@ -6850,6 +6867,12 @@ const shareReport = async (files, nav = navigator) => {
     return "failed";
   }
 };
+// AI "sparkles" mark for the Ask Claude button (it's used for questions as
+// much as for bug reports, so no bug icon). Inline SVG so it renders the
+// same on every phone, in the button's own color.
+const AiSparkIcon = () => React.createElement("svg", { "data-testid": "ai-icon", width: 20, height: 20, viewBox: "0 0 24 24", fill: "currentColor", "aria-hidden": "true", style: { display: "block", margin: "0 auto" } },
+  React.createElement("path", { d: "M10 2.5l1.9 5.6 5.6 1.9-5.6 1.9L10 17.5l-1.9-5.6L2.5 10l5.6-1.9z" }),
+  React.createElement("path", { d: "M18.5 13.5l.95 2.55 2.55.95-2.55.95-.95 2.55-.95-2.55-2.55-.95 2.55-.95z" }));
 const ReportButton = ({ profile, tabName }) => {
   const h = React.createElement;
   const [status, setStatus] = useState("idle"); // idle | working | ready
@@ -6911,8 +6934,8 @@ const ReportButton = ({ profile, tabName }) => {
     h("button", {
       onClick: onTap,
       "data-testid": "report-button",
-      "aria-label": "Report to Claude",
-      title: "Report to Claude",
+      "aria-label": "Ask Claude",
+      title: "Ask Claude — sends a screenshot and your data",
       style: {
         pointerEvents: "auto",
         height: 38,
@@ -6929,7 +6952,7 @@ const ReportButton = ({ profile, tabName }) => {
         fontFamily: "'Inter',sans-serif",
         lineHeight: 1
       }
-    }, status === "working" ? "…" : status === "ready" ? "Tap to send" : "🐞"),
+    }, status === "working" ? "…" : status === "ready" ? "Tap to send" : h(AiSparkIcon, null)),
     msg && h("div", {
       "data-testid": "report-msg",
       style: { pointerEvents: "auto", background: T.text, color: "#fff", fontSize: 12, padding: "7px 11px", borderRadius: 10, maxWidth: 240, fontFamily: "'Inter',sans-serif" }
