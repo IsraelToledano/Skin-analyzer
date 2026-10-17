@@ -85,8 +85,8 @@ function audit(get,profile,planObj,days){
       // the slot counts as filled by anything that holds it that night (a
       // leave-on hydrating mask fills the essence slot)
       const filled=Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('classifySingletonGroups')(p).includes(g))).length;
-      // tretinoin nights deliberately leave the essence slot empty (lean nights)
-      const lean=g==='layer:essence'?Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('rotationRoleFor')(p)==='tretinoin')).length:0;
+      // retinoid nights deliberately leave the toner and essence slots empty (lean nights)
+      const lean=(g==='layer:essence'||g==='layer:toner')?Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('detectType')(p)==='retinoid')).length:0;
       if(filled<(days-lean)*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days-lean} ${s.toUpperCase()}s`);
       // fair turns are judged per unit of share: a product with shareWeight 2
       // is meant to get about twice the nights of its peers

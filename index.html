@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-16.1";
+const APP_VERSION = "2026-10-17.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -2851,6 +2851,20 @@ const MIGRATIONS = [{
     return { ...profile, products: profile.products.map(p => p.id === target.id ? { ...p, shareWeight: 2 } : p) };
   }
 }, {
+  id: "retinoid_on_dry_skin_v1",
+  // Explicit request (2026-10-17): retinoids go on clean, dry skin with no
+  // step before them. Replaces the old "give the toner 10 minutes" note on
+  // each scheduled retinoid with how it now runs, and shows it as the
+  // step's wait note.
+  apply: profile => {
+    const note = "Right after cleansing, on fully dry skin (about 10 minutes after washing). No toner or essence before it — moisturizer goes on after.";
+    const targets = (profile.products || []).filter(p => p.scheduled && detectType(p) === "retinoid" && p.waitInstruction !== note);
+    if (!targets.length) return profile;
+    const ids = new Set(targets.map(p => p.id));
+    const clean = n => (n || "").replace(/Skin isn't sensitive[^]*?potency\.\s*/, "").trim();
+    return { ...profile, products: profile.products.map(p => ids.has(p.id) ? { ...p, notes: clean(p.notes), waitInstruction: note } : p) };
+  }
+}, {
   id: "vitc_wait_note_v1",
   // Explicit request (2026-10-16): a note on the vitamin C serum, shown when
   // the step is expanded, on waiting after the toner. Only fills an empty
@@ -3964,12 +3978,26 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         registerPlaced(winner);
       });
     }
-    // 2e. Tretinoin nights stay lean (Israel's call, 2026-10-15): cleanser,
-    //    toner, tretinoin, moisturizer, lip. The essence slot (essences and
-    //    leave-on hydrating masks) sits out, so there is one watery layer to
-    //    wait out before the tretinoin goes on dry skin. A step he added by
-    //    hand still stays.
-    if ([...placedIds].some(id => { const p = byId.get(id); return p && rotationRoleFor(p) === "tretinoin"; })) placedGroups.add("layer:essence");
+    // 2e. Retinoid nights are lean (Israel's call: tretinoin 2026-10-15,
+    //    every retinoid on clean dry skin 2026-10-17): cleanser, retinoid,
+    //    moisturizer, lip. Nothing watery goes on before it, so the toner
+    //    and the essence slot (essences, leave-on hydrating masks) sit out.
+    //    A step he added by hand, or already ticked, stays; a step carried
+    //    over from a skip moves on instead (it is daily, so it is back
+    //    tomorrow).
+    if ([...placedIds].some(id => { const p = byId.get(id); return p && detectType(p) === "retinoid"; })) {
+      const leanOut = p => p && classifySingletonGroups(p).some(g => g === "layer:toner" || g === "layer:essence");
+      for (let i = dayList.length - 1; i >= 0; i--) {
+        const e = dayList[i];
+        if (!e.carried || e.pinned) continue;
+        if (logs.some(l => l.date === ds && l.session === session && l.productId === e.productId && l.done)) continue;
+        if (!leanOut(byId.get(e.productId))) continue;
+        dayList.splice(i, 1);
+        placedIds.delete(e.productId);
+      }
+      placedGroups.add("layer:essence");
+      placedGroups.add("layer:toner");
+    }
     // 3. Fill remaining budget from the group pool, most-overdue-first.
     //    A group's overdue score is its most-overdue member; a group only
     //    gets scheduled if every not-yet-placed member fits in the budget.
