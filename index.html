@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-17.1";
+const APP_VERSION = "2026-10-22.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3738,9 +3738,14 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     const deferredCarry = new Set();
     const pinnedProds = Array.from(placedIds).map(id => products.find(p => p.id === id)).filter(Boolean);
     const clashesWithPinned = p => excludedToday.has(p.id) || pinnedProds.some(q => q.id !== p.id && (productsConflict(p, q) || classifySingletonGroups(p).some(g => classifySingletonGroups(q).includes(g))));
+    // Two carried groups can't stack on each other either: skipping the oil +
+    // gel cleanse pair and the Anua cleanser on the same night carried all
+    // three into the next night (2026-10-22). The later one waits a day.
+    const carriedPlaced = [];
+    const clashesWithCarried = p => carriedPlaced.some(q => q.id !== p.id && (productsConflict(p, q) || classifySingletonGroups(p).some(g => classifySingletonGroups(q).includes(g))));
     groups.forEach(group => {
       if (group.some(p => carriedIds.has(p.id))) {
-        if (group.some(clashesWithPinned)) {
+        if (group.some(p => clashesWithPinned(p) || clashesWithCarried(p))) {
           group.forEach(p => deferredCarry.add(p.id));
           return;
         }
@@ -3750,6 +3755,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
               productId: p.id,
               carried: true
             });
+            carriedPlaced.push(p);
             lastServed[p.id] = ds;
             servedCount[p.id] = (servedCount[p.id] || 0) + 1;
             placedIds.add(p.id);
