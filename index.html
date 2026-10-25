@@ -126,7 +126,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-22.1";
+const APP_VERSION = "2026-10-25.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1160,6 +1160,95 @@ const explainAddStepBumps = (newProduct, bumpIds, prods) => (bumpIds || []).map(
   const why = productsConflict(newProduct, p) ? "shouldn't be used the same session" : sameRole ? "same role — one per session" : "makes room under the step cap";
   return { id, name: p.genericName, why };
 }).filter(Boolean);
+
+// ─── ADD-STEP IRRITATION CHECK ───────────────────────────────────────────
+// Israel, 2026-10-25: adding a step that clashes with what he used in the
+// last day (a Microfoliant the evening before an acid wash and 20% vitamin
+// C) should stop and say why before it goes in. Looks back one session
+// pair — for an evening step: that morning and the night before; for a
+// morning step: the night before — at what actually ran (ticked steps), or
+// the plan minus skips when nothing was ticked. Also flags a strong product
+// used again inside its own interval, and a procedure recovery window.
+// Pure: returns [{ text }] reasons, empty when the add is fine.
+const STRONG_GROUPS = ["retinoid", "acid-exfoliant", "vitamin-c", "benzoyl"];
+const strongGroupsOf = p => !p ? [] : conflictGroupsFor(p).filter(g => STRONG_GROUPS.includes(g));
+const GROUP_WORD = { "retinoid": "a retinoid", "acid-exfoliant": "an exfoliant", "vitamin-c": "a strong vitamin C", "benzoyl": "benzoyl peroxide" };
+const FREQ_WORD = { daily: "daily", "twice-weekly": "about twice a week", weekly: "once a week", "bi-weekly": "every two weeks", monthly: "once a month", "6-weekly": "every six weeks", "8-weekly": "every eight weeks" };
+const sessionWhen = (date, sess, today) => {
+  const y = addDaysStr(today, -1);
+  if (date === today) return sess === "am" ? "this morning" : "tonight";
+  if (date === y) return sess === "am" ? "yesterday morning" : "last night";
+  const d = parseDate(date);
+  return `${d.toLocaleDateString("en-US", { weekday: "long" })} ${sess === "am" ? "morning" : "evening"}`;
+};
+const sessionRan = (profile, date, sess) => {
+  const all = [...(profile.products || []), ...(profile.removedProducts || [])];
+  const byId = new Map(all.map(p => [p.id, p]));
+  const logs = (profile.logs || []).filter(l => l && l.date === date && l.session === sess);
+  const done = logs.filter(l => l.done).map(l => l.productId);
+  if (done.length) return { logged: true, prods: done.map(id => byId.get(id)).filter(Boolean) };
+  const skipped = new Set(logs.filter(l => l.skipped && !l.done).map(l => l.productId));
+  const prods = profile.products || [];
+  const sched = buildSessionSchedule(prods, profile.logs || [], sess, computeEpoch(prods, sess), date, SESSION_CAP, profile.pins || [], profile.procedures || []);
+  return { logged: false, prods: (sched[date] || []).map(e => byId.get(e.productId)).filter(p => p && !skipped.has(p.id)) };
+};
+const riskName = p => p.brandName ? `${p.genericName} (${p.brandName.split(" ").slice(0, 3).join(" ")})` : p.genericName;
+const pairReason = (prev, prevGroups, when, used, next, nextGroups) => {
+  const pn = riskName(prev), nn = next.genericName;
+  const has = (arr, g) => arr.includes(g);
+  const lead = `${when} you ${used ? "used" : "had"} ${pn} — ${prevGroups.map(g => GROUP_WORD[g]).join(", ")}.`;
+  let why;
+  if (has(nextGroups, "vitamin-c") && (has(prevGroups, "retinoid") || has(prevGroups, "acid-exfoliant"))) why = `Strong vitamin C is very acidic. On skin that was just ${has(prevGroups, "retinoid") ? "on a retinoid" : "exfoliated"} it stings and turns red.`;
+  else if (has(prevGroups, "vitamin-c")) why = `Strong vitamin C is very acidic; ${nn} on top of it within the same day adds up — redness and stinging.`;
+  else if (has(prevGroups, "retinoid") && has(nextGroups, "acid-exfoliant")) why = `A retinoid leaves the top layer of skin thinner and more reactive for a day or two. Exfoliating on top of that strips it further — the usual cause of redness, stinging and peeling.`;
+  else if (has(prevGroups, "acid-exfoliant") && has(nextGroups, "retinoid")) why = `Freshly exfoliated skin lets a retinoid in deeper and faster — more redness and peeling.`;
+  else if (has(prevGroups, "acid-exfoliant") && has(nextGroups, "acid-exfoliant")) why = `A second exfoliation this soon takes off more of the protective layer than skin rebuilds in a night — redness, stinging, dryness.`;
+  else if (has(prevGroups, "retinoid") && has(nextGroups, "retinoid")) why = `Two retinoid sessions back to back don't work better; they just add irritation. Skin needs the night off.`;
+  else why = `Two strong actives this close together add up — redness and irritation.`;
+  return `${lead} ${why}`;
+};
+const addStepIrritationRisks = (profile, product, ds, session) => {
+  const out = [];
+  const nextGroups = strongGroupsOf(product);
+  if (!profile || !product || !nextGroups.length) return out;
+  const today = todayStr();
+  const looks = session === "pm" ? [[ds, "am"], [addDaysStr(ds, -1), "pm"]] : [[addDaysStr(ds, -1), "pm"]];
+  looks.forEach(([d, sess]) => {
+    const { logged, prods } = sessionRan(profile, d, sess);
+    const when = sessionWhen(d, sess, today);
+    prods.forEach(q => {
+      if (q.id === product.id && sess === session) return;
+      if (isRinseOffProduct(q)) return; // a wash is on the skin for seconds
+      const pg = strongGroupsOf(q);
+      if (!pg.length) return;
+      const text = pairReason(q, pg, when[0].toUpperCase() + when.slice(1), logged, product, nextGroups);
+      out.push({ text, productId: q.id, date: d, session: sess });
+    });
+  });
+  // the same strong product again inside its own interval
+  const iv = FREQ_DAYS[product.frequency];
+  if (iv && iv > 1) {
+    const lastUse = (profile.logs || []).filter(l => l && l.productId === product.id && l.done && l.date < ds).map(l => l.date).sort().pop();
+    if (lastUse) {
+      const n = daysBetween(lastUse, ds);
+      if (n < iv) out.push({ text: `You used ${product.genericName} ${n === 1 ? "yesterday" : `${n} days ago`}. It's meant ${FREQ_WORD[product.frequency] || product.frequency} — using it again this soon over-does it.`, productId: product.id, date: lastUse });
+    }
+  }
+  // a procedure recovery window (e.g. microneedling) covering this day
+  if (session === "pm" && nextGroups.some(g => g === "retinoid" || g === "acid-exfoliant") && activesBlockedOn(profile, ds)) {
+    out.push({ text: `You're inside a procedure recovery window (e.g. microneedling). Skin is still healing — retinoids and exfoliants on it now cause redness and irritation.` });
+  }
+  return out;
+};
+// What adding a step to an evening changes in the next morning — shown in
+// the "Added …" notice so the knock-on effect isn't silent.
+const nextMorningRemovals = (profile, newPins, ds) => {
+  const prods = profile.products || [];
+  const nd = addDaysStr(ds, 1);
+  const am = pins => (buildSessionSchedule(prods, profile.logs || [], "am", computeEpoch(prods, "am"), nd, SESSION_CAP, pins, profile.procedures || [])[nd] || []).map(e => e.productId);
+  const before = am(profile.pins || []), after = new Set(am(newPins));
+  return before.filter(id => !after.has(id)).map(id => prods.find(p => p.id === id)).filter(Boolean).map(p => ({ id: p.id, name: p.genericName }));
+};
 
 // ─── DAY ROUTINE HEALTH CHECK ────────────────────────────────────────────
 // Pure, testable function: given the actual list of active products for a
@@ -3566,6 +3655,15 @@ const groupRotating = rotating => {
 // sunscreen), which belong in every session.
 const MORNING_AFTER_EXEMPT_TYPES = new Set(["cleanser", "cleanser_oil", "moisturizer", "spf"]);
 const blockedMorningAfter = p => !!p && !MORNING_AFTER_EXEMPT_TYPES.has(detectType(p));
+// Recovery morning (Israel, 2026-10-25): after an evening with a retinoid or
+// an exfoliant (acid, peel, Microfoliant), the next morning carries nothing
+// that adds to the irritation — no vitamin C, no acid (an acid cleanser
+// included), no retinoid, no benzoyl. A gentle cleanser stands in for an
+// acid one. Found when a Microfoliant night followed by an acid wash and
+// 20% vitamin C left his cheeks red.
+const RECOVERY_BLOCKED_GROUPS = ["vitamin-c", "acid-exfoliant", "retinoid", "benzoyl"];
+const blockedOnRecoveryMorning = p => !!p && conflictGroupsFor(p).some(g => RECOVERY_BLOCKED_GROUPS.includes(g));
+const isStrongEveningStep = p => !!p && !isRinseOffProduct(p) && classifyActiveGroups(p).some(g => g === "retinoid" || g === "acid-exfoliant");
 const shareWeightOf = p => typeof p.shareWeight === "number" && p.shareWeight > 0 ? p.shareWeight : 1;
 const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESSION_CAP, pins = [], procedures = []) => {
   logs = (logs || []).filter(Boolean);
@@ -3594,6 +3692,14 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   // only a productId, and the cap needs each entry's type.
   const byId = new Map((products || []).map(p => [p.id, p]));
   const lastServed = {};
+  // Products a recovery morning held back while they were due: they take
+  // the next free morning (two days after their last use is enough) rather
+  // than waiting out their full interval again, so a twice-weekly vitamin C
+  // still gets its two mornings in a week with many active evenings.
+  const recoveryOwed = {};
+  const servedDates = {};
+  // Owed catch-up keeps the product at its intended weekly count, never above.
+  const underWeeklyQuota = (p, ds) => (servedDates[p.id] || []).filter(d => daysBetween(d, ds) < 7).length < 7 / (FREQ_DAYS[p.frequency] || 1);
   // Tracks how many times each product has been placed so far in this
   // schedule build. Used ONLY as a tiebreaker (after overdue score) when
   // filling budget in step 3 below — see the comment there for why this
@@ -3709,6 +3815,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       const role = rotationRoleFor(byId.get(pin.productId));
       if (role) pinnedRoleOn[role] = ds;
     });
+    let recoveryMorning = false;
     if (pmPlan) {
       // What actually ran last night. When steps were ticked off that night,
       // the ticked ones are what ran — a step on the plan that was never
@@ -3727,6 +3834,18 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       ranLastNight.forEach(id => {
         if (!placedIds.has(id) && blockedMorningAfter(byId.get(id))) excludedToday.add(id);
       });
+      const strongLastNight = [...ranLastNight].map(id => byId.get(id)).filter(isStrongEveningStep);
+      if (strongLastNight.length) {
+        recoveryMorning = true;
+        // an acid cleanser only sits out when a gentle one can take its place
+        const gentleCleanserExists = (products || []).some(p => p.scheduled && detectType(p) === "cleanser" && classifyActiveGroups(p).length === 0);
+        sessionProducts.forEach(p => {
+          if (placedIds.has(p.id) || !blockedOnRecoveryMorning(p)) return;
+          if (isRinseOffProduct(p) && !gentleCleanserExists) return;
+          excludedToday.add(p.id);
+          recoveryOwed[p.id] = true;
+        });
+      }
     }
     excludedToday.forEach(id => { if (placedIds.has(id)) excludedToday.delete(id); });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
@@ -3817,6 +3936,19 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           served: servedCount[p.id] || 0
         } : null;
       }).filter(Boolean).sort((a, b) => b.overdue - a.overdue || a.served - b.served);
+      // Recovery morning with only an acid cleanser on the morning list:
+      // borrow the gentlest scheduled cleanser (no actives; the everyday
+      // one first) so the morning still starts with a wash.
+      if (cat === "cleanser" && recoveryMorning && !due.length) {
+        const gentle = (products || []).filter(p => p.scheduled && detectType(p) === "cleanser" && classifyActiveGroups(p).length === 0 && !placedIds.has(p.id) && !excludedToday.has(p.id))
+          .sort((a, b) => (FREQ_DAYS[a.frequency] || 99) - (FREQ_DAYS[b.frequency] || 99) || String(a.id).localeCompare(String(b.id)))[0];
+        if (gentle) {
+          dayList.push({ productId: gentle.id, carried: false, recovery: true });
+          placedIds.add(gentle.id);
+          registerPlaced(gentle);
+          return;
+        }
+      }
       if (due.length && !conflictsWithToday(due[0].p)) {
         const winner = due[0].p;
         // If the winner is part of a linked group (e.g. oil cleanser +
@@ -4031,7 +4163,8 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           const iv = FREQ_DAYS[p.frequency] || 1;
           const last = lastServed[p.id];
           const since = last ? daysBetween(last, ds) : daysBetween(p.nextDate, ds);
-          const due = last ? since >= iv : daysBetween(p.nextDate, ds) >= 0;
+          const owedDue = !!recoveryOwed[p.id] && (!last || since >= 2) && underWeeklyQuota(p, ds);
+          const due = last ? since >= iv || owedDue : daysBetween(p.nextDate, ds) >= 0 || owedDue;
           if (due) {
             anyDue = true;
             // Normalized to each product's own interval (not a raw day
@@ -4130,6 +4263,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         registerPlaced(prod);
       });
     }
+    placedIds.forEach(id => { delete recoveryOwed[id]; (servedDates[id] = servedDates[id] || []).push(ds); });
     dayList.sort((a, b) => {
       const pa = products.find(p => p.id === a.productId);
       const pb = products.find(p => p.id === b.productId);
@@ -4163,6 +4297,7 @@ const queueFor = (schedule, products, date) => {
   return entries.map(e => ({
     ...products.find(p => p.id === e.productId),
     carried: e.carried,
+    recovery: e.recovery || false,
     pinned: e.pinned || false
   })).filter(p => p.id);
 };
@@ -4445,6 +4580,40 @@ const useVisualViewportInsets = () => {
   }, []);
   return insets;
 };
+// Shown before an added/swapped-in step goes in when it clashes with what
+// ran in the last day: why, in plain words, and the two choices.
+const IrritationWarning = ({ product, risks, sessionLabel, onAddAnyway, onCancel }) => {
+  const h = React.createElement;
+  const font = "'Inter',sans-serif";
+  return h("div", {
+    "data-testid": "risk-prompt",
+    role: "dialog",
+    "aria-modal": "true",
+    onClick: onCancel,
+    style: { position: "fixed", inset: 0, background: "rgba(44,36,32,0.55)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }
+  }, h("div", {
+    onClick: e => e.stopPropagation(),
+    style: { background: "#fff", borderRadius: 16, maxWidth: 400, width: "100%", maxHeight: "85vh", overflowY: "auto", padding: "18px 18px 14px", boxShadow: "0 10px 40px rgba(44,36,32,0.25)", fontFamily: font }
+  },
+    h("div", { style: { fontSize: 16, fontWeight: 700, color: T.text } }, "⚠️ This may irritate your skin"),
+    h("div", { style: { fontSize: 13, color: T.muted, marginTop: 4 } }, "Adding ", h("b", { style: { color: T.text } }, product.genericName), " ", sessionLabel, ":"),
+    h("div", { style: { marginTop: 10 } }, risks.map((r, i) => h("div", {
+      key: i,
+      "data-testid": "risk-reason",
+      style: { display: "flex", gap: 8, fontSize: 13, lineHeight: 1.5, color: T.text, padding: "8px 10px", borderRadius: 10, background: T.redSoft || "#fdecea", marginTop: i ? 6 : 0 }
+    }, h("span", { "aria-hidden": "true", style: { flexShrink: 0 } }, "•"), h("span", { style: { flex: 1, minWidth: 0 } }, r.text)))),
+    h("div", { style: { display: "flex", gap: 8, marginTop: 14 } },
+      h("button", {
+        "data-testid": "risk-cancel",
+        onClick: onCancel,
+        style: { flex: 1, padding: "11px 10px", borderRadius: 12, border: "none", background: T.accent, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: font }
+      }, "You're right, don't add"),
+      h("button", {
+        "data-testid": "risk-add-anyway",
+        onClick: onAddAnyway,
+        style: { flex: 1, padding: "11px 10px", borderRadius: 12, border: `1.5px solid ${T.border}`, background: "#fff", color: T.text, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: font }
+      }, "Add anyway"))));
+};
 const SwapPickerModal = ({
   mode,
   session,
@@ -4710,6 +4879,7 @@ const RoutineBlock = ({
   const [dragId, setDragId] = useState(null);
   const [dragWarning, setDragWarning] = useState(null);
   const [addNotice, setAddNotice] = useState(null); // { added, removed: [{ name, why }] } after "+ Add step"
+  const [riskPrompt, setRiskPrompt] = useState(null); // { product, risks } — irritation warning before an add/swap goes in
   const rowRefs = useRef({});
   const dragOrderRef = useRef(dragOrder);
   const dragIdRef = useRef(dragId);
@@ -4896,7 +5066,8 @@ const RoutineBlock = ({
         stepOrder: recommendStepOrder(pr)
       } : pr);
     }
-    if (mode === "add") setAddNotice({ added: newProduct.genericName, removed: explainAddStepBumps(newProduct, bumpIds, prods) });
+    const tomorrow = session === "pm" ? nextMorningRemovals(profile, newPins, ds) : [];
+    if (mode === "add" || tomorrow.length) setAddNotice({ added: newProduct.genericName, removed: mode === "add" ? explainAddStepBumps(newProduct, bumpIds, prods) : [], tomorrow });
     onUpdate(patch);
     setPicker(null);
   };
@@ -5363,10 +5534,14 @@ const RoutineBlock = ({
     style: { marginTop: 6, padding: "9px 12px", borderRadius: 10, background: T.greenSoft, border: `1px solid ${T.green}33`, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
   }, /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 12, fontWeight: 700, color: T.text }
-  }, "Added ", addNotice.added, addNotice.removed.length ? "" : " \u2014 nothing else had to change"), addNotice.removed.map(r => /*#__PURE__*/React.createElement("div", {
+  }, "Added ", addNotice.added, addNotice.removed.length || (addNotice.tomorrow || []).length ? "" : " \u2014 nothing else had to change"), addNotice.removed.map(r => /*#__PURE__*/React.createElement("div", {
     key: r.id,
     style: { fontSize: 12, color: T.text, marginTop: 3, lineHeight: 1.4 }
-  }, "\u2212 ", /*#__PURE__*/React.createElement("b", null, r.name), " \u2014 ", r.why)), /*#__PURE__*/React.createElement("div", {
+  }, "\u2212 ", /*#__PURE__*/React.createElement("b", null, r.name), " \u2014 ", r.why)), (addNotice.tomorrow || []).map(r => /*#__PURE__*/React.createElement("div", {
+    key: "t" + r.id,
+    "data-testid": "add-notice-tomorrow",
+    style: { fontSize: 12, color: T.text, marginTop: 3, lineHeight: 1.4 }
+  }, "Tomorrow morning: \u2212 ", /*#__PURE__*/React.createElement("b", null, r.name), " \u2014 not right after tonight's ", addNotice.added)), /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 10.5, color: T.muted, marginTop: 4 }
   }, "Tap to dismiss")), dragWarning && /*#__PURE__*/React.createElement("div", {
     onClick: () => setDragWarning(null),
@@ -5407,8 +5582,18 @@ const RoutineBlock = ({
     profile: profile,
     excludeProduct: picker.excludeProduct,
     activeProducts: prods,
-    onSelect: applySwap,
+    onSelect: p => {
+      const risks = addStepIrritationRisks(profile, p, ds, session);
+      if (risks.length) setRiskPrompt({ product: p, risks });
+      else applySwap(p);
+    },
     onClose: () => setPicker(null)
+  }), riskPrompt && /*#__PURE__*/React.createElement(IrritationWarning, {
+    product: riskPrompt.product,
+    risks: riskPrompt.risks,
+    sessionLabel: sessionWhen(ds, session, todayStr()),
+    onAddAnyway: () => { const p = riskPrompt.product; setRiskPrompt(null); applySwap(p); },
+    onCancel: () => { setRiskPrompt(null); setPicker(null); }
   }), detailProduct && /*#__PURE__*/React.createElement(ProductDetailModal, {
     product: detailProduct,
     onClose: () => setDetailProduct(null)

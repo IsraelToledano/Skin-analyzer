@@ -57,7 +57,8 @@ function audit(get,profile,planObj,days){
   const nameOf=p=>`${p.genericName}${p.brandName?' ('+p.brandName.split(' ').slice(0,3).join(' ')+')':''}`;
   Object.entries(planObj).forEach(([key,list])=>{
     const session=key.split(':')[1];
-    list.forEach(p=>{counts[p.id]=counts[p.id]||{am:0,pm:0};counts[p.id][session]++;});
+    // a gentle cleanser borrowed for a recovery morning isn't a session mismatch
+    list.forEach(p=>{if(p.recovery)return;counts[p.id]=counts[p.id]||{am:0,pm:0};counts[p.id][session]++;});
     checkDay(get,key,list,add);
   });
   // R9 frequency adherence
@@ -118,6 +119,17 @@ function audit(get,profile,planObj,days){
     // a step skipped that evening never ran, so it may run the next morning
     const skippedPm=id=>(profile.logs||[]).some(l=>l&&l.date===prev.split(':')[0]&&l.session==='pm'&&l.productId===id&&l.skipped&&!l.done);
     planObj[k].filter(p=>!['cleanser','cleanser_oil','moisturizer','spf'].includes(get('detectType')(p))&&!skippedPm(p.id)).forEach(p=>{if(planObj[prev].some(q=>q.id===p.id))add('high',k,`"${nameOf(p)}" runs in the evening and again the next morning`)});
+  });
+  // R13 recovery morning: after an evening with a leave-on retinoid or an
+  // exfoliant (acid, peel, Microfoliant — not a cleanser), the next morning
+  // has no vitamin C, acid (acid cleanser included), retinoid or benzoyl,
+  // unless he added it himself
+  amKeys.forEach(k=>{
+    const d=k.split(':')[0];const prev=get('addDaysStr')(d,-1)+':pm';if(!planObj[prev])return;
+    const skippedPm=id=>(profile.logs||[]).some(l=>l&&l.date===prev.split(':')[0]&&l.session==='pm'&&l.productId===id&&l.skipped&&!l.done);
+    const strong=planObj[prev].some(p=>!skippedPm(p.id)&&!['cleanser','cleanser_oil'].includes(type(p))&&get('classifyActiveGroups')(p).some(g=>g==='retinoid'||g==='acid-exfoliant'));
+    if(!strong)return;
+    planObj[k].filter(p=>!p.pinned&&get('conflictGroupsFor')(p).some(g=>['vitamin-c','acid-exfoliant','retinoid','benzoyl'].includes(g))).forEach(p=>add('high',k,`"${nameOf(p)}" the morning after a retinoid/exfoliant evening`));
   });
   // R12 a leave-on treatment active runs at most once a day
   amKeys.forEach(k=>{
