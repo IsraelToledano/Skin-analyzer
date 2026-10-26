@@ -41,6 +41,7 @@
   #boot-status.hide{display:none;}
   #boot-status .spinner{width:28px;height:28px;border:3px solid #EDE8E3;border-top-color:#E8837A;border-radius:50%;animation:spin 0.8s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
+  @keyframes sr-tipbar{from{transform:scaleX(1);}to{transform:scaleX(0);}}
   #boot-error{color:#D95F5F;font-size:13px;max-width:340px;line-height:1.5;font-family:monospace;white-space:pre-wrap;text-align:left;background:#fff;border:1px solid #D95F5F33;border-radius:10px;padding:14px;margin-top:10px;display:none;}
 </style>
 </head>
@@ -126,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-25.1";
+const APP_VERSION = "2026-10-26.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -4580,6 +4581,73 @@ const useVisualViewportInsets = () => {
   }, []);
   return insets;
 };
+// ─── STEP-TO-STEP TIPS ───────────────────────────────────────────────────
+// Israel, 2026-10-26: ticking a step done shows what to do before the next
+// one — wait for it to dry, dampen skin for hyaluronic acid, rinse a mask.
+// Pure: (the step just done, the next open step) → { title, lines } or
+// null when there's nothing worth saying. A product's own waitInstruction
+// (vitamin C, sunscreen, retinoids) wins over the generic before-tip.
+const isHyaluronicLeaveOn = p => !!p && /hyaluron/i.test([p.genericName, p.brandName].filter(Boolean).join(" ")) && !["cleanser", "cleanser_oil"].includes(detectType(p));
+const stepTip = (done, next) => {
+  if (!done || !next) return null;
+  const dt = detectType(done), nt = detectType(next);
+  const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+  const nn = next.genericName;
+  const lines = [];
+  // after the step just done
+  if (dt === "cleanser_oil" && nt === "cleanser") lines.push("Rinse the oil off fully, then wash with the gel cleanser.");
+  else if (isWashOffMask(done)) lines.push("Rinse the mask off with lukewarm water and pat dry.");
+  else if (/microfoliant|powder exfoliant/.test(hay(done))) lines.push("Rinse well and pat dry — don't rub.");
+  else if (/peeling solution|gel peel/.test(hay(done))) lines.push("Rinse it off (10 minutes max) and pat dry — a little tingling is normal.");
+  else if (!isRinseOffProduct(done) && classifyActiveGroups(done).includes("acid-exfoliant")) lines.push(`Let it absorb for 2–3 minutes before ${nn}.`);
+  else if (dt === "vitc") lines.push(`Give it about a minute to sink in before ${nn}.`);
+  else if (dt === "retinoid") lines.push(`Let it absorb for a minute before ${nn}.`);
+  else if (dt === "selftan") lines.push("Wash your hands now so your palms don't tan.");
+  // before the next step — by type first (worded for what came just
+  // before it), the product's own waitInstruction for anything else
+  const wet = ["cleanser", "cleanser_oil", "toner", "mist", "essence"].includes(dt) || isWashOffMask(done) || /microfoliant|powder exfoliant|peeling solution|gel peel/.test(hay(done));
+  const own = typeof next.waitInstruction === "string" && next.waitInstruction.trim();
+  if (isHyaluronicLeaveOn(next)) lines.push(["toner", "mist", "essence"].includes(dt) ? `Put ${nn} on while the skin is still damp from the ${dt === "essence" ? "essence" : "toner"} — if it has dried, mist or pat on a little water first. Hyaluronic acid needs water on the skin to hold.` : `Mist or pat a little water on your face first — ${nn} needs damp skin. On dry skin hyaluronic acid can pull moisture out instead.`);
+  else if (nt === "retinoid") lines.push(wet ? "Pat dry and wait until your skin is completely dry (about 10 minutes after washing) — on damp skin a retinoid irritates more." : "Make sure your skin is completely dry first.");
+  else if (nt === "vitc") lines.push(wet ? "Wait 1–2 minutes until your skin isn't wet — strong vitamin C stings more on damp skin." : "Your skin should be dry before it goes on.");
+  else if (nt === "spf") lines.push(`Wait until the ${dt === "moisturizer" ? "moisturizer" : "last layer"} isn't tacky (1–2 minutes) so the sunscreen spreads evenly.`);
+  else if (nt === "selftan") lines.push("Spread it evenly and blend into the hairline, brows and jawline so there's no line.");
+  else if (own) lines.push(own);
+  return lines.length ? { title: `Before ${nn}`, lines } : null;
+};
+// Bottom toast for a step tip: closes by itself after 5 seconds; a tap
+// keeps it open; ✕ closes it right away.
+const StepTipToast = ({ tip, onClose }) => {
+  const h = React.createElement;
+  const [kept, setKept] = useState(false);
+  useEffect(() => {
+    if (kept) return;
+    const t = setTimeout(onClose, 5000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept]);
+  const font = "'Inter',sans-serif";
+  return h("div", {
+    "data-testid": "step-tip",
+    "data-kept": kept ? "1" : "0",
+    role: "status",
+    onClick: () => setKept(true),
+    style: { position: "fixed", left: 12, right: 12, bottom: "calc(64px + env(safe-area-inset-bottom))", zIndex: 1050, maxWidth: 420, margin: "0 auto", background: T.text, color: "#fff", borderRadius: 14, boxShadow: "0 8px 28px rgba(44,36,32,0.28)", overflow: "hidden", fontFamily: font, cursor: "pointer", animation: "sr-expand .18s ease" }
+  },
+    h("div", { style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 10px 12px 14px" } },
+      h("span", { "aria-hidden": "true", style: { fontSize: 16, lineHeight: "20px" } }, "⏱"),
+      h("div", { style: { flex: 1, minWidth: 0 } },
+        h("div", { style: { fontSize: 13, fontWeight: 700, marginBottom: 2 } }, tip.title),
+        tip.lines.map((l, i) => h("div", { key: i, "data-testid": "step-tip-line", style: { fontSize: 13, lineHeight: 1.45, opacity: 0.95, marginTop: i ? 4 : 0 } }, l)),
+        h("div", { style: { fontSize: 10.5, opacity: 0.6, marginTop: 6 } }, kept ? "Kept open — tap ✕ to close" : "Tap to keep open")),
+      h("button", {
+        "data-testid": "step-tip-close",
+        "aria-label": "Close",
+        onClick: e => { e.stopPropagation(); onClose(); },
+        style: { flexShrink: 0, width: 28, height: 28, borderRadius: 100, border: "none", background: "rgba(255,255,255,0.14)", color: "#fff", fontSize: 13, cursor: "pointer", padding: 0 }
+      }, "✕")),
+    !kept && h("div", { style: { height: 3, background: T.accent, transformOrigin: "left", animation: "sr-tipbar 5s linear forwards" } }));
+};
 // Shown before an added/swapped-in step goes in when it clashes with what
 // ran in the last day: why, in plain words, and the two choices.
 const IrritationWarning = ({ product, risks, sessionLabel, onAddAnyway, onCancel }) => {
@@ -4880,6 +4948,7 @@ const RoutineBlock = ({
   const [dragWarning, setDragWarning] = useState(null);
   const [addNotice, setAddNotice] = useState(null); // { added, removed: [{ name, why }] } after "+ Add step"
   const [riskPrompt, setRiskPrompt] = useState(null); // { product, risks } — irritation warning before an add/swap goes in
+  const [stepTipShown, setStepTipShown] = useState(null); // { key, title, lines } after ticking a step done
   const rowRefs = useRef({});
   const dragOrderRef = useRef(dragOrder);
   const dragIdRef = useRef(dragId);
@@ -5099,6 +5168,14 @@ const RoutineBlock = ({
     onUpdate({
       logs: newLogs
     });
+    // What to do before the next open step (in the order shown).
+    if (done) {
+      const handled = id => newLogs.some(l => l.date === ds && l.session === session && l.productId === id && (l.done || l.skipped));
+      const i = orderedProds.findIndex(p => p.id === productId);
+      const next = i >= 0 ? orderedProds.slice(i + 1).find(p => !handled(p.id)) : null;
+      const tip = i >= 0 ? stepTip(orderedProds[i], next) : null;
+      setStepTipShown(tip ? { ...tip, key: `${productId}-${Date.now()}` } : null);
+    } else setStepTipShown(null);
   };
   const toggleSkip = (productId, session) => {
     const ex = allLogs.find(l => l.date === ds && l.productId === productId && l.session === session);
@@ -5588,6 +5665,10 @@ const RoutineBlock = ({
       else applySwap(p);
     },
     onClose: () => setPicker(null)
+  }), stepTipShown && /*#__PURE__*/React.createElement(StepTipToast, {
+    key: stepTipShown.key,
+    tip: stepTipShown,
+    onClose: () => setStepTipShown(null)
   }), riskPrompt && /*#__PURE__*/React.createElement(IrritationWarning, {
     product: riskPrompt.product,
     risks: riskPrompt.risks,
