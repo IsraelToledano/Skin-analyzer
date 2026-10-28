@@ -13,13 +13,16 @@ const products=[
   P(7,'Sunscreen Serum SPF 50','am','daily'),
   P(17,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'}),
   P(6.5,'powder exfoliant','pm','weekly',{brandName:'Dermalogica Daily Microfoliant',scheduled:false,nextDate:''}),
-  P(10,'hydrating cream mask','pm','weekly',{brandName:'Caudalie VinoHydra',scheduled:false,nextDate:'',rotationRole:'none'})];
+  P(10,'hydrating cream mask','pm','weekly',{brandName:'Caudalie VinoHydra',scheduled:false,nextDate:'',rotationRole:'none'}),
+  P(35,'Skin Perfecting 2% BHA Liquid Exfoliant','pm','weekly',{brandName:"Paula's Choice",scheduled:false,nextDate:''})];
+// last night he used the BHA (ticked), so another exfoliant tonight is two in a row
+const logs=[{id:1,date:'2026-09-19',session:'pm',productId:2,done:true},{id:2,date:'2026-09-19',session:'pm',productId:35,done:true}];
 (async()=>{const server=await serve(8153);
 const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:900},deviceScaleFactor:2});
 await ctx.addInitScript(({seed})=>{const R=Date;const fx=new R(2026,8,20,20,30).getTime();
   class D extends R{constructor(...a){if(a.length===0)super(fx);else super(...a)}static now(){return fx}}window.Date=D;
-  if(!localStorage.getItem('skinritual_v4'))localStorage.setItem('skinritual_v4',JSON.stringify({v:4,profile:seed}));},{seed:profile({products,migrations:MIG})});
+  if(!localStorage.getItem('skinritual_v4'))localStorage.setItem('skinritual_v4',JSON.stringify({v:4,profile:seed}));},{seed:profile({products,logs,migrations:MIG})});
 const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.goto('http://localhost:8153/');await page.waitForSelector('[data-testid=usage-toggle]');
 // the morning block of the shown day, opened if collapsed (SPF is always in it)
@@ -29,20 +32,26 @@ const go=async dir=>{await page.getByRole('button',{name:dir>0?'Next day':'Previ
 const pmNames=async()=>page.evaluate(()=>[...document.querySelectorAll('[data-testid=usage-toggle]')].map(b=>b.closest('div[style*="flex-wrap"]').innerText));
 await go(1);const tomorrowBefore=await morningText();console.log('   tomorrow AM before:',tomorrowBefore.replace(/\s+/g,' ').slice(0,200));await go(-1);
 ok(/Vitamin C Serum/.test(tomorrowBefore)&&/Gentle Exfoliating SA/.test(tomorrowBefore),'before: tomorrow morning has vitamin C and the acid wash');
-// 1. a clashing add: this morning had 20% vitamin C
+// 1. the picker: an exfoliant after last night's BHA is not offered as a fit
 await page.getByText('+ Add step').last().click();await page.waitForSelector('[data-testid=picker-row]');
-await page.locator('[data-testid=picker-row]',{hasText:'Microfoliant'}).click();
+ok(await page.locator('[data-testid=picker-row]',{hasText:'Microfoliant'}).count()===0,'Microfoliant is not listed as a fit');
+const riskyTxt=(await page.locator('[data-testid=risky-block]').innerText().catch(()=>'')).replace(/\s+/g,' ');console.log('   risky block:',riskyTxt.slice(0,200));
+ok(/Not right now/.test(riskyTxt)&&/Microfoliant/.test(riskyTxt)&&/Last night you used/.test(riskyTxt),'it sits under "Not right now — may irritate" with the reason');
+ok(await page.locator('[data-testid=picker-row]',{hasText:'hydrating cream mask'}).count()===1,'a harmless step is still offered as a fit');
+await page.screenshot({path:'picker-risky.png'});
+// choosing it anyway still asks first
+await page.locator('[data-testid=risky-row]',{hasText:'Microfoliant'}).click();
 await page.waitForSelector('[data-testid=risk-prompt]',{timeout:5000}).catch(()=>{});
-ok(await page.locator('[data-testid=risk-prompt]').count()===1,'adding an exfoliant after a vitamin C morning shows the warning');
+ok(await page.locator('[data-testid=risk-prompt]').count()===1,'choosing it anyway shows the warning');
 const reasons=(await page.locator('[data-testid=risk-reason]').allInnerTexts()).join(' | ');console.log('   reason:',reasons);
-ok(/This morning/.test(reasons)&&/Vitamin C Serum/.test(reasons)&&/acidic/.test(reasons),'the warning says what ran this morning and why it matters');
+ok(/Last night you used Skin Perfecting 2% BHA/.test(reasons)&&/second exfoliation/.test(reasons),'the warning says what ran last night and why it matters');
 await page.screenshot({path:'risk.png'});
 await page.locator('[data-testid=risk-cancel]').click();await page.waitForTimeout(200);
 ok(await page.locator('[data-testid=risk-prompt]').count()===0&&await page.locator('[data-testid=picker-row]').count()===0,"\"Don't add\" closes the warning and the picker");
 ok(!(await pmNames()).some(t=>/Microfoliant/.test(t)),"\"Don't add\" leaves tonight unchanged");
 // 2. add anyway
 await page.getByText('+ Add step').last().click();await page.waitForSelector('[data-testid=picker-row]');
-await page.locator('[data-testid=picker-row]',{hasText:'Microfoliant'}).click();await page.waitForSelector('[data-testid=risk-prompt]');
+await page.locator('[data-testid=risky-row]',{hasText:'Microfoliant'}).click();await page.waitForSelector('[data-testid=risk-prompt]');
 await page.locator('[data-testid=risk-add-anyway]').click();await page.waitForSelector('[data-testid=add-notice]');
 ok((await pmNames()).some(t=>/Microfoliant/.test(t)),'"Add anyway" adds it to tonight');
 const notice=(await page.locator('[data-testid=add-notice]').innerText()).replace(/\s+/g,' ');console.log('   notice:',notice);

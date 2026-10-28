@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-26.1";
+const APP_VERSION = "2026-10-29.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -1172,7 +1172,7 @@ const explainAddStepBumps = (newProduct, bumpIds, prods) => (bumpIds || []).map(
 // used again inside its own interval, and a procedure recovery window.
 // Pure: returns [{ text }] reasons, empty when the add is fine.
 const STRONG_GROUPS = ["retinoid", "acid-exfoliant", "vitamin-c", "benzoyl"];
-const strongGroupsOf = p => !p ? [] : conflictGroupsFor(p).filter(g => STRONG_GROUPS.includes(g));
+const strongGroupsOf = p => !p || detectType(p) === "selftan" ? [] : conflictGroupsFor(p).filter(g => STRONG_GROUPS.includes(g));
 const GROUP_WORD = { "retinoid": "a retinoid", "acid-exfoliant": "an exfoliant", "vitamin-c": "a strong vitamin C", "benzoyl": "benzoyl peroxide" };
 const FREQ_WORD = { daily: "daily", "twice-weekly": "about twice a week", weekly: "once a week", "bi-weekly": "every two weeks", monthly: "once a month", "6-weekly": "every six weeks", "8-weekly": "every eight weeks" };
 const sessionWhen = (date, sess, today) => {
@@ -1182,7 +1182,15 @@ const sessionWhen = (date, sess, today) => {
   const d = parseDate(date);
   return `${d.toLocaleDateString("en-US", { weekday: "long" })} ${sess === "am" ? "morning" : "evening"}`;
 };
+const sessionRanCache = new WeakMap();
 const sessionRan = (profile, date, sess) => {
+  let cache = sessionRanCache.get(profile);
+  if (!cache) { cache = new Map(); sessionRanCache.set(profile, cache); }
+  const key = `${date}:${sess}`;
+  if (!cache.has(key)) cache.set(key, sessionRanUncached(profile, date, sess));
+  return cache.get(key);
+};
+const sessionRanUncached = (profile, date, sess) => {
   const all = [...(profile.products || []), ...(profile.removedProducts || [])];
   const byId = new Map(all.map(p => [p.id, p]));
   const logs = (profile.logs || []).filter(l => l && l.date === date && l.session === sess);
@@ -1213,18 +1221,31 @@ const addStepIrritationRisks = (profile, product, ds, session) => {
   const nextGroups = strongGroupsOf(product);
   if (!profile || !product || !nextGroups.length) return out;
   const today = todayStr();
-  const looks = session === "pm" ? [[ds, "am"], [addDaysStr(ds, -1), "pm"]] : [[addDaysStr(ds, -1), "pm"]];
-  looks.forEach(([d, sess]) => {
-    const { logged, prods } = sessionRan(profile, d, sess);
-    const when = sessionWhen(d, sess, today);
-    prods.forEach(q => {
-      if (q.id === product.id && sess === session) return;
-      if (isRinseOffProduct(q)) return; // a wash is on the skin for seconds
-      const pg = strongGroupsOf(q);
-      if (!pg.length) return;
-      const text = pairReason(q, pg, when[0].toUpperCase() + when.slice(1), logged, product, nextGroups);
-      out.push({ text, productId: q.id, date: d, session: sess });
-    });
+  // Same rules the routine is built on (2026-10-29: the warning used to be
+  // stricter than the routine, so steps it scheduled itself — and swap
+  // suggestions — set it off):
+  //  - morning after a retinoid/exfoliant evening: no vitamin C, acids or
+  //    retinoid (the recovery-morning rule);
+  //  - two evenings in a row of the same strong active (exfoliant then
+  //    exfoliant, retinoid then retinoid).
+  // Vitamin C in the morning with an acid or retinoid that night is the
+  // standard split, and a retinoid night next to an exfoliant night is how
+  // the routine is meant to run, so neither warns.
+  const prevPm = addDaysStr(ds, -1);
+  const { logged, prods } = sessionRan(profile, prevPm, "pm");
+  const when = sessionWhen(prevPm, "pm", today);
+  const When = when[0].toUpperCase() + when.slice(1);
+  prods.forEach(q => {
+    if (isRinseOffProduct(q)) return; // a wash is on the skin for seconds
+    const pg = strongGroupsOf(q);
+    if (!pg.length) return;
+    if (session === "am") {
+      if (!isStrongEveningStep(q) || !blockedOnRecoveryMorning(product)) return;
+    } else {
+      const same = ["retinoid", "acid-exfoliant"].filter(g => pg.includes(g) && nextGroups.includes(g));
+      if (!same.length || !isStrongEveningStep(q) || isRinseOffProduct(product)) return;
+    }
+    out.push({ text: pairReason(q, pg, When, logged, product, nextGroups), productId: q.id, date: prevPm, session: "pm" });
   });
   // the same strong product again inside its own interval
   const iv = FREQ_DAYS[product.frequency];
@@ -4702,7 +4723,13 @@ const SwapPickerModal = ({
     p,
     score: scoreCandidate(p, { session, ds, profile, otherActiveProducts })
   })).sort((a, b) => b.score - a.score);
-  const { category, sections, sameCount, otherItems } = buildPickerSections(candidates, mode === "swap" ? excludeProduct : null);
+  // Anything that would set off the irritation warning is never offered as a
+  // fit: it moves to its own section at the bottom, with the reason
+  // (2026-10-29 — swap offered exfoliants that then warned).
+  const risksById = new Map(candidates.map(c => [c.p.id, addStepIrritationRisks(profile, c.p, ds, session)]));
+  const safeCandidates = candidates.filter(c => !risksById.get(c.p.id).length);
+  const riskyCandidates = candidates.filter(c => risksById.get(c.p.id).length);
+  const { category, sections, sameCount, otherItems } = buildPickerSections(safeCandidates, mode === "swap" ? excludeProduct : null);
   // Other categories stay folded until asked for — except when searching
   // (the person is clearly looking for something specific) or when the
   // step's own category has nothing else to offer.
@@ -4773,6 +4800,22 @@ const SwapPickerModal = ({
           style: { width: "100%", marginTop: 12, padding: "10px 0", borderRadius: 10, border: `1px dashed ${T.border}`, background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
         }, `Show ${otherItems.length} from other categories`),
         otherItems.length > 0 && otherOpen && block("other", "Other categories", T.muted, `Outside ${category}`, otherItems, true),
+        riskyCandidates.length > 0 && h("div", {
+          key: "risky",
+          "data-testid": "risky-block",
+          style: { margin: "12px 0", border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }
+        },
+          h("div", { style: { padding: "8px 12px", background: T.faint, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "baseline", gap: 8 } },
+            h("span", { style: { fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "'Inter',sans-serif" } }, "\u26a0\ufe0f Not right now \u2014 may irritate"),
+            h("span", { style: { marginLeft: "auto", fontSize: 11, color: T.muted } }, riskyCandidates.length)),
+          riskyCandidates.map(({ p }, i) => h("div", {
+            key: p.id,
+            "data-testid": "risky-row",
+            onClick: () => onSelect(p),
+            style: { padding: "10px 12px", borderBottom: i === riskyCandidates.length - 1 ? "none" : `1px solid ${T.border}`, cursor: "pointer", background: "#fff", opacity: 0.85 }
+          },
+            h("div", { style: { fontSize: 13, fontWeight: 600, color: T.text } }, p.genericName, p.brandName && h("span", { style: { color: T.muted, fontWeight: 400, fontSize: 12 } }, " \u00b7 ", p.brandName)),
+            h("div", { style: { fontSize: 11.5, color: T.red, marginTop: 2, lineHeight: 1.4 } }, risksById.get(p.id)[0].text)))),
         alreadyIn.length > 0 && h("div", {
           "data-testid": "already-in-block",
           style: { margin: "12px 0", border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden", opacity: 0.75 }
