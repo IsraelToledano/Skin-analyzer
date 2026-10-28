@@ -8,7 +8,8 @@ let pass=0,fail=0;const t=(n,fn)=>{try{fn();pass++;console.log('  ok  ',n)}catch
 const type=get('detectType'),add=get('addDaysStr'),cg=get('conflictGroupsFor'),ag=get('classifyActiveGroups');
 const today=get('todayStr')();
 const seed=seedProfile(get);const start=add(today,-10);
-const prof={...seed,products:seed.products.map(p=>p.nextDate?{...p,nextDate:start}:p)};
+// the skin break of Oct 29 is tested on its own (skin-break.test.js)
+const prof={...seed,procedures:(seed.procedures||[]).filter(x=>x.type!=='irritation'),products:seed.products.map(p=>p.nextDate?{...p,nextDate:start}:p)};
 const f=re=>prof.products.find(p=>p.scheduled!==false&&re.test(p.genericName+' '+(p.brandName||'')));
 const micro=f(/microfoliant/i),vitc=f(/vitamin c serum/i),sa=f(/exfoliating sa cleanser/i),tret=f(/tretinoin/i),vino=f(/vinohydra/i);
 const bad=p=>cg(p).some(g=>['vitamin-c','acid-exfoliant','retinoid','benzoyl'].includes(g));

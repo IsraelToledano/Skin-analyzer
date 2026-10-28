@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-29.2";
+const APP_VERSION = "2026-10-29.3";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -540,8 +540,28 @@ const PROCEDURE_TYPES = {
     icon: "🔆",
     blockNights: 0,
     note: "Non-ablative — no recovery window, so it doesn't hold back actives. Tracked only."
+  },
+  // Israel, 2026-10-29: "my skin feels a bit irritated — take that into
+  // consideration when scheduling actives". A skin break covers the day it
+  // is logged and the next one, morning and evening: no retinoids, acids
+  // (acid cleanser included), vitamin C or clay masks; a gentle cleanser in
+  // the mornings. Logged from its own button, not the treatment list.
+  irritation: {
+    label: "Skin break",
+    icon: "🩹",
+    blockNights: 2,
+    breakDays: 2,
+    ownButton: true,
+    note: "Skin feels irritated: two gentle days — no retinoids, acids, vitamin C or clay masks."
   }
 };
+// The skin break covering `ds` (morning and evening), or null.
+const skinBreakOn = (procedures, ds) => (procedures || []).find(x => {
+  const def = x && PROCEDURE_TYPES[x.type];
+  if (!def || !def.breakDays || !x.date || !/^\d{4}-\d{2}-\d{2}$/.test(x.date) || !ds) return false;
+  const gap = daysBetween(x.date, ds);
+  return gap >= 0 && gap < def.breakDays;
+}) || null;
 const proceduresOn = (profile, ds) => (profile?.procedures || []).filter(x => x.date === ds);
 // True if an active (retinoid / acid exfoliant) must be held back on `ds`
 // because of a procedure's recovery window. A procedure with blockNights: n
@@ -1256,8 +1276,15 @@ const addStepIrritationRisks = (profile, product, ds, session) => {
       if (n < iv) out.push({ text: `You used ${product.genericName} ${n === 1 ? "yesterday" : `${n} days ago`}. It's meant ${FREQ_WORD[product.frequency] || product.frequency} — using it again this soon over-does it.`, productId: product.id, date: lastUse });
     }
   }
+  // a skin break he logged (irritated skin) covering this day
+  const brk = skinBreakOn(profile.procedures, ds);
+  if (brk) {
+    const resume = addDaysStr(brk.date, PROCEDURE_TYPES[brk.type].breakDays);
+    const dayWord = brk.date === today ? "today" : brk.date === addDaysStr(today, -1) ? "yesterday" : `on ${parseDate(brk.date).toLocaleDateString("en-US", { weekday: "long" })}`;
+    out.push({ text: `You marked your skin as irritated ${dayWord} — it's on a break from retinoids, acids and vitamin C until ${parseDate(resume).toLocaleDateString("en-US", { weekday: "long" })}. ${product.genericName} now would irritate it further.` });
+  }
   // a procedure recovery window (e.g. microneedling) covering this day
-  if (session === "pm" && nextGroups.some(g => g === "retinoid" || g === "acid-exfoliant") && activesBlockedOn(profile, ds)) {
+  else if (session === "pm" && nextGroups.some(g => g === "retinoid" || g === "acid-exfoliant") && activesBlockedOn(profile, ds)) {
     out.push({ text: `You're inside a procedure recovery window (e.g. microneedling). Skin is still healing — retinoids and exfoliants on it now cause redness and irritation.` });
   }
   return out;
@@ -2976,6 +3003,28 @@ const MIGRATIONS = [{
     return { ...profile, products: profile.products.map(p => ids.has(p.id) ? { ...p, notes: clean(p.notes), waitInstruction: note } : p) };
   }
 }, {
+  id: "mark_fragranced_cleanser_v1",
+  // The Caudalie Vinopure Purifying Gel Cleanser carries six essential oils
+  // and allergens (its own notes say so). Flagged so a skin break picks the
+  // fragrance-free cleanser instead (2026-10-29).
+  apply: profile => {
+    const hit = p => /vinopure purifying gel/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+    if (!(profile.products || []).some(p => hit(p) && !p.fragranced)) return profile;
+    return { ...profile, products: profile.products.map(p => hit(p) ? { ...p, fragranced: true } : p) };
+  }
+}, {
+  id: "skin_break_2026_10_29_v1",
+  // Explicit request (2026-10-29, after midnight): "my skin feels a bit
+  // irritated — take that into consideration when scheduling actives".
+  // Starts a two-day skin break on Oct 29 (Oct 29–30, morning and evening).
+  // Only while it's still relevant, and never on top of a break he logged.
+  apply: profile => {
+    if (todayStr() > "2026-10-30") return profile;
+    const procs = profile.procedures || [];
+    if (procs.some(x => x && x.type === "irritation" && x.date >= "2026-10-28")) return profile;
+    return { ...profile, procedures: [...procs, { date: "2026-10-29", type: "irritation" }] };
+  }
+}, {
   id: "vitc_wait_note_v1",
   // Explicit request (2026-10-16): a note on the vitamin C serum, shown when
   // the step is expanded, on waiting after the toner. Only fills an empty
@@ -3868,6 +3917,21 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           recoveryOwed[p.id] = true;
         });
       }
+    }
+    // A skin break: the morning is a recovery morning whatever ran last
+    // night; the evening keeps clay masks out (retinoids and acids are held
+    // by the procedure window below).
+    if (skinBreakOn(procedures, ds)) {
+      if (session === "am") recoveryMorning = true;
+      const gentleCleanserExists = (products || []).some(p => p.scheduled && detectType(p) === "cleanser" && classifyActiveGroups(p).length === 0);
+      sessionProducts.forEach(p => {
+        if (placedIds.has(p.id)) return;
+        if (session === "am" && blockedOnRecoveryMorning(p) && !(isRinseOffProduct(p) && !gentleCleanserExists)) excludedToday.add(p.id);
+        if (isWashOffMask(p)) excludedToday.add(p.id);
+        // fragranced / essential-oil products sit out too (e.g. the
+        // Caudalie gel cleanser); the gentle cleanser takes the wash
+        if (p.fragranced) excludedToday.add(p.id);
+      });
     }
     excludedToday.forEach(id => { if (placedIds.has(id)) excludedToday.delete(id); });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
@@ -4838,6 +4902,35 @@ const SwapPickerModal = ({
 // treatment appears here only because Israel logged it, and logging one
 // immediately reshapes the PM schedule around its recovery window (see
 // PROCEDURE_TYPES / procedureBlocksActives).
+// One tap when skin feels irritated: a two-day skin break (see
+// PROCEDURE_TYPES.irritation). While one covers the day, it shows what's
+// paused and until when, with a way to end it early.
+const SkinBreakStrip = ({ ds, profile, onUpdate }) => {
+  const h = React.createElement;
+  const font = "'Inter',sans-serif";
+  const brk = skinBreakOn(profile.procedures, ds);
+  if (brk) {
+    const resume = addDaysStr(brk.date, PROCEDURE_TYPES.irritation.breakDays);
+    const resumeName = parseDate(resume).toLocaleDateString("en-US", { weekday: "long" });
+    return h("div", {
+      "data-testid": "skin-break-on",
+      style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginTop: 8, borderRadius: 8, background: T.accentSoft, fontFamily: font }
+    }, h("span", { style: { fontSize: 15 } }, "\ud83e\ude79"),
+      h("div", { style: { flex: 1, minWidth: 0 } },
+        h("div", { style: { fontSize: 13, fontWeight: 700, color: T.text } }, "Skin break"),
+        h("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, `Gentle routine — no retinoids, acids, vitamin C or clay masks. Back to normal ${resumeName}.`)),
+      h("button", {
+        "data-testid": "skin-break-end",
+        onClick: () => onUpdate({ procedures: (profile.procedures || []).filter(x => x !== brk) }),
+        style: { border: "none", background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font }
+      }, "End break"));
+  }
+  return h("button", {
+    "data-testid": "skin-break-start",
+    onClick: () => onUpdate({ procedures: [...(profile.procedures || []), { date: ds, type: "irritation" }] }),
+    style: { width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 10, border: `1px dashed ${T.border}`, background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font }
+  }, "\ud83e\ude79 Skin feels irritated \u2014 take a 2-day break");
+};
 const TreatmentStrip = ({ ds, profile, onUpdate }) => {
   const [open, setOpen] = useState(false);
   const logged = proceduresOn(profile, ds);
@@ -4862,7 +4955,7 @@ const TreatmentStrip = ({ ds, profile, onUpdate }) => {
   // contents are visible at a glance alongside the product steps.
   logged.map(item => {
     const def = PROCEDURE_TYPES[item.type];
-    if (!def) return null;
+    if (!def || def.ownButton) return null;
     return /*#__PURE__*/React.createElement("div", {
       key: item.type,
       style: {
@@ -4899,7 +4992,7 @@ const TreatmentStrip = ({ ds, profile, onUpdate }) => {
       border: `1px solid ${T.border}`,
       fontFamily: "'Inter',sans-serif"
     }
-  }, Object.entries(PROCEDURE_TYPES).map(([type, def]) => {
+  }, Object.entries(PROCEDURE_TYPES).filter(([, def]) => !def.ownButton).map(([type, def]) => {
     const already = logged.some(x => x.type === type);
     return /*#__PURE__*/React.createElement("button", {
       key: type,
@@ -5670,6 +5763,10 @@ const RoutineBlock = ({
       const log = logs.find(l => l.productId === p.id && l.session === session);
       return !(log?.skipped && !log?.done);
     })
+  }), /*#__PURE__*/React.createElement(SkinBreakStrip, {
+    ds: ds,
+    profile: profile,
+    onUpdate: onUpdate
   }), session === "pm" && /*#__PURE__*/React.createElement(TreatmentStrip, {
     ds: ds,
     profile: profile,
