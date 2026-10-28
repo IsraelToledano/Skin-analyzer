@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-29.1";
+const APP_VERSION = "2026-10-29.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -5153,12 +5153,20 @@ const RoutineBlock = ({
       ds,
       profile
     });
+    // Swapping out a step that was itself swapped/added in: its pin goes, and
+    // whatever that pin had taken out of the routine stays out (2026-10-29 —
+    // a swapped-in step could only be removed, not swapped again).
+    const outPin = mode === "swap" && excludeProduct ? (profile.pins || []).find(pin => pin && pin.date === ds && pin.session === session && pin.productId === excludeProduct.id) : null;
+    if (outPin) {
+      (Array.isArray(outPin.bumps) ? outPin.bumps : []).forEach(id => { if (id !== newProduct.id && !bumpIds.includes(id)) bumpIds.push(id); });
+    }
+    const basePins = outPin ? (profile.pins || []).filter(pin => pin !== outPin) : (profile.pins || []);
     const samePin = pin => pin && pin.date === ds && pin.session === session && pin.productId === newProduct.id;
-    const existingPin = (profile.pins || []).find(samePin);
-    const newPins = existingPin ? (profile.pins || []).map(pin => samePin(pin) ? {
+    const existingPin = basePins.find(samePin);
+    const newPins = existingPin ? basePins.map(pin => samePin(pin) ? {
       ...pin,
       bumps: Array.from(new Set([...(Array.isArray(pin.bumps) ? pin.bumps : []), ...bumpIds]))
-    } : pin) : [...(profile.pins || []), {
+    } : pin) : [...basePins, {
       id: Date.now() + Math.random(),
       date: ds,
       session,
@@ -5546,7 +5554,26 @@ const RoutineBlock = ({
         width: 52,
         flexShrink: 0
       }
-    }, p.pinned ? /*#__PURE__*/React.createElement("button", {
+    }, p.pinned ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setPicker({
+        mode: "swap",
+        excludeProduct: p
+      }),
+      "data-testid": "swap-pinned",
+      title: "Swap this step",
+      style: {
+        height: 25,
+        padding: 0,
+        borderRadius: 7,
+        border: `1px solid ${T.border}`,
+        background: "transparent",
+        color: T.muted,
+        fontSize: 10,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "'Inter',sans-serif"
+      }
+    }, "\u21c4 Swap"), /*#__PURE__*/React.createElement("button", {
       onClick: () => removePin(p.id),
       style: {
         height: 24,
@@ -5560,7 +5587,7 @@ const RoutineBlock = ({
         fontFamily: "'Inter',sans-serif",
         padding: 0
       }
-    }, "Remove") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    }, "Remove")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
       onClick: () => setPicker({
         mode: "swap",
         excludeProduct: p
