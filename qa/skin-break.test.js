@@ -22,7 +22,7 @@ t('a step he adds himself during the break stays',()=>{const vc=base.products.fi
   const p2=plan(get,{...withBreak,pins:[{id:1,date:today,session:'am',productId:vc.id}]},3);assert.ok(p2[today+':am'].some(p=>p.id===vc.id));});
 t('adding an active during the break warns, naming the break',()=>{const R=get('addStepIrritationRisks');const tret=base.products.find(p=>/tretinoin/i.test(p.brandName||''));const vc=base.products.find(p=>/vitamin c serum/i.test(p.genericName));
   const r1=R(withBreak,tret,add(today,1),'pm'),r2=R(withBreak,vc,today,'am');
-  assert.ok(r1.some(x=>/marked your skin as irritated today/.test(x.text)),JSON.stringify(r1));assert.ok(r2.some(x=>/irritated/.test(x.text)));
+  assert.ok(r1.some(x=>/on a break \(you said it felt irritated\)/.test(x.text)),JSON.stringify(r1));assert.ok(r2.some(x=>/irritated/.test(x.text)));
   assert.ok(!R(withBreak,base.products.find(p=>/snail/i.test(p.brandName||p.genericName)),today,'pm').length,'a hydrating step does not warn');});
 t('nothing scheduled during the break sets the warning off',()=>{const R=get('addStepIrritationRisks');
   bdays.forEach(d=>['am','pm'].forEach(s=>pl[d+':'+s].forEach(p=>assert.deepStrictEqual(R(withBreak,p,d,s),[],d+s+' '+p.genericName))));});

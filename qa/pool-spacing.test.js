@@ -2,7 +2,7 @@
 // wins the first exfoliant night of the week must not also win the second
 // one two days later (the Microfoliant Wed + Fri bug, 2026-10-02).
 const assert=require('assert');const {load}=require('./sim');const {P,baseProducts,T}=require('./fixture');
-const get=load([2026,8,20]);
+const get=load([2026,8,20],{plan:'standard'}); // rotation mechanics, written against the standard (summer) week
 let pass=0,fail=0;const t=(n,fn)=>{try{fn();pass++;console.log('  ok  ',n)}catch(e){fail++;console.log('  FAIL',n,'\n       ',e.message.split('\n')[0])}};
 const add=get('addDaysStr'),between=get('daysBetween'),rr=get('rotationRoleFor'),FD=get('FREQ_DAYS');
 const ANCHOR=T;

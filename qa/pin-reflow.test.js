@@ -3,7 +3,7 @@
 // same-role rotation night right after it moves on, and the steps it took
 // out come back on their next eligible night. Nothing before it changes.
 const assert=require('assert');const {load,seedProfile}=require('./sim');const {checkDay}=require('./audit');const {P,T}=require('./fixture');
-const get=load([2026,8,20]);
+const get=load([2026,8,20],{plan:'standard'}); // rotation mechanics, written against the standard (summer) week
 let pass=0,fail=0;const t=(n,fn)=>{try{fn();pass++;console.log('  ok  ',n)}catch(e){fail++;console.log('  FAIL',n,'\n       ',e.message.split('\n')[0])}};
 const add=get('addDaysStr'),cap=get('SESSION_CAP'),rr=get('rotationRoleFor');
 const build=(prods,logs,pins,session,days=30)=>get('buildSessionSchedule')(prods,logs,session,get('computeEpoch')(prods,session),add(T,days-1),cap,pins,[]);

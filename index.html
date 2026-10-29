@@ -127,13 +127,14 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-29.3";
+const APP_VERSION = "2026-10-29.4";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
 const CONCERNS = ["Acne / Breakouts", "Blackheads / Whiteheads", "Oiliness", "Dryness / Flakiness", "Sensitivity / Redness", "Hyperpigmentation", "Dark spots / Melasma", "Fine lines / Wrinkles", "Enlarged pores", "Dullness / Texture", "Dark circles", "Sagging / Firmness", "Rosacea", "Eczema / Psoriasis", "Scarring"];
 const FREQS = {
   daily: "Daily",
+  "three-weekly": "3×/week",
   "twice-weekly": "2×/week",
   weekly: "Weekly",
   "bi-weekly": "Every 2 wks",
@@ -143,6 +144,7 @@ const FREQS = {
 };
 const FREQ_DAYS = {
   daily: 1,
+  "three-weekly": 2,
   "twice-weekly": 3,
   weekly: 7,
   "bi-weekly": 14,
@@ -543,9 +545,10 @@ const PROCEDURE_TYPES = {
   },
   // Israel, 2026-10-29: "my skin feels a bit irritated — take that into
   // consideration when scheduling actives". A skin break covers the day it
-  // is logged and the next one, morning and evening: no retinoids, acids
+  // starts and the next one, morning and evening: no retinoids, acids
   // (acid cleanser included), vitamin C or clay masks; a gentle cleanser in
-  // the mornings. Logged from its own button, not the treatment list.
+  // the mornings. No button (his call: too rare) — Claude starts one with a
+  // named migration when he says his skin is irritated.
   irritation: {
     label: "Skin break",
     icon: "🩹",
@@ -580,10 +583,24 @@ const dayOrderFor = (profile, ds, session) => (profile?.dayOrder || {})[dayOrder
 // exists for this exact day+session), otherwise the canonical category
 // order. Ties inside a category fall back to product id so the result is
 // stable rather than dependent on array order.
+// On a retinoid night the hydrating layer (essence / leave-on cream mask)
+// goes right after the retinoid instead of before it: nothing touches the
+// skin before the retinoid, and the humectant still gets its turn
+// (2026-10-29, winter).
+const humectantAfterRetinoid = list => {
+  const r = list.map(p => detectType(p)).lastIndexOf("retinoid");
+  if (r < 0) return list;
+  const hyd = p => !isWashOffMask(p) && classifySingletonGroups(p).includes("layer:essence");
+  const moving = list.filter((p, i) => i < r && hyd(p));
+  if (!moving.length) return list;
+  const rest = list.filter(p => !moving.includes(p));
+  const at = rest.map(p => detectType(p)).lastIndexOf("retinoid") + 1;
+  return [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+};
 const sortForDay = (prods, profile, ds, session) => {
   const canon = (a, b) => canonicalStepOrder(a) - canonicalStepOrder(b) || String(a.id).localeCompare(String(b.id));
   const override = dayOrderFor(profile, ds, session);
-  if (!Array.isArray(override) || !override.length) return [...prods].sort(canon);
+  if (!Array.isArray(override) || !override.length) return humectantAfterRetinoid([...prods].sort(canon));
   // Products named in the override keep the dragged order. Anything NOT
   // named (a step added after the drag, or a product that newly became due)
   // used to sort after every named product regardless of category, so a
@@ -1194,7 +1211,7 @@ const explainAddStepBumps = (newProduct, bumpIds, prods) => (bumpIds || []).map(
 const STRONG_GROUPS = ["retinoid", "acid-exfoliant", "vitamin-c", "benzoyl"];
 const strongGroupsOf = p => !p || detectType(p) === "selftan" ? [] : conflictGroupsFor(p).filter(g => STRONG_GROUPS.includes(g));
 const GROUP_WORD = { "retinoid": "a retinoid", "acid-exfoliant": "an exfoliant", "vitamin-c": "a strong vitamin C", "benzoyl": "benzoyl peroxide" };
-const FREQ_WORD = { daily: "daily", "twice-weekly": "about twice a week", weekly: "once a week", "bi-weekly": "every two weeks", monthly: "once a month", "6-weekly": "every six weeks", "8-weekly": "every eight weeks" };
+const FREQ_WORD = { daily: "daily", "three-weekly": "about three times a week", "twice-weekly": "about twice a week", weekly: "once a week", "bi-weekly": "every two weeks", monthly: "once a month", "6-weekly": "every six weeks", "8-weekly": "every eight weeks" };
 const sessionWhen = (date, sess, today) => {
   const y = addDaysStr(today, -1);
   if (date === today) return sess === "am" ? "this morning" : "tonight";
@@ -1280,8 +1297,7 @@ const addStepIrritationRisks = (profile, product, ds, session) => {
   const brk = skinBreakOn(profile.procedures, ds);
   if (brk) {
     const resume = addDaysStr(brk.date, PROCEDURE_TYPES[brk.type].breakDays);
-    const dayWord = brk.date === today ? "today" : brk.date === addDaysStr(today, -1) ? "yesterday" : `on ${parseDate(brk.date).toLocaleDateString("en-US", { weekday: "long" })}`;
-    out.push({ text: `You marked your skin as irritated ${dayWord} — it's on a break from retinoids, acids and vitamin C until ${parseDate(resume).toLocaleDateString("en-US", { weekday: "long" })}. ${product.genericName} now would irritate it further.` });
+    out.push({ text: `Your skin is on a break (you said it felt irritated) — no retinoids, acids or vitamin C until ${parseDate(resume).toLocaleDateString("en-US", { weekday: "long" })}. ${product.genericName} now would irritate it further.` });
   }
   // a procedure recovery window (e.g. microneedling) covering this day
   else if (session === "pm" && nextGroups.some(g => g === "retinoid" || g === "acid-exfoliant") && activesBlockedOn(profile, ds)) {
@@ -3003,6 +3019,34 @@ const MIGRATIONS = [{
     return { ...profile, products: profile.products.map(p => ids.has(p.id) ? { ...p, notes: clean(p.notes), waitInstruction: note } : p) };
   }
 }, {
+  id: "winter_2026_v1",
+  // Israel, 2026-10-29: going into winter — fewer and gentler peels, more
+  // retinoid, more hydration. With the winter rotation (ROTATION_PLANS):
+  //  - tretinoin 3 nights a week (was 2);
+  //  - OTC retinol paused — tretinoin's third night replaces it;
+  //  - the strongest exfoliants paused: SR One Step Peel, the AHA 30% peel
+  //    on the whole face (spot use stays), Glycolic 7%, Some By Mi
+  //    AHA/BHA/PHA and COSRX AHA/BHA toners. One gentle exfoliant night a
+  //    week rotates Paula's Choice BHA, Microfoliant and the Caudalie serum;
+  //  - the VinoHydra cream mask twice a week (was weekly).
+  // Paused products stay in the library, marked winterPaused, so spring can
+  // bring them back. Idempotent: only touches what isn't already set.
+  apply: profile => {
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const pause = [/one step peel/, /aha 30%/, /glycolic acid 7%/, /aha\.bha\.pha|30 days miracle/, /cosrx aha\/bha/];
+    let changed = false;
+    const products = (profile.products || []).map(p => {
+      if (!p || !p.scheduled) return p;
+      const h = hay(p);
+      if (detectType(p) === "retinoid" && h.includes("tretinoin") && p.frequency !== "three-weekly") { changed = true; return { ...p, frequency: "three-weekly" }; }
+      if (detectType(p) === "retinoid" && !h.includes("tretinoin")) { changed = true; return { ...p, scheduled: false, winterPaused: true }; }
+      if (pause.some(re => re.test(h))) { changed = true; return { ...p, scheduled: false, winterPaused: true }; }
+      if (/vinohydra/.test(h) && p.frequency === "weekly") { changed = true; return { ...p, frequency: "twice-weekly" }; }
+      return p;
+    });
+    return changed ? { ...profile, products } : profile;
+  }
+}, {
   id: "mark_fragranced_cleanser_v1",
   // The Caudalie Vinopure Purifying Gel Cleanser carries six essential oils
   // and allergens (its own notes say so). Flagged so a skin break picks the
@@ -3681,7 +3725,15 @@ const rotationRoleFor = p => {
   return ROTATION_CATEGORY_ROLES[type];
 };
 const poolWeightFor = p => RANK_WEIGHT[getProductRank(p).tag] || 1;
-const ROTATION_SLOTS = [{
+// Weekly rotation plans. "standard" is the summer/default week; "winter"
+// (Israel, 2026-10-29: winter is coming — fewer, gentler peels, more
+// retinoid, more hydration) trades the second exfoliant night and the OTC
+// retinol night for a third tretinoin night and a rest night:
+//   day 0 exfoliant · 1 tretinoin · 2 rest · 3 tretinoin · 4 mask ·
+//   5 tretinoin · 6 rest  →  4 active nights instead of 5.
+// Switching back is one line: ROTATION_SLOTS = ROTATION_PLANS.standard.
+const ROTATION_PLANS = {
+  standard: [{
   role: "exfoliant",
   offsetDays: 0
 }, {
@@ -3699,7 +3751,10 @@ const ROTATION_SLOTS = [{
 }, {
   role: "tretinoin",
   offsetDays: 5
-}];
+}],
+  winter: [{ role: "exfoliant", offsetDays: 0 }, { role: "tretinoin", offsetDays: 1 }, { role: "tretinoin", offsetDays: 3 }, { role: "mask", offsetDays: 4 }, { role: "tretinoin", offsetDays: 5 }]
+};
+const ROTATION_SLOTS = ROTATION_PLANS.winter;
 const daysBetween = (aStr, bStr) => {
   const a = parseDate(aStr),
     b = parseDate(bStr);
@@ -3770,7 +3825,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   const recoveryOwed = {};
   const servedDates = {};
   // Owed catch-up keeps the product at its intended weekly count, never above.
-  const underWeeklyQuota = (p, ds) => (servedDates[p.id] || []).filter(d => daysBetween(d, ds) < 7).length < 7 / (FREQ_DAYS[p.frequency] || 1);
+  const underWeeklyQuota = (p, ds) => (servedDates[p.id] || []).filter(d => daysBetween(d, ds) < 7).length < Math.max(1, Math.round(7 / (FREQ_DAYS[p.frequency] || 1)));
   // Tracks how many times each product has been placed so far in this
   // schedule build. Used ONLY as a tiebreaker (after overdue score) when
   // filling budget in step 3 below — see the comment there for why this
@@ -4202,15 +4257,14 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         registerPlaced(winner);
       });
     }
-    // 2e. Retinoid nights are lean (Israel's call: tretinoin 2026-10-15,
-    //    every retinoid on clean dry skin 2026-10-17): cleanser, retinoid,
-    //    moisturizer, lip. Nothing watery goes on before it, so the toner
-    //    and the essence slot (essences, leave-on hydrating masks) sit out.
-    //    A step he added by hand, or already ticked, stays; a step carried
-    //    over from a skip moves on instead (it is daily, so it is back
-    //    tomorrow).
+    // 2e. Retinoid nights: the retinoid goes on clean, dry skin with nothing
+    //    before it (Israel, 2026-10-17), so the toner sits out. Winter
+    //    (2026-10-29: "more humectants"): the night's hydrating layer (an
+    //    essence or the cream mask) now comes back, AFTER the retinoid and
+    //    before the moisturizer — see sortForDay. A step he added by hand,
+    //    or already ticked, stays; a carried-over toner moves on.
     if ([...placedIds].some(id => { const p = byId.get(id); return p && detectType(p) === "retinoid"; })) {
-      const leanOut = p => p && classifySingletonGroups(p).some(g => g === "layer:toner" || g === "layer:essence");
+      const leanOut = p => p && classifySingletonGroups(p).some(g => g === "layer:toner");
       for (let i = dayList.length - 1; i >= 0; i--) {
         const e = dayList[i];
         if (!e.carried || e.pinned) continue;
@@ -4219,7 +4273,6 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         dayList.splice(i, 1);
         placedIds.delete(e.productId);
       }
-      placedGroups.add("layer:essence");
       placedGroups.add("layer:toner");
     }
     // 3. Fill remaining budget from the group pool, most-overdue-first.
@@ -4692,7 +4745,8 @@ const stepTip = (done, next) => {
   // before it), the product's own waitInstruction for anything else
   const wet = ["cleanser", "cleanser_oil", "toner", "mist", "essence"].includes(dt) || isWashOffMask(done) || /microfoliant|powder exfoliant|peeling solution|gel peel/.test(hay(done));
   const own = typeof next.waitInstruction === "string" && next.waitInstruction.trim();
-  if (isHyaluronicLeaveOn(next)) lines.push(["toner", "mist", "essence"].includes(dt) ? `Put ${nn} on while the skin is still damp from the ${dt === "essence" ? "essence" : "toner"} — if it has dried, mist or pat on a little water first. Hyaluronic acid needs water on the skin to hold.` : `Mist or pat a little water on your face first — ${nn} needs damp skin. On dry skin hyaluronic acid can pull moisture out instead.`);
+  if (isHyaluronicLeaveOn(next) && dt === "retinoid") lines.push(`Put ${nn} on as it is — no extra water over the retinoid.`);
+  else if (isHyaluronicLeaveOn(next)) lines.push(["toner", "mist", "essence"].includes(dt) ? `Put ${nn} on while the skin is still damp from the ${dt === "essence" ? "essence" : "toner"} — if it has dried, mist or pat on a little water first. Hyaluronic acid needs water on the skin to hold.` : `Mist or pat a little water on your face first — ${nn} needs damp skin. On dry skin hyaluronic acid can pull moisture out instead.`);
   else if (nt === "retinoid") lines.push(wet ? "Pat dry and wait until your skin is completely dry (about 10 minutes after washing) — on damp skin a retinoid irritates more." : "Make sure your skin is completely dry first.");
   else if (nt === "vitc") lines.push(wet ? "Wait 1–2 minutes until your skin isn't wet — strong vitamin C stings more on damp skin." : "Your skin should be dry before it goes on.");
   else if (nt === "spf") lines.push(`Wait until the ${dt === "moisturizer" ? "moisturizer" : "last layer"} isn't tacky (1–2 minutes) so the sunscreen spreads evenly.`);
@@ -4902,35 +4956,6 @@ const SwapPickerModal = ({
 // treatment appears here only because Israel logged it, and logging one
 // immediately reshapes the PM schedule around its recovery window (see
 // PROCEDURE_TYPES / procedureBlocksActives).
-// One tap when skin feels irritated: a two-day skin break (see
-// PROCEDURE_TYPES.irritation). While one covers the day, it shows what's
-// paused and until when, with a way to end it early.
-const SkinBreakStrip = ({ ds, profile, onUpdate }) => {
-  const h = React.createElement;
-  const font = "'Inter',sans-serif";
-  const brk = skinBreakOn(profile.procedures, ds);
-  if (brk) {
-    const resume = addDaysStr(brk.date, PROCEDURE_TYPES.irritation.breakDays);
-    const resumeName = parseDate(resume).toLocaleDateString("en-US", { weekday: "long" });
-    return h("div", {
-      "data-testid": "skin-break-on",
-      style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginTop: 8, borderRadius: 8, background: T.accentSoft, fontFamily: font }
-    }, h("span", { style: { fontSize: 15 } }, "\ud83e\ude79"),
-      h("div", { style: { flex: 1, minWidth: 0 } },
-        h("div", { style: { fontSize: 13, fontWeight: 700, color: T.text } }, "Skin break"),
-        h("div", { style: { fontSize: 11, color: T.muted, marginTop: 2 } }, `Gentle routine — no retinoids, acids, vitamin C or clay masks. Back to normal ${resumeName}.`)),
-      h("button", {
-        "data-testid": "skin-break-end",
-        onClick: () => onUpdate({ procedures: (profile.procedures || []).filter(x => x !== brk) }),
-        style: { border: "none", background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font }
-      }, "End break"));
-  }
-  return h("button", {
-    "data-testid": "skin-break-start",
-    onClick: () => onUpdate({ procedures: [...(profile.procedures || []), { date: ds, type: "irritation" }] }),
-    style: { width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 10, border: `1px dashed ${T.border}`, background: "transparent", color: T.muted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: font }
-  }, "\ud83e\ude79 Skin feels irritated \u2014 take a 2-day break");
-};
 const TreatmentStrip = ({ ds, profile, onUpdate }) => {
   const [open, setOpen] = useState(false);
   const logged = proceduresOn(profile, ds);
@@ -5763,10 +5788,6 @@ const RoutineBlock = ({
       const log = logs.find(l => l.productId === p.id && l.session === session);
       return !(log?.skipped && !log?.done);
     })
-  }), /*#__PURE__*/React.createElement(SkinBreakStrip, {
-    ds: ds,
-    profile: profile,
-    onUpdate: onUpdate
   }), session === "pm" && /*#__PURE__*/React.createElement(TreatmentStrip, {
     ds: ds,
     profile: profile,

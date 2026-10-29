@@ -2,7 +2,7 @@
 // for that day had something else (2026-10-15: the AHA 30% peel was done
 // Oct 9 and came back Oct 14). Plus the peel's mostly-spot migration.
 const assert=require('assert');const {load}=require('./sim');const {P,baseProducts}=require('./fixture');
-const get=load([2026,9,15]);
+const get=load([2026,9,15],{plan:'standard'}); // fixture dates assume the standard week's two exfoliant slots
 let pass=0,fail=0;const t=(n,fn)=>{try{fn();pass++;console.log('  ok  ',n)}catch(e){fail++;console.log('  FAIL',n,'\n       ',e.message.split('\n')[0])}};
 const add=get('addDaysStr'),between=get('daysBetween'),today=get('todayStr')();
 const START='2026-09-01';

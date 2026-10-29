@@ -36,10 +36,17 @@ t('"why this step" ignores a stale stored stepOrder',()=>{
 console.log('full canonical order');
 const all=[['cleanser_oil','Cleansing Oil'],['cleanser','Gel Cleanser'],['exfoliant','Glycolic Acid 7% Toning Solution'],['toner','Hydrating Toner'],['essence','Snail 96 Mucin Power Essence'],['vitc','Vitamin C Serum'],['retinoid','Retinol Serum'],['serum','Peptide Serum'],['eye','Eye Cream'],['mask','Sheet Mask'],['faceoil','Squalane Face Oil'],['moisturizer','Barrier Cream Moisturizer'],['lip','Lip Balm'],['spf','SPF 50 Sunscreen']];
 t('each test product classifies into its intended category',()=>{all.forEach(([type,n],i)=>assert.strictEqual(A.detectType(P(i,n,'pm','daily')),type,n))});
-t('strict layering order holds across every category',()=>{
+t('strict layering order holds across every category (a night without a retinoid)',()=>{
+  const noRet=all.filter(([type])=>type!=='retinoid');
+  const ps=noRet.map(([,n],i)=>P(100+i,n,'pm','daily'));
+  const o=A.sortForDay([...ps].reverse(),profile(),T,'pm').map(p=>A.detectType(p));
+  assert.deepStrictEqual(o,noRet.map(([type])=>type));
+});
+t('on a retinoid night the hydrating layer moves to right after the retinoid; the rest keeps its order (winter 2026-10-29)',()=>{
   const ps=all.map(([,n],i)=>P(100+i,n,'pm','daily'));
   const o=A.sortForDay([...ps].reverse(),profile(),T,'pm').map(p=>A.detectType(p));
-  assert.deepStrictEqual(o,all.map(([type])=>type));
+  const exp=all.map(([type])=>type).filter(t=>t!=='essence');exp.splice(exp.indexOf('retinoid')+1,0,'essence');
+  assert.deepStrictEqual(o,exp);
 });
 t('oil cleanse still precedes the water cleanse, and every cleanser precedes the exfoliant',()=>{
   const o=all.map(([t])=>t);assert.ok(o.indexOf('cleanser_oil')<o.indexOf('cleanser')&&o.indexOf('cleanser')<o.indexOf('exfoliant'));

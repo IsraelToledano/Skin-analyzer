@@ -11,6 +11,6 @@ t('scheduled retinoids get the dry-skin note and lose the toner note',()=>{const
   assert.strictEqual(o.products[1],off);assert.ok(!o.products[2].waitInstruction);});
 t('keeps any other note text',()=>{const o=M().apply({products:[{...ret,notes:old+' Use a pea-sized amount.'}]});assert.strictEqual(o.products[0].notes,'Use a pea-sized amount.');});
 t('idempotent and safe on empty',()=>{const once=M().apply({products:[ret]});assert.strictEqual(M().apply(once),once);const e={};assert.strictEqual(M().apply(e),e);});
-t('his library: both scheduled retinoids carry it',()=>{const p=seedProfile(get);const r=p.products.filter(x=>x.scheduled&&get('detectType')(x)==='retinoid');
+t('his library: both scheduled retinoids carry it',()=>{const p=seedProfile(get);const r=p.products.filter(x=>(x.scheduled||x.winterPaused)&&get('detectType')(x)==='retinoid');
   assert.ok(r.length>=2);r.forEach(x=>assert.ok(/dry skin/.test(x.waitInstruction||''),x.genericName));});
 console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);

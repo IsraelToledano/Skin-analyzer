@@ -2,12 +2,15 @@
 // product library: the original seed list (artifact-version ISRAEL_PRODUCTS)
 // run through every migration the phone app applies on load.
 const fs=require('fs');
-function load(today=[2026,9,1]){
+// opts.plan: 'standard' runs the summer rotation (ROTATION_PLANS.standard)
+// for tests of the rotation mechanics written against it; default = the app's.
+function load(today=[2026,9,1],opts={}){
   const html=fs.readFileSync(require('path').join(__dirname,'..','index.html'),'utf8');
   const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
   let main=scripts[scripts.length-1];
   main=main.slice(0,main.indexOf('const root = ReactDOM.createRoot'));
   main=main.replace(/const appToday = \(\) => \{[\s\S]*?\n\};\n/,`const appToday = () => new Date(${today.join(',')});\n`);
+  if(opts.plan){const from='const ROTATION_SLOTS = ROTATION_PLANS.winter;';if(!main.includes(from))throw new Error('sim: rotation plan line not found');main=main.replace(from,`const ROTATION_SLOTS = ROTATION_PLANS.${opts.plan};`);}
   const noop=()=>{};
   const React={useState:v=>[typeof v==='function'?v():v,noop],useRef:v=>({current:v}),useEffect:noop,useCallback:f=>f,useMemo:f=>f(),useLayoutEffect:noop,createElement:()=>null,Fragment:'f'};
   const store={};const ls={getItem:k=>store[k]??null,setItem:(k,v)=>{store[k]=v},removeItem:k=>{delete store[k]}};

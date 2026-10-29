@@ -30,7 +30,13 @@ function checkDay(get,key,list,add){
     // R5 layering order (leave-on part): toner < essence < treatments < eye < mask < oil < moisturizer < lip < spf
     const rank={exfoliant:0.5,toner:1,mist:1,essence:2,vitc:3,niacinamide:3,retinoid:3,serum:3.5,eye:4,mask:5,faceoil:6,moisturizer:7,selftan:7.5,lip:8,spf:9};
     const leave=list.filter(p=>!RINSE_OFF(p));
-    for(let i=1;i<leave.length;i++){const a=rank[type(leave[i-1])]??3.5,b=rank[type(leave[i])]??3.5;if(a>b)add('high',key,`"${nameOf(leave[i])}" (${type(leave[i])}) after "${nameOf(leave[i-1])}" (${type(leave[i-1])})`);}
+    // on a retinoid night the hydrating layer (essence / leave-on cream mask)
+    // goes after the retinoid, so it ranks just above it there
+    const retNight=types.includes('retinoid');
+    const rk=p=>retNight&&!RINSE_OFF(p)&&get('classifySingletonGroups')(p).includes('layer:essence')?3.2:(rank[type(p)]??3.5);
+    for(let i=1;i<leave.length;i++){const a=rk(leave[i-1]),b=rk(leave[i]);if(a>b)add('high',key,`"${nameOf(leave[i])}" (${type(leave[i])}) after "${nameOf(leave[i-1])}" (${type(leave[i-1])})`);}
+    // nothing but cleansing before a retinoid
+    if(retNight){const ri=types.indexOf('retinoid');list.slice(0,ri).forEach(p=>{if(!p.pinned&&!['cleanser','cleanser_oil'].includes(type(p)))add('high',key,`"${nameOf(p)}" before the retinoid`)});}
     // R6 conflicts on the skin at the same time (leave-on only, plus acid wash + retinoid)
     const has=g=>list.some(p=>get('conflictGroupsFor')(p).includes(g));
     const leaveHas=g=>leave.some(p=>get('conflictGroupsFor')(p).includes(g));
@@ -53,22 +59,26 @@ function checkDay(get,key,list,add){
 function audit(get,profile,planObj,days){
   const type=p=>get('detectType')(p);
   const issues=[];const add=(sev,key,msg)=>issues.push({sev,key,msg});
-  const counts={};
+  const counts={};const fair={};
   const nameOf=p=>`${p.genericName}${p.brandName?' ('+p.brandName.split(' ').slice(0,3).join(' ')+')':''}`;
   Object.entries(planObj).forEach(([key,list])=>{
     const session=key.split(':')[1];
     // a gentle cleanser borrowed for a recovery morning isn't a session mismatch
     list.forEach(p=>{if(p.recovery)return;counts[p.id]=counts[p.id]||{am:0,pm:0};counts[p.id][session]++;});
+    // fair-turn checks look at the scheduler's own picks: a step carried over
+    // from a skip is the user's doing, not the rotation's
+    list.forEach(p=>{if(p.recovery||p.carried)return;fair[p.id]=fair[p.id]||{am:0,pm:0};fair[p.id][session]++;});
     checkDay(get,key,list,add);
   });
   // R9 frequency adherence
-  const expected={daily:days,'twice-weekly':days*2/7,weekly:days/7,'bi-weekly':days/14,monthly:days/30};
+  const expected={daily:days,'three-weekly':days*3/7,'twice-weekly':days*2/7,weekly:days/7,'bi-weekly':days/14,monthly:days/30};
   const role=p=>get('rotationRoleFor')(p);
   const layer=p=>get('classifySingletonGroups')(p).find(g=>g.startsWith('layer:'));
   const scheduled=profile.products.filter(p=>p.scheduled);
   const info=[];
   // a) weekly rotation pools: total nights per pool, and every member gets a turn
-  const slotsPerWeek={exfoliant:2,tretinoin:2,retinol:1,mask:1};
+  // slots per week come from the app's active rotation plan (standard / winter)
+  const slotsPerWeek={};get('ROTATION_SLOTS').forEach(s=>{slotsPerWeek[s.role]=(slotsPerWeek[s.role]||0)+1;});
   Object.entries(slotsPerWeek).forEach(([r,perWeek])=>{
     const members=scheduled.filter(p=>role(p)===r);if(!members.length)return;
     const total=members.reduce((n,p)=>n+((counts[p.id]||{}).pm||0),0);const exp=days/7*perWeek;
@@ -81,13 +91,15 @@ function audit(get,profile,planObj,days){
     const groups={};
     scheduled.filter(p=>!role(p)&&p.frequency==='daily'&&(p.session===s||p.session==='both')&&layer(p)).forEach(p=>{(groups[layer(p)]=groups[layer(p)]||[]).push(p)});
     Object.entries(groups).filter(([,m])=>m.length>1).forEach(([g,m])=>{
-      const c=m.map(p=>(counts[p.id]||{})[s]||0);const tot=c.reduce((a,b)=>a+b,0);
+      const c=m.map(p=>(fair[p.id]||{})[s]||0);const tot=c.reduce((a,b)=>a+b,0);
       info.push(`${s.toUpperCase()} ${g}: ${m.map((p,i)=>`${p.genericName.slice(0,18)} ${c[i]}`).join(', ')}`);
       // the slot counts as filled by anything that holds it that night (a
       // leave-on hydrating mask fills the essence slot)
       const filled=Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('classifySingletonGroups')(p).includes(g))).length;
       // retinoid nights deliberately leave the toner and essence slots empty (lean nights)
-      const lean=(g==='layer:essence'||g==='layer:toner')?Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('detectType')(p)==='retinoid')).length:0;
+      // retinoid nights leave the toner out (the retinoid goes on dry skin);
+      // the hydrating layer now comes after it (winter), so only toner is lean
+      const lean=(g==='layer:toner')?Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('detectType')(p)==='retinoid')).length:0;
       if(filled<(days-lean)*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days-lean} ${s.toUpperCase()}s`);
       // fair turns are judged per unit of share: a product with shareWeight 2
       // is meant to get about twice the nights of its peers
