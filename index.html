@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-29.4";
+const APP_VERSION = "2026-10-31.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -4736,6 +4736,7 @@ const stepTip = (done, next) => {
   if (dt === "cleanser_oil" && nt === "cleanser") lines.push("Rinse the oil off fully, then wash with the gel cleanser.");
   else if (isWashOffMask(done)) lines.push("Rinse the mask off with lukewarm water and pat dry.");
   else if (/microfoliant|powder exfoliant/.test(hay(done))) lines.push("Rinse well and pat dry — don't rub.");
+  else if (dt === "mask" && /vinohydra|cream mask|sleeping mask|masque-cr/.test(hay(done))) lines.push(`Leave it on about 10 minutes, then wipe off what hasn't sunk in — don't rinse. (Or keep it on overnight as a sleeping mask and go light on ${nn}.)`);
   else if (/peeling solution|gel peel/.test(hay(done))) lines.push("Rinse it off (10 minutes max) and pat dry — a little tingling is normal.");
   else if (!isRinseOffProduct(done) && classifyActiveGroups(done).includes("acid-exfoliant")) lines.push(`Let it absorb for 2–3 minutes before ${nn}.`);
   else if (dt === "vitc") lines.push(`Give it about a minute to sink in before ${nn}.`);

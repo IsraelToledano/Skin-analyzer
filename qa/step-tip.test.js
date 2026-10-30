@@ -20,6 +20,8 @@ t('oil cleanse → gel cleanser: rinse the oil off',()=>assert.ok(/Rinse the oil
 t('clay mask → next: rinse the mask off',()=>assert.ok(/Rinse the mask off/.test(L(clay,snail))));
 t('leave-on BHA → toner: wait 2–3 minutes',()=>assert.ok(/2–3 minutes/.test(L(bha,ton))));
 t('self-tan: blend before, wash hands after',()=>{assert.ok(/blend into the hairline/.test(L(mo,tan)));assert.ok(/Wash your hands/.test(L(tan,lip)));});
+t('leave-on cream mask → moisturizer: 10 minutes, wipe the excess, no rinse (or overnight)',()=>{const vino=P(10,'hydrating cream mask','pm','twice-weekly',{brandName:'Caudalie VinoHydra Masque-Crème Hydratant'});
+  const x=L(vino,mo);assert.ok(/10 minutes/.test(x)&&/don't rinse/.test(x)&&/overnight/.test(x),x);assert.ok(!/Rinse the mask off/.test(x));});
 t('nothing worth saying → null (toner → essence, essence → moisturizer, moisturizer → lip)',()=>{assert.strictEqual(tip(ton,snail),null);assert.strictEqual(tip(snail,mo),null);assert.strictEqual(tip(mo,lip),null);});
 t('the title names the next step',()=>assert.strictEqual(tip(cl,ret).title,'Before Topical Retinoid Cream 0.05%'));
 t('a product\'s own note is used for types with no built-in tip',()=>assert.ok(/pea-sized/.test(L(ton,P(50,'Eye Cream','pm','daily',{waitInstruction:'Use a pea-sized amount'})))));
