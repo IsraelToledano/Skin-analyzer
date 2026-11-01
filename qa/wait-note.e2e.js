@@ -5,7 +5,7 @@ const {profile,P}=require('./fixture');const {loadApp}=require('./harness');
 const MIG=loadApp().MIGRATIONS.map(m=>m.id);
 let fails=0;const ok=(c,m)=>{console.log(c?'  ok   ':'  FAIL ',m);if(!c)fails++};
 const NOTE='Wait 1-2 minutes after the toner.';
-const products=[P(1,'Gel Cleanser','am','daily'),P(5,'Vitamin C Serum','am','daily',{brandName:"Pura d'or 20%",waitInstruction:NOTE}),
+const products=[P(1,'Gel Cleanser','am','daily',{howTo:'Massage onto damp skin, then rinse.'}),P(5,'Vitamin C Serum','am','daily',{brandName:"Pura d'or 20%",waitInstruction:NOTE}),
   P(6,'water gel moisturizer','am','daily',{waitInstruction:'   '}),P(7,'SPF 50 Sunscreen','am','daily')];
 (async()=>{const server=await serve(8152);
 const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
@@ -26,6 +26,11 @@ await page.screenshot({path:'wait-note.png'});
 await cards.nth(await idx('Vitamin C')).click();
 await cards.nth(await idx('water gel')).click();await page.waitForSelector('[data-testid=usage-panel]');
 ok((await page.locator('[data-testid=wait-note]').count())===0,'a blank note shows nothing');
+ok((await page.locator('[data-testid=how-to]').count())===0,'no how-to box for a product without instructions');
+await cards.nth(await idx('water gel')).click();
+await cards.nth(await idx('Gel Cleanser')).click();await page.waitForSelector('[data-testid=how-to]');
+ok((await page.locator('[data-testid=how-to]').innerText()).includes('Massage onto damp skin'),'expanding a product with instructions shows its how-to');
+await page.screenshot({path:'how-to.png'});
 const btn=page.locator('[data-testid=report-button]');
 ok((await btn.locator('[data-testid=ai-icon]').count())===1,'the Ask Claude button shows the AI sparkle');
 ok(!(await btn.innerText()).includes('🐞'),'no bug icon');

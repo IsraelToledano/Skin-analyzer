@@ -22,10 +22,13 @@ t('leave-on BHA → toner: wait 2–3 minutes',()=>assert.ok(/2–3 minutes/.tes
 t('self-tan: blend before, wash hands after',()=>{assert.ok(/blend into the hairline/.test(L(mo,tan)));assert.ok(/Wash your hands/.test(L(tan,lip)));});
 t('leave-on cream mask → moisturizer: 10 minutes, wipe the excess, no rinse (or overnight)',()=>{const vino=P(10,'hydrating cream mask','pm','twice-weekly',{brandName:'Caudalie VinoHydra Masque-Crème Hydratant'});
   const x=L(vino,mo);assert.ok(/10 minutes/.test(x)&&/don't rinse/.test(x)&&/overnight/.test(x),x);assert.ok(!/Rinse the mask off/.test(x));});
+t('the next product\'s own how-to is added last',()=>{const r=tip(cl,{...ret,howTo:'A pea-sized amount.'});assert.strictEqual(r.lines[r.lines.length-1],'A pea-sized amount.');assert.ok(/completely dry/.test(r.lines[0]));});
+t('a how-to alone is enough for a tip (toner → niacinamide)',()=>{const r=tip(ton,P(9,'Niacinamide 10% + Zinc 1%','am','daily',{howTo:'A few drops.'}));assert.deepStrictEqual(r.lines,['A few drops.']);});
+t('a blank how-to adds nothing',()=>assert.strictEqual(tip(ton,{...snail,howTo:'  '}),null));
 t('nothing worth saying → null (toner → essence, essence → moisturizer, moisturizer → lip)',()=>{assert.strictEqual(tip(ton,snail),null);assert.strictEqual(tip(snail,mo),null);assert.strictEqual(tip(mo,lip),null);});
 t('the title names the next step',()=>assert.strictEqual(tip(cl,ret).title,'Before Topical Retinoid Cream 0.05%'));
 t('a product\'s own note is used for types with no built-in tip',()=>assert.ok(/pea-sized/.test(L(ton,P(50,'Eye Cream','pm','daily',{waitInstruction:'Use a pea-sized amount'})))));
 t('no next step or missing input → null, never throws',()=>{assert.strictEqual(tip(mo,null),null);assert.strictEqual(tip(null,mo),null);tip({id:1},{id:2});});
-t('his real week: every tip is short (≤ 2 lines, each under 240 chars)',()=>{const pl=plan(get,seedProfile(get),14);
-  Object.values(pl).forEach(l=>{for(let i=0;i<l.length-1;i++){const r=tip(l[i],l[i+1]);if(r){assert.ok(r.lines.length<=2);r.lines.forEach(x=>assert.ok(x.length<240,x));}}});});
+t('his real week: every tip is short (≤ 3 lines, each under 240 chars)',()=>{const pl=plan(get,seedProfile(get),14);
+  Object.values(pl).forEach(l=>{for(let i=0;i<l.length-1;i++){const r=tip(l[i],l[i+1]);if(r){assert.ok(r.lines.length<=3);r.lines.forEach(x=>assert.ok(x.length<240,x));}}});});
 console.log(`\n${pass} passed, ${fail} failed`);process.exit(fail?1:0);

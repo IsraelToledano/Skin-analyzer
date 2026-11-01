@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-10-31.1";
+const APP_VERSION = "2026-11-01.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3129,6 +3129,50 @@ const MIGRATIONS = [{
     const { routineSync, ...rest } = profile;
     return rest;
   }
+}, {
+  id: "how_to_notes_v1",
+  // Israel, 2026-11-01: check every product has the instructions it needs.
+  // Each product's own "how to use" (from the maker's directions where they
+  // matter: clay masks, Microfoliant, cleansing oil, self-tans, the acid
+  // toners paused for winter), shown in the popup
+  // before that step and in its expanded panel. Only fills an empty howTo,
+  // so nothing he writes himself is replaced.
+  apply: profile => {
+    const NOTES = [
+      [/skin1004.*cleansing oil|centella light cleansing oil/, "1–2 pumps into dry hands and roll gently over a dry face. Add a little water until it turns milky, then rinse with lukewarm water."],
+      [/exfoliating sa cleanser|cetaphil/, "Massage onto damp skin for about 30 seconds, then rinse with lukewarm water."],
+      [/microfoliant/, "About ½ teaspoon into wet hands, work it into a creamy paste, massage gently for about a minute (away from the eyes), then rinse thoroughly."],
+      [/2% bha liquid/, "Sweep over the face with a cotton pad or press in with your palms. Don't rinse."],
+      [/vinopure blemish control/, "A few drops over clean, dry skin — focus on the T-zone and breakout areas. Don't rinse."],
+      [/indian healing clay/, "Mix with water (gentler than vinegar) into a smooth paste in a non-metal bowl. Thin layer, away from eyes and mouth. 10 minutes max, then rinse with warm water — don't scrub."],
+      [/red bean refreshing pore mask/, "Even layer on clean, dry skin. 5–10 minutes, then massage with warm water and rinse well."],
+      [/instant d[eé]tox/, "A light layer on clean skin. 5–10 minutes, then rinse off."],
+      [/dubai peptide clay/, "Spread over dry skin, away from eyes and mouth. Roll the capsules until they're crushed and the colour changes, then rinse with warm water."],
+      [/vinohydra/, "A generous layer. 10 minutes, then wipe off the excess without rinsing — or leave it on overnight."],
+      [/st\.? ?tropez|purity vitamins/, "A couple of drops on their own or mixed into your moisturizer, massaged evenly over face and neck. Don't rinse — wash your hands right after. The colour develops over 4–8 hours."],
+      [/retinol b3/, "A few drops on clean, dry skin in the evening, away from the eyes and lips."],
+      [/glycolic acid 7%/, "Sweep over clean skin with a cotton pad. Don't rinse."],
+      [/aha\/bha clarifying/, "On a cotton pad, wiped over the face away from the eyes and mouth. Don't rinse."],
+      [/30 days miracle toner/, "Wipe over the face with a cotton pad, then pat gently so it sinks in. Don't rinse."],
+      [/one step peel/, "About 5 drops on a cotton pad, wiped over the whole face. Don't rinse."],
+      [/tretinoin/, "A pea-sized amount for the whole face: dot it on and spread thinly, away from the eye corners, nostril creases and lips."],
+      [/vitamin c serum/, "A few drops pressed into dry skin, away from the eye area."],
+      [/niacinamide 10%/, "A few drops spread over the face."],
+      [/sunscreen|spf/, "Use enough: about two finger-lengths (¼ teaspoon) for face and neck."],
+      [/tan-luxe/, "2–4 drops (more drops = deeper colour), smoothed over face and neck — or mixed with a little extra moisturizer."],
+      [/aha 30%.*peeling|peeling solution/, "Spot use: dab on the spot only, 10 minutes max, then rinse."]
+    ];
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    let changed = false;
+    const products = (profile.products || []).map(p => {
+      if (!p || (typeof p.howTo === "string" && p.howTo.trim())) return p;
+      const hit = NOTES.find(([re]) => re.test(hay(p)));
+      if (!hit) return p;
+      changed = true;
+      return { ...p, howTo: hit[1] };
+    });
+    return changed ? { ...profile, products } : profile;
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -4519,6 +4563,10 @@ const ProductUsagePanel = ({ profile, p }) => {
       "data-testid": "wait-note",
       style: { display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 8px", padding: "8px 10px", borderRadius: 10, background: T.accentSoft, color: T.text, fontSize: 13, lineHeight: 1.45, fontFamily: "'Inter',sans-serif" }
     }, h("span", { "aria-hidden": "true", style: { flexShrink: 0 } }, "\u23f1"), h("span", { style: { flex: 1, minWidth: 0 } }, p.waitInstruction.trim())),
+    typeof p.howTo === "string" && p.howTo.trim() && h("div", {
+      "data-testid": "how-to",
+      style: { display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 8px", padding: "8px 10px", borderRadius: 10, background: T.faint, color: T.text, fontSize: 13, lineHeight: 1.45, fontFamily: "'Inter',sans-serif" }
+    }, h("span", { style: { flexShrink: 0, fontWeight: 700, fontSize: 11, color: T.muted, paddingTop: 1 } }, "HOW TO"), h("span", { style: { flex: 1, minWidth: 0 } }, p.howTo.trim())),
     row("Last used", u.lastApplied ? usagePhrase(u.lastApplied, todayDs) : "Never", u.lastApplied ? null : T.red),
     missed && row(missed.outcome === "skipped" ? "Skipped" : "Missed", usagePhrase(missed, todayDs), T.muted),
     row("Next", u.nextScheduled ? usagePhrase(u.nextScheduled, todayDs) : "Not scheduled"),
@@ -4733,7 +4781,7 @@ const stepTip = (done, next) => {
   const nn = next.genericName;
   const lines = [];
   // after the step just done
-  if (dt === "cleanser_oil" && nt === "cleanser") lines.push("Rinse the oil off fully, then wash with the gel cleanser.");
+  if (dt === "cleanser_oil" && nt === "cleanser") lines.push("Rinse the oil off fully (it should have turned milky with water), then wash with the gel cleanser.");
   else if (isWashOffMask(done)) lines.push("Rinse the mask off with lukewarm water and pat dry.");
   else if (/microfoliant|powder exfoliant/.test(hay(done))) lines.push("Rinse well and pat dry — don't rub.");
   else if (dt === "mask" && /vinohydra|cream mask|sleeping mask|masque-cr/.test(hay(done))) lines.push(`Leave it on about 10 minutes, then wipe off what hasn't sunk in — don't rinse. (Or keep it on overnight as a sleeping mask and go light on ${nn}.)`);
@@ -4753,6 +4801,8 @@ const stepTip = (done, next) => {
   else if (nt === "spf") lines.push(`Wait until the ${dt === "moisturizer" ? "moisturizer" : "last layer"} isn't tacky (1–2 minutes) so the sunscreen spreads evenly.`);
   else if (nt === "selftan") lines.push("Spread it evenly and blend into the hairline, brows and jawline so there's no line.");
   else if (own) lines.push(own);
+  // how to apply the next product itself (its own instructions)
+  if (typeof next.howTo === "string" && next.howTo.trim()) lines.push(next.howTo.trim());
   return lines.length ? { title: `Before ${nn}`, lines } : null;
 };
 // Bottom toast for a step tip: closes by itself after 5 seconds; a tap
