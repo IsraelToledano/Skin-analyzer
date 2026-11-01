@@ -15,7 +15,7 @@ const server=http.createServer((q,r)=>{const u=q.url.split('?')[0];
   if(files[u]){r.writeHead(200,{'content-type':'text/javascript'});return r.end(files[u])}
   r.writeHead(404);r.end()});
 (async()=>{await new Promise(r=>server.listen(8144,r));
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:844}});
 await ctx.addInitScript(({seed})=>{if(!localStorage.getItem('skinritual_v4'))localStorage.setItem('skinritual_v4',JSON.stringify({v:4,profile:seed}));},{seed:profile({products:[P(1,'Gel Cleanser','pm','daily')],migrations:MIG})});
 const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));

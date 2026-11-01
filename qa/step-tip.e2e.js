@@ -8,7 +8,7 @@ const products=[P(1,'Gel Cleanser','pm','daily'),
   P(4,'Topical Retinoid Cream 0.05%','pm','daily',{brandName:'Ret-Avit (Tretinoin 0.05% w/w)',rotationRole:'none'}),
   P(5,'water gel moisturizer','pm','daily'),P(16,'overnight lip sleeping mask','pm','daily')];
 (async()=>{const server=await serve(8155);
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
 await ctx.addInitScript(({seed})=>{const R=Date;const off=new R(2026,8,20,20,30).getTime()-R.now();
   // a fixed evening that still ticks forward, so timers behave

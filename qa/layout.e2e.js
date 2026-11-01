@@ -5,7 +5,7 @@ let fails=0;const ok=(c,m)=>{console.log(c?'  ok   ':'  FAIL ',m);if(!c)fails++}
 const LONG='Extremely Long Hydrating Rice Water Brightening Toner Essence Deluxe Edition';
 (async()=>{
   const server=await serve(8140);
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+  const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
   const products=[...baseProducts(),
     P(17,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'}),
     P(30,'Glycolic Acid 7% Toning Solution','pm','daily',{brandName:'The Ordinary'}),

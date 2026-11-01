@@ -76,12 +76,37 @@ function audit(get,profile,planObj,days){
   const layer=p=>get('classifySingletonGroups')(p).find(g=>g.startsWith('layer:'));
   const scheduled=profile.products.filter(p=>p.scheduled);
   const info=[];
+  // Trips (profile.procedures type "trip"): a light routine in strong sun.
+  // Checked here from the trip's own data, not the scheduler's helpers.
+  const trips=(profile.procedures||[]).filter(x=>x&&x.type==='trip'&&x.date&&x.until);
+  const tripOf=d=>trips.find(t=>t.date<=d&&d<=t.until);
+  const planDays=[...new Set(Object.keys(planObj).map(k=>k.split(':')[0]))].sort();
+  const tripDays=planDays.filter(d=>tripOf(d)).length;
+  const isTretinoin=p=>/tretinoin/i.test([p.genericName,p.brandName].join(' '));
+  const tripOut=p=>['mask','selftan'].includes(type(p))||(get('classifyActiveGroups')(p).length>0&&!isTretinoin(p));
+  // R14 trip days: no acids (an acid wash only when there's no gentle one),
+  // vitamin C, niacinamide, masks, self-tan or OTC retinol; tretinoin on at
+  // most 2 of any 7 trip nights and never on the nights around the dives
+  const gentleWash=scheduled.some(p=>type(p)==='cleanser'&&!get('classifyActiveGroups')(p).length);
+  Object.entries(planObj).forEach(([key,list])=>{
+    const d=key.split(':')[0];const t=tripOf(d);if(!t)return;
+    list.forEach(p=>{if(p.pinned||!tripOut(p))return;if(type(p)==='cleanser'&&!gentleWash)return;add('high',key,`"${nameOf(p)}" on a trip day`)});
+    if(key.endsWith(':pm')&&list.some(p=>type(p)==='retinoid')){
+      if((t.noRetinoid||[]).includes(d))add('high',key,'retinoid on a night around the dives');
+      let n=0;for(let i=1;i<=6;i++){const dd=get('addDaysStr')(d,-i);if(dd<t.date)break;if((planObj[dd+':pm']||[]).some(p=>type(p)==='retinoid'))n++;}
+      if(n>=2)add('high',key,`retinoid on a 3rd night within 7 trip nights`);
+    }
+  });
   // a) weekly rotation pools: total nights per pool, and every member gets a turn
-  // slots per week come from the app's active rotation plan (standard / winter)
-  const slotsPerWeek={};get('ROTATION_SLOTS').forEach(s=>{slotsPerWeek[s.role]=(slotsPerWeek[s.role]||0)+1;});
-  Object.entries(slotsPerWeek).forEach(([r,perWeek])=>{
+  // slots come from the plan in force each day (standard / winter / a dated
+  // switch); a slot whose role has no member goes to its fallback role; on a
+  // trip day only tretinoin keeps its slot
+  const slotsExp={};planDays.forEach(d=>{get('rotationSlotsOn')(profile.procedures,d).forEach(s=>{
+    const r=s.fallback&&!scheduled.some(p=>role(p)===s.role)?s.fallback:s.role;
+    if(tripOf(d)&&r!=='tretinoin')return;slotsExp[r]=(slotsExp[r]||0)+1/7;});});
+  Object.entries(slotsExp).forEach(([r,exp])=>{
     const members=scheduled.filter(p=>role(p)===r);if(!members.length)return;
-    const total=members.reduce((n,p)=>n+((counts[p.id]||{}).pm||0),0);const exp=days/7*perWeek;
+    const total=members.reduce((n,p)=>n+((counts[p.id]||{}).pm||0),0);
     info.push(`pool ${r}: ${total} nights (slots ~${Math.round(exp)}): `+members.map(p=>`${p.genericName.slice(0,18)} ${(counts[p.id]||{}).pm||0}`).join(', '));
     if(total<exp*0.7)add('med','freq:pool',`${r} rotation ran ${total} nights in ${days}, slots allow ~${Math.round(exp)}`);
     if(days>=56)members.forEach(p=>{if(!((counts[p.id]||{}).pm))add('high','freq:pool',`"${nameOf(p)}" never gets a ${r} night in ${days} days`)});
@@ -115,7 +140,8 @@ function audit(get,profile,planObj,days){
       if(role(p))return;
       const l=layer(p);const shared=l&&p.frequency==='daily'&&scheduled.some(o=>o!==p&&!role(o)&&o.frequency==='daily'&&layer(o)===l&&(o.session===s||o.session==='both'));
       if(shared)return;
-      const exp=expected[p.frequency];if(!exp)return;
+      let exp=expected[p.frequency];if(!exp)return;
+      if(tripOut(p))exp*=(days-tripDays)/days; // the trip leaves it out
       const got=c[s]||0;
       if(got===0)add('high',`freq:${s}`,`"${nameOf(p)}" never appears in ${s.toUpperCase()} (${p.frequency})`);
       else if(got<exp*0.6)add(p.frequency==='daily'?'info':'med',`freq:${s}`,`"${nameOf(p)}" ${got}× in ${days} ${s.toUpperCase()}s, expected ~${Math.round(exp)} (${p.frequency})`);

@@ -1,7 +1,9 @@
 // Winter 2026 (2026-10-29): fewer/gentler peels, tretinoin 3×/week, more hydration.
+// Pinned to Oct 31 — the week as decided then. From Nov 1 the step-up and
+// the trip take over (winter-step-up.test.js).
 const assert=require('assert');const {load,seedProfile,plan}=require('./sim');
 let pass=0,fail=0;const t=(n,fn)=>{try{fn();pass++;console.log('  ok  ',n)}catch(e){fail++;console.log('  FAIL',n,'\n       ',e.message.split('\n')[0])}};
-const get=load([2026,10,2]);const type=get('detectType'),rr=get('rotationRoleFor'),add=get('addDaysStr'),ag=get('classifyActiveGroups'),sg=get('classifySingletonGroups');
+const get=load([2026,9,31]);const type=get('detectType'),rr=get('rotationRoleFor'),add=get('addDaysStr'),ag=get('classifyActiveGroups'),sg=get('classifySingletonGroups');
 const prof=seedProfile(get);const pl=plan(get,prof,56);const pm=Object.keys(pl).filter(k=>k.endsWith(':pm')).sort();
 const M=()=>get('MIGRATIONS').find(m=>m.id==='winter_2026_v1');const by=re=>prof.products.find(p=>re.test(p.genericName+' '+(p.brandName||'')));
 const strong=l=>l.some(p=>!/cleanser/.test(type(p))&&ag(p).some(g=>g==='retinoid'||g==='acid-exfoliant'));

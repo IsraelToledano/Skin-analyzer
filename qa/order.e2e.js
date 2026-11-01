@@ -3,7 +3,7 @@ const {profile,P}=require('./fixture');const {loadApp}=require('./harness');
 const MIG=loadApp().MIGRATIONS.map(m=>m.id);
 let fails=0;const ok=(c,m)=>{console.log(c?'  ok   ':'  FAIL ',m);if(!c)fails++};
 (async()=>{const server=await serve(8141);
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:900},deviceScaleFactor:2});
 const products=[P(1,'8 Hyaluronic Acid Moisturizing Gentle Gel Cleanser','pm','daily',{brandName:'Anua'}),
   P(2,'Niacinamide 10% + Zinc 1%','pm','daily',{brandName:'The Ordinary'}),

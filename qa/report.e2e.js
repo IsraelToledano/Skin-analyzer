@@ -7,7 +7,7 @@ let fails=0;const ok=(c,m)=>{console.log(c?'  ok   ':'  FAIL ',m);if(!c)fails++}
 const products=[P(1,'Gel Cleanser','pm','daily'),P(17,'Snail 96 Mucin Power Essence','pm','daily',{brandName:'COSRX'}),P(5,'water gel moisturizer','pm','daily')];
 const seed=profile({products,migrations:MIG,skinImgs:[{b64:'AAAA',mime:'image/png'}]});
 (async()=>{const server=await serve(8151);
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const open=async mode=>{
   const ctx=await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
   await ctx.grantPermissions(['clipboard-read','clipboard-write'],{origin:'http://localhost:8151'});

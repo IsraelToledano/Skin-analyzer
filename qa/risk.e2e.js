@@ -18,7 +18,7 @@ const products=[
 // last night he used the BHA (ticked), so another exfoliant tonight is two in a row
 const logs=[{id:1,date:'2026-09-19',session:'pm',productId:2,done:true},{id:2,date:'2026-09-19',session:'pm',productId:35,done:true}];
 (async()=>{const server=await serve(8153);
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:900},deviceScaleFactor:2});
 await ctx.addInitScript(({seed})=>{const R=Date;const fx=new R(2026,8,20,20,30).getTime();
   class D extends R{constructor(...a){if(a.length===0)super(fx);else super(...a)}static now(){return fx}}window.Date=D;

@@ -8,7 +8,7 @@ const NOTE='Wait 1-2 minutes after the toner.';
 const products=[P(1,'Gel Cleanser','am','daily',{howTo:'Massage onto damp skin, then rinse.'}),P(5,'Vitamin C Serum','am','daily',{brandName:"Pura d'or 20%",waitInstruction:NOTE}),
   P(6,'water gel moisturizer','am','daily',{waitInstruction:'   '}),P(7,'SPF 50 Sunscreen','am','daily')];
 (async()=>{const server=await serve(8152);
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
 await ctx.addInitScript(seed=>{const R=Date;const fx=new R(2026,8,20,8,30).getTime();
   class D extends R{constructor(...a){if(a.length===0)super(fx);else super(...a)}static now(){return fx}}window.Date=D;

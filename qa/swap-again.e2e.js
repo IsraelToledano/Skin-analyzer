@@ -9,7 +9,7 @@ const products=[P(1,'Gel Cleanser','pm','daily'),P(17,'Snail 96 Mucin Power Esse
   P(18,'Hydrating Serum','pm','daily',{brandName:'The Ordinary Marine Hyaluronics',scheduled:false,nextDate:''}),
   P(5,'water gel moisturizer','pm','daily')];
 (async()=>{const server=await serve(8157);
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',args:['--no-sandbox']});
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
 const ctx=await b.newContext({viewport:{width:390,height:900}});
 await ctx.addInitScript(({seed})=>{const R=Date;const fx=new R(2026,8,20,20,30).getTime();
   class D extends R{constructor(...a){if(a.length===0)super(fx);else super(...a)}static now(){return fx}}window.Date=D;

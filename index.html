@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-01.1";
+const APP_VERSION = "2026-11-01.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -556,8 +556,36 @@ const PROCEDURE_TYPES = {
     breakDays: 2,
     ownButton: true,
     note: "Skin feels irritated: two gentle days — no retinoids, acids, vitamin C or clay masks."
+  },
+  // Israel, 2026-11-01: Cambodia, Vietnam and Thailand from Nov 4 (he flies
+  // that evening) to Nov 24, diving Nov 16–18 — tropical sun, the opposite
+  // of a winter at home. From `date` to `until` the routine is light:
+  // cleanser, hydrating layers, moisturizer, sunscreen. No acids, vitamin C,
+  // niacinamide, masks or self-tan; an acid cleanser gives way to a gentle
+  // one. Tretinoin stays, at most twice in any 7 trip nights and never on
+  // the nights in `noRetinoid` (around the dives). No button — Claude adds a
+  // trip with a named migration when he mentions one.
+  trip: {
+    label: "Trip",
+    icon: "✈️",
+    blockNights: 0,
+    ownButton: true,
+    maxRetinoidNights: 2,
+    note: "Travelling in strong sun: a light routine — cleanse, moisturize, sunscreen; tretinoin twice a week at most."
+  },
+  // A change of the weekly rotation plan (ROTATION_PLANS[plan]) from `date`
+  // on — e.g. the full winter week once he's back from the trip.
+  rotation: {
+    label: "Rotation plan",
+    icon: "🔁",
+    blockNights: 0,
+    ownButton: true,
+    note: "The weekly rotation switches plan from this date."
   }
 };
+const isDs = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+// The trip covering `ds` (morning and evening), or null.
+const tripOn = (procedures, ds) => (procedures || []).find(x => x && x.type === "trip" && isDs(x.date) && isDs(x.until) && isDs(ds) && x.date <= ds && ds <= x.until) || null;
 // The skin break covering `ds` (morning and evening), or null.
 const skinBreakOn = (procedures, ds) => (procedures || []).find(x => {
   const def = x && PROCEDURE_TYPES[x.type];
@@ -1302,6 +1330,20 @@ const addStepIrritationRisks = (profile, product, ds, session) => {
   // a procedure recovery window (e.g. microneedling) covering this day
   else if (session === "pm" && nextGroups.some(g => g === "retinoid" || g === "acid-exfoliant") && activesBlockedOn(profile, ds)) {
     out.push({ text: `You're inside a procedure recovery window (e.g. microneedling). Skin is still healing — retinoids and exfoliants on it now cause redness and irritation.` });
+  }
+  // a trip in strong sun covering this day (same limits the routine keeps)
+  const trip = tripOn(profile.procedures, ds);
+  if (trip) {
+    const day = d => parseDate(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    if (nextGroups.includes("acid-exfoliant") && !isRinseOffProduct(product)) {
+      out.push({ text: `You're travelling in strong sun until ${day(trip.until)} — as strong as an Israeli summer, or stronger. ${product.genericName} makes skin burn and darken more easily for up to a week after, so it waits until you're home.` });
+    } else if (session === "pm" && nextGroups.includes("retinoid")) {
+      const from = trip.date > addDaysStr(ds, -6) ? trip.date : addDaysStr(ds, -6);
+      let nights = 0;
+      for (let d = from; d < ds; d = addDaysStr(d, 1)) if (sessionRan(profile, d, "pm").prods.some(q => detectType(q) === "retinoid")) nights++;
+      if (Array.isArray(trip.noRetinoid) && trip.noRetinoid.includes(ds)) out.push({ text: `${day(ds)} is next to your dives — a whole day of sun, salt water and wind. On skin that just had a retinoid that means burning and peeling, so the trip skips it on the nights around the dives.` });
+      else if (nights >= PROCEDURE_TYPES.trip.maxRetinoidNights) out.push({ text: `You've had a retinoid on ${nights} of the last 7 nights. In strong sun the trip keeps it to ${PROCEDURE_TYPES.trip.maxRetinoidNights} a week — a retinoid also makes skin burn more easily.` });
+    }
   }
   return out;
 };
@@ -3173,6 +3215,52 @@ const MIGRATIONS = [{
     });
     return changed ? { ...profile, products } : profile;
   }
+}, {
+  id: "winter_step_up_2026_11_v1",
+  // Israel, 2026-11-01: winter is when acids and retinoids can go UP (less
+  // sun damage), not down — winter_2026_v1 had read "take out the bigger
+  // guns" backwards. The trip comes first (trip_2026_11_v1), so the step-up
+  // starts once he's home:
+  //  - the La Roche-Posay Retinol B3 comes back now, on the winter week's
+  //    third retinoid night (he wants to finish it); tretinoin keeps the
+  //    other two, and takes that night back when the B3 is gone;
+  //  - the acids paused for winter return from Nov 25 — the AHA 30% peel
+  //    (still mostly spot) a week later, so the first nights after three
+  //    weeks of tropical sun and a long flight aren't the strongest peel;
+  //  - from Nov 25 the full winter week (two exfoliant nights).
+  // Only from Nov 1 (when he asked), so plans built for earlier days stay
+  // as they were.
+  apply: profile => {
+    if (todayStr() < "2026-11-01") return profile;
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    let changed = false;
+    const products = (profile.products || []).map(p => {
+      if (!p || !p.winterPaused) return p;
+      const { winterPaused, ...rest } = p;
+      changed = true;
+      if (detectType(p) === "retinoid") return { ...rest, scheduled: true };
+      return { ...rest, scheduled: true, activeFrom: /aha 30%/.test(hay(p)) ? "2026-12-02" : "2026-11-25" };
+    });
+    const procs = profile.procedures || [];
+    const hasPlan = procs.some(x => x && x.type === "rotation" && x.date === "2026-11-25");
+    if (!changed && hasPlan) return profile;
+    return { ...profile, products: changed ? products : profile.products, procedures: hasPlan ? procs : [...procs, { date: "2026-11-25", type: "rotation", plan: "winterFull" }] };
+  }
+}, {
+  id: "trip_2026_11_v1",
+  // Israel, 2026-11-01: Cambodia, Vietnam and Thailand — he flies the
+  // evening of Nov 4 and is home late on Nov 24; dive refresher Nov 16,
+  // liveaboard Nov 17–18. A light routine for the whole trip
+  // (PROCEDURE_TYPES.trip), and no retinoid from the night before the first
+  // dive to the night after the last. Only while the trip is still ahead or
+  // under way.
+  apply: profile => {
+    const t = todayStr();
+    if (t < "2026-11-01" || t > "2026-11-24") return profile;
+    const procs = profile.procedures || [];
+    if (procs.some(x => x && x.type === "trip" && x.date === "2026-11-04")) return profile;
+    return { ...profile, procedures: [...procs, { date: "2026-11-04", until: "2026-11-24", type: "trip", noRetinoid: ["2026-11-15", "2026-11-16", "2026-11-17", "2026-11-18"] }] };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -3796,9 +3884,32 @@ const ROTATION_PLANS = {
   role: "tretinoin",
   offsetDays: 5
 }],
-  winter: [{ role: "exfoliant", offsetDays: 0 }, { role: "tretinoin", offsetDays: 1 }, { role: "tretinoin", offsetDays: 3 }, { role: "mask", offsetDays: 4 }, { role: "tretinoin", offsetDays: 5 }]
+  // Day 3 is the OTC retinol's night while he has one scheduled (2026-11-01:
+  // he's finishing the La Roche-Posay B3); with none, tretinoin takes it, so
+  // winter keeps three retinoid nights either way.
+  winter: [{ role: "exfoliant", offsetDays: 0 }, { role: "tretinoin", offsetDays: 1 }, { role: "retinol", offsetDays: 3, fallback: "tretinoin" }, { role: "mask", offsetDays: 4 }, { role: "tretinoin", offsetDays: 5 }],
+  // Full winter (Israel, 2026-11-01: winter is when acids and retinoids can
+  // go UP — less sun): back to two exfoliant nights, three retinoid nights,
+  // a mask night and one rest night. Starts when he's home from the trip.
+  winterFull: [{ role: "exfoliant", offsetDays: 0 }, { role: "tretinoin", offsetDays: 1 }, { role: "exfoliant", offsetDays: 2 }, { role: "retinol", offsetDays: 3, fallback: "tretinoin" }, { role: "mask", offsetDays: 4 }, { role: "tretinoin", offsetDays: 5 }]
 };
 const ROTATION_SLOTS = ROTATION_PLANS.winter;
+// The plan in force on `ds`: the latest "rotation" entry on or before it
+// (profile.procedures), else ROTATION_SLOTS.
+const rotationSlotsOn = (procedures, ds) => {
+  const c = (procedures || []).filter(x => x && x.type === "rotation" && isDs(x.date) && x.date <= ds && ROTATION_PLANS[x.plan]).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0).pop();
+  return c ? ROTATION_PLANS[c.plan] : ROTATION_SLOTS;
+};
+// What a trip day leaves out of the routine (see PROCEDURE_TYPES.trip):
+// masks, self-tan and every treatment active except tretinoin, which the
+// scheduler limits separately.
+const tripLeavesOut = p => {
+  if (!p) return false;
+  const t = detectType(p);
+  if (t === "mask" || t === "selftan") return true;
+  if (t === "retinoid") return rotationRoleFor(p) !== "tretinoin";
+  return classifyActiveGroups(p).length > 0;
+};
 const daysBetween = (aStr, bStr) => {
   const a = parseDate(aStr),
     b = parseDate(bStr);
@@ -3926,6 +4037,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     return gap >= 0 && gap < def.blockNights;
   });
   let pendingCarry = new Set();
+  const creditedReturn = new Set();
   const schedule = {};
   let cur = epoch;
   let guard = 0;
@@ -4032,6 +4144,33 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         if (p.fragranced) excludedToday.add(p.id);
       });
     }
+    // A trip (strong sun): a light routine — see PROCEDURE_TYPES.trip. The
+    // morning is a recovery morning (a gentle cleanser stands in for an acid
+    // one); tretinoin keeps its rotation nights, at most `maxRetinoidNights`
+    // in any 7 trip nights and none on the nights around the dives.
+    const trip = tripOn(procedures, ds);
+    if (trip) {
+      if (session === "am") recoveryMorning = true;
+      const gentleCleanserExists = (products || []).some(p => p.scheduled && detectType(p) === "cleanser" && classifyActiveGroups(p).length === 0);
+      const from = trip.date > addDaysStr(ds, -6) ? trip.date : addDaysStr(ds, -6);
+      const retinoidNights = new Set();
+      Object.entries(servedDates).forEach(([id, dates]) => {
+        const p = products.find(q => String(q.id) === id);
+        if (p && detectType(p) === "retinoid") dates.forEach(d => { if (d >= from && d < ds) retinoidNights.add(d); });
+      });
+      const retinoidOff = (Array.isArray(trip.noRetinoid) && trip.noRetinoid.includes(ds)) || retinoidNights.size >= PROCEDURE_TYPES.trip.maxRetinoidNights;
+      sessionProducts.forEach(p => {
+        if (placedIds.has(p.id)) return;
+        if (detectType(p) === "retinoid" && retinoidOff) { excludedToday.add(p.id); return; }
+        if (!tripLeavesOut(p)) return;
+        if (isRinseOffProduct(p) && detectType(p) === "cleanser" && !gentleCleanserExists) return;
+        excludedToday.add(p.id);
+      });
+    }
+    // A product coming back on a set date (p.activeFrom) sits out until then.
+    sessionProducts.forEach(p => {
+      if (isDs(p.activeFrom) && ds < p.activeFrom && !placedIds.has(p.id)) excludedToday.add(p.id);
+    });
     excludedToday.forEach(id => { if (placedIds.has(id)) excludedToday.delete(id); });
     // 2. Carried-over skips — guaranteed to reappear, whole group together.
     // Except onto a day where a step the user added (pin) or a one-off
@@ -4233,7 +4372,21 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
       // run at all.
       const anchorSource = poolMembers.find(p => p.rotationAnchor);
       const anchor = anchorSource ? anchorSource.rotationAnchor : epoch;
-      ROTATION_SLOTS.forEach(slot => {
+      // A member coming back on its activeFrom date starts level with the
+      // least-used member of its role, instead of at its old count — or it
+      // would win every night of its role for weeks to catch up.
+      poolMembers.forEach(p => {
+        if (!isDs(p.activeFrom) || ds < p.activeFrom || creditedReturn.has(p.id)) return;
+        creditedReturn.add(p.id);
+        const peers = poolMembers.filter(q => q.id !== p.id && rotationRoleFor(q) === rotationRoleFor(p) && !(isDs(q.activeFrom) && q.activeFrom > ds));
+        if (!peers.length) return;
+        const level = Math.min(...peers.map(q => (servedCount[q.id] || 0) / poolWeightFor(q)));
+        servedCount[p.id] = Math.max(servedCount[p.id] || 0, Math.floor(level * poolWeightFor(p)));
+      });
+      rotationSlotsOn(procedures, ds).forEach(planSlot => {
+        // a slot with a fallback role (the OTC retinol's night) goes to the
+        // fallback when nothing of its own role is scheduled at all
+        const slot = planSlot.fallback && !poolMembers.some(p => rotationRoleFor(p) === planSlot.role) ? { ...planSlot, role: planSlot.fallback } : planSlot;
         if (capUsed() >= cap) return; // same deliberate allowance pattern as the cleanser/moisturizer guarantee above — a foundational slot can push slightly past cap, but not compound further once already there
         const slotDate = addDaysStr(anchor, slot.offsetDays);
         const offset = daysBetween(slotDate, ds);
@@ -5934,7 +6087,25 @@ const DayAgenda = ({
   const amProds = sortForDay(queueFor(amSchedule, profile.products, date), profile, ds, "am");
   const pmProds = sortForDay(queueFor(pmSchedule, profile.products, date), profile, ds, "pm");
   const logs = profile.logs.filter(l => l.date === ds);
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(RoutineBlock, {
+  const trip = tripOn(profile.procedures, ds);
+  const short = d => parseDate(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const dives = trip && Array.isArray(trip.noRetinoid) && trip.noRetinoid.length ? trip.noRetinoid.slice().sort() : null;
+  return /*#__PURE__*/React.createElement("div", null, trip && /*#__PURE__*/React.createElement("div", {
+    "data-testid": "trip-note",
+    style: {
+      margin: "0 0 12px",
+      padding: "10px 12px",
+      borderRadius: 12,
+      background: T.faint,
+      border: `1px solid ${T.border}`,
+      fontSize: 12.5,
+      lineHeight: 1.45,
+      color: T.text,
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontWeight: 700, marginBottom: 2 }
+  }, "\u2708\uFE0F Trip routine \u2014 until ", short(trip.until)), "Strong sun, so a light routine: cleanse, hydrate, moisturize, sunscreen. Reapply sunscreen every 2 hours outdoors and after swimming. Tretinoin twice a week at most", dives ? `, none ${short(dives[0])}\u2013${short(dives[dives.length - 1])} (dives)` : "", ". No acids, vitamin C, masks or self-tan until you're home."), /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: amProds,
     session: "am",
     accent: T.accent,
@@ -6536,7 +6707,17 @@ const ProductRow = ({
       fontSize: 11,
       fontWeight: 600
     }
-  }, p.session === "both" ? "AM+PM" : p.session?.toUpperCase(), " · ", FREQS[p.frequency] || p.frequency)) : /*#__PURE__*/React.createElement("div", {
+  }, p.session === "both" ? "AM+PM" : p.session?.toUpperCase(), " · ", FREQS[p.frequency] || p.frequency), isDs(p.activeFrom) && p.activeFrom > todayStr() && /*#__PURE__*/React.createElement("span", {
+    "data-testid": "active-from",
+    style: {
+      background: T.blueSoft || T.faint,
+      color: T.blue,
+      borderRadius: 20,
+      padding: "1px 8px",
+      fontSize: 11,
+      fontWeight: 600
+    }
+  }, "Back ", parseDate(p.activeFrom).toLocaleDateString("en-US", { month: "short", day: "numeric" }))) : /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: T.muted,
