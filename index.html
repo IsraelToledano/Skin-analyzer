@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-01.2";
+const APP_VERSION = "2026-11-02.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -6076,6 +6076,24 @@ const RoutineBlock = ({
 // ─── DAY SHEET ─────────────────────────────────────────────────────────────────
 // DayAgenda: inline (non-modal) single-day AM/PM routine view, used by the
 // calendar's "day" toggle.
+// Israel, 2026-11-02: he skips clay-mask nights because he finds out at
+// bedtime, too tired to wait out the mask. So a day with a wash-off (clay)
+// mask on the evening plan says so from the morning on, until the mask is
+// done or skipped. Returns { product, minutes, early } or null — `early`
+// when the evening has no retinoid, so the whole routine can be done early.
+const clayMaskHeadsUp = (pmProds, logs, ds, today) => {
+  if (!ds || ds < today) return null;
+  const mask = (pmProds || []).find(p => p && isWashOffMask(p));
+  if (!mask) return null;
+  const log = (logs || []).find(l => l && l.date === ds && l.session === "pm" && l.productId === mask.id);
+  if (log && (log.done || log.skipped)) return null;
+  const m = typeof mask.howTo === "string" && mask.howTo.match(/(\d+(?:\s*[\u2013-]\s*\d+)?)\s*minutes/);
+  return {
+    product: mask,
+    minutes: m ? `${m[1].replace(/\s*-\s*/, "\u2013")} minutes` : "about 10 minutes",
+    early: !(pmProds || []).some(p => p && detectType(p) === "retinoid")
+  };
+};
 const DayAgenda = ({
   date,
   profile,
@@ -6090,7 +6108,24 @@ const DayAgenda = ({
   const trip = tripOn(profile.procedures, ds);
   const short = d => parseDate(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const dives = trip && Array.isArray(trip.noRetinoid) && trip.noRetinoid.length ? trip.noRetinoid.slice().sort() : null;
-  return /*#__PURE__*/React.createElement("div", null, trip && /*#__PURE__*/React.createElement("div", {
+  const todayDs = todayStr();
+  const clay = clayMaskHeadsUp(pmProds, logs, ds, todayDs);
+  return /*#__PURE__*/React.createElement("div", null, clay && /*#__PURE__*/React.createElement("div", {
+    "data-testid": "mask-heads-up",
+    style: {
+      margin: "0 0 12px",
+      padding: "10px 12px",
+      borderRadius: 12,
+      background: T.blueSoft,
+      border: `1px solid ${T.blue}33`,
+      fontSize: 12.5,
+      lineHeight: 1.45,
+      color: T.text,
+      fontFamily: "'Inter',sans-serif"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontWeight: 700, marginBottom: 2 }
+  }, "\uD83C\uDF19 Clay mask ", ds === todayDs ? "tonight" : "this evening", " \u2014 ", clay.product.genericName), `It needs ${clay.minutes} on the skin before you rinse, so it's easy to skip at bedtime. `, clay.early ? `There's no retinoid ${ds === todayDs ? "tonight" : "that evening"}, so do the whole evening routine early \u2014 when you get home or before dinner.` : "Start the evening routine a little earlier."), trip && /*#__PURE__*/React.createElement("div", {
     "data-testid": "trip-note",
     style: {
       margin: "0 0 12px",
