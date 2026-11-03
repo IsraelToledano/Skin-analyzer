@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-02.1";
+const APP_VERSION = "2026-11-04.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3260,6 +3260,20 @@ const MIGRATIONS = [{
     const procs = profile.procedures || [];
     if (procs.some(x => x && x.type === "trip" && x.date === "2026-11-04")) return profile;
     return { ...profile, procedures: [...procs, { date: "2026-11-04", until: "2026-11-24", type: "trip", noRetinoid: ["2026-11-15", "2026-11-16", "2026-11-17", "2026-11-18"] }] };
+  }
+}, {
+  id: "vinohydra_damp_skin_v1",
+  // Israel, 2026-11-03: "should the hyaluronic mask go on a face with a bit
+  // of water?" No extra water: the toner before it already leaves the skin
+  // damp, which is what its humectants (glycerin, beta-glucan) want; a wet
+  // face only thins the cream. On a retinoid night it goes straight over
+  // the retinoid (water under or over a retinoid makes it sting more).
+  // Replaces only the how_to_notes_v1 text, never one he wrote himself.
+  apply: profile => {
+    const OLD = "A generous layer. 10 minutes, then wipe off the excess without rinsing — or leave it on overnight.";
+    const NEW = "No extra water: apply right after the toner, while skin is still slightly damp (on a retinoid night, straight over the retinoid). A generous layer, 10 minutes, then wipe off the excess without rinsing — or leave it on overnight.";
+    if (!(profile.products || []).some(p => p && /vinohydra/i.test([p.genericName, p.brandName].join(" ")) && p.howTo === OLD)) return profile;
+    return { ...profile, products: profile.products.map(p => p && /vinohydra/i.test([p.genericName, p.brandName].join(" ")) && p.howTo === OLD ? { ...p, howTo: NEW } : p) };
   }
 }];
 const applyMigrations = profile => {
