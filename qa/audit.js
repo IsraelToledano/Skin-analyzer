@@ -49,8 +49,10 @@ function checkDay(get,key,list,add){
     const dup=(t,label)=>{if(types.filter(x=>x===t).length>1)add('med',key,`two ${label}`)};
     dup('cleanser','water cleansers');dup('toner','toners');dup('essence','essences');dup('moisturizer','moisturizers');dup('retinoid','retinoids');dup('spf','sunscreens');dup('mask','masks');
     if(leave.filter(p=>get('conflictGroupsFor')(p).includes('acid-exfoliant')).length>1)add('high',key,'two leave-on acids');
-    // R8 cap (skin steps)
-    if(skin.length>get('SESSION_CAP'))add('med',key,`${skin.length} skin steps (cap ${get('SESSION_CAP')})`);
+    // R8 cap (skin steps; sunscreen doesn't count — it's the last morning
+    // step and never optional, 2026-11-10)
+    const capSteps=skin.filter(p=>type(p)!=='spf');
+    if(capSteps.length>get('SESSION_CAP'))add('med',key,`${capSteps.length} skin steps (cap ${get('SESSION_CAP')})`);
       // R11 a wash-off clay mask night carries no retinoid or leave-on acid:
     // clay is drying and the mask night is meant to be the barrier's break.
     const clay=list.some(p=>type(p)==='mask'&&RINSE_OFF(p));
@@ -80,6 +82,7 @@ function audit(get,profile,planObj,days){
   // Checked here from the trip's own data, not the scheduler's helpers.
   const trips=(profile.procedures||[]).filter(x=>x&&x.type==='trip'&&x.date&&x.until);
   const tripOf=d=>trips.find(t=>t.date<=d&&d<=t.until);
+  const kitDay=d=>{const t=tripOf(d);return !!(t&&Array.isArray(t.kit));};
   const planDays=[...new Set(Object.keys(planObj).map(k=>k.split(':')[0]))].sort();
   const tripDays=planDays.filter(d=>tripOf(d)).length;
   const isTretinoin=p=>/tretinoin/i.test([p.genericName,p.brandName].join(' '));
@@ -90,6 +93,11 @@ function audit(get,profile,planObj,days){
   const gentleWash=scheduled.some(p=>type(p)==='cleanser'&&!get('classifyActiveGroups')(p).length);
   Object.entries(planObj).forEach(([key,list])=>{
     const d=key.split(':')[0];const t=tripOf(d);if(!t)return;
+    if(Array.isArray(t.kit)){const sess=key.split(':')[1];
+      const want=t.kit.filter(k=>k.session===sess||k.session==='both').map(k=>k.productId).filter(id=>profile.products.some(p=>p.id===id));
+      list.forEach(p=>{if(!p.pinned&&!want.includes(p.id))add('high',key,`"${nameOf(p)}" on a trip day, not in what he packed`)});
+      want.forEach(id=>{if(!list.some(p=>p.id===id))add('high',key,`packed "${nameOf(profile.products.find(p=>p.id===id))}" missing`)});
+      return;}
     list.forEach(p=>{if(p.pinned||!tripOut(p))return;if(type(p)==='cleanser'&&!gentleWash)return;add('high',key,`"${nameOf(p)}" on a trip day`)});
     if(key.endsWith(':pm')&&list.some(p=>type(p)==='retinoid')){
       if((t.noRetinoid||[]).includes(d))add('high',key,'retinoid on a night around the dives');
@@ -103,13 +111,28 @@ function audit(get,profile,planObj,days){
   // trip day only tretinoin keeps its slot
   const slotsExp={};planDays.forEach(d=>{get('rotationSlotsOn')(profile.procedures,d).forEach(s=>{
     const r=s.fallback&&!scheduled.some(p=>role(p)===s.role)?s.fallback:s.role;
-    if(tripOf(d)&&r!=='tretinoin')return;slotsExp[r]=(slotsExp[r]||0)+1/7;});});
+    // a trip keeps only tretinoin's slots; a packed trip only what he packed
+    if(tripOf(d)){if(kitDay(d)){if(!tripOf(d).kit.some(k=>{const p=profile.products.find(x=>x.id===k.productId);return p&&role(p)===r;}))return;}else if(r!=='tretinoin')return;}
+    slotsExp[r]=(slotsExp[r]||0)+1/7;});});
   Object.entries(slotsExp).forEach(([r,exp])=>{
     const members=scheduled.filter(p=>role(p)===r);if(!members.length)return;
     const total=members.reduce((n,p)=>n+((counts[p.id]||{}).pm||0),0);
     info.push(`pool ${r}: ${total} nights (slots ~${Math.round(exp)}): `+members.map(p=>`${p.genericName.slice(0,18)} ${(counts[p.id]||{}).pm||0}`).join(', '));
     if(total<exp*0.7)add('med','freq:pool',`${r} rotation ran ${total} nights in ${days}, slots allow ~${Math.round(exp)}`);
-    if(days>=56)members.forEach(p=>{if(!((counts[p.id]||{}).pm))add('high','freq:pool',`"${nameOf(p)}" never gets a ${r} night in ${days} days`)});
+    // a salicylic-first plan (winterFull, 2026-11-10) gives the other
+    // members one night every `othersEvery` days between them, so each
+    // non-salicylic member is only owed a night when that adds up to one
+    const salicylic=p=>{const h=[p.genericName,p.brandName].join(' ').toLowerCase();return /\bbha\b|salicylic/.test(h)&&!/\baha\b|glycolic|lactic|mandelic|\bpha\b|peel/.test(h);};
+    const preferDays=planDays.filter(d=>!tripOf(d)&&get('rotationSlotsOn')(profile.procedures,d).some(s=>s.role===r&&s.prefer==='salicylic'));
+    const othersEvery=(get('rotationSlotsOn')(profile.procedures,preferDays[0]||planDays[0]).find(s=>s.role===r&&s.prefer)||{}).othersEvery||14;
+    const others=members.filter(p=>!salicylic(p));
+    const owedOther=preferDays.length?preferDays.length/othersEvery/Math.max(1,others.length):Infinity;
+    if(days>=56)members.forEach(p=>{if(!((counts[p.id]||{}).pm)&&(salicylic(p)||!preferDays.length||owedOther>=1))add('high','freq:pool',`"${nameOf(p)}" never gets a ${r} night in ${days} days`)});
+    // and on those days most exfoliant nights are salicylic
+    if(preferDays.length>=14){const nights=preferDays.map(d=>planObj[d+':pm']||[]).filter(l=>l.some(p=>role(p)===r&&!p.pinned));
+      const sal=nights.filter(l=>l.some(p=>role(p)===r&&salicylic(p))).length;
+      if(nights.length&&sal<nights.length*0.6)add('med','freq:pool',`salicylic on only ${sal}/${nights.length} ${r} nights of a salicylic-first plan`);
+      info.push(`salicylic-first: ${sal}/${nights.length} ${r} nights salicylic`);}
   });
   // b) daily products sharing a one-per-session slot: the slot is filled, members take fair turns
   ['am','pm'].forEach(s=>{
@@ -125,7 +148,8 @@ function audit(get,profile,planObj,days){
       // retinoid nights leave the toner out (the retinoid goes on dry skin);
       // the hydrating layer now comes after it (winter), so only toner is lean
       const lean=(g==='layer:toner')?Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&l.some(p=>get('detectType')(p)==='retinoid')).length:0;
-      if(filled<(days-lean)*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days-lean} ${s.toUpperCase()}s`);
+      const kitN=planDays.filter(kitDay).length;
+      if(filled<(days-lean-kitN)*0.9)add('med',`freq:${s}`,`${g} slot filled only ${filled}/${days-lean-kitN} ${s.toUpperCase()}s`);
       // fair turns are judged per unit of share: a product with shareWeight 2
       // is meant to get about twice the nights of its peers
       const w=m.map(p=>get('shareWeightOf')(p)),wt=w.reduce((a,b)=>a+b,0),n=c.map((x,i)=>x/w[i]*wt/m.length);
@@ -147,7 +171,9 @@ function audit(get,profile,planObj,days){
       else if(got<exp*0.6)add(p.frequency==='daily'?'info':'med',`freq:${s}`,`"${nameOf(p)}" ${got}× in ${days} ${s.toUpperCase()}s, expected ~${Math.round(exp)} (${p.frequency})`);
       else if(got>exp*1.6+1)add('med',`freq:${s}`,`"${nameOf(p)}" ${got}× in ${days} ${s.toUpperCase()}s, expected ~${Math.round(exp)} (${p.frequency})`);
     });
-    ['am','pm'].forEach(s=>{if(!sessions.includes(s)&&(c[s]||0)>0)add('high',`freq:${s}`,`"${nameOf(p)}" appears in ${s.toUpperCase()} but is scheduled ${p.session}`)});
+    // (a packed trip's days follow what he packed, not the home sessions)
+    const offKit=s=>Object.entries(planObj).filter(([k,l])=>k.endsWith(':'+s)&&!kitDay(k.split(':')[0])&&l.some(q=>q.id===p.id&&!q.recovery)).length;
+    ['am','pm'].forEach(s=>{if(!sessions.includes(s)&&offKit(s)>0)add('high',`freq:${s}`,`"${nameOf(p)}" appears in ${s.toUpperCase()} but is scheduled ${p.session}`)});
   });
   // R11 no product runs one evening and again the next morning, except the
   // foundation steps (cleanser, moisturizer, sunscreen)
@@ -164,6 +190,7 @@ function audit(get,profile,planObj,days){
   // unless he added it himself
   amKeys.forEach(k=>{
     const d=k.split(':')[0];const prev=get('addDaysStr')(d,-1)+':pm';if(!planObj[prev])return;
+    if(kitDay(d))return; // a packed trip morning is what he packed (R14)
     const skippedPm=id=>(profile.logs||[]).some(l=>l&&l.date===prev.split(':')[0]&&l.session==='pm'&&l.productId===id&&l.skipped&&!l.done);
     const strong=planObj[prev].some(p=>!skippedPm(p.id)&&!['cleanser','cleanser_oil'].includes(type(p))&&get('classifyActiveGroups')(p).some(g=>g==='retinoid'||g==='acid-exfoliant'));
     if(!strong)return;

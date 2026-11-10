@@ -48,8 +48,12 @@ t('two exfoliant nights a week',()=>weeks.forEach(w=>assert.strictEqual(inWeek(w
 t('three retinoid nights a week: tretinoin twice and the B3 once',()=>weeks.forEach(w=>{assert.strictEqual(inWeek(w,p=>rr(p)==='tretinoin'),2,w);assert.strictEqual(inWeek(w,p=>rr(p)==='retinol'),1,w);}));
 t('a clay mask night and a rest night every week',()=>weeks.forEach(w=>{assert.strictEqual(inWeek(w,p=>rr(p)==='mask'),1,w);assert.ok(7-inWeek(w,p=>!!rr(p)||type(p)==='retinoid')>=1,w);}));
 t('never two exfoliants, two retinoids, or a retinoid with an exfoliant on one night',()=>keys('pm').filter(home).forEach(k=>{const r=pl[k].filter(p=>type(p)==='retinoid').length,e=pl[k].filter(p=>rr(p)==='exfoliant').length;assert.ok(r<=1&&e<=1&&!(r&&e),k);}));
-t('every returning acid gets a night by the end of December; none before its date',()=>{
-  RETURNING.concat([/AHA 30%/]).forEach(re=>{const p=by(re);const n=keys('pm').filter(k=>pl[k].some(q=>q.id===p.id)).map(k=>k.split(':')[0]);assert.ok(n.length>=1,p.genericName+' never');assert.ok(n.every(d=>d>=p.activeFrom),p.genericName+' '+n[0]);});});
+// 2026-11-10: the full winter week is salicylic-first — the other acids
+// (the returning ones included) share one exfoliant night every two weeks
+t('none of the returning acids runs before its date; they come back on the every-two-weeks "other" nights',()=>{
+  RETURNING.concat([/AHA 30%/]).forEach(re=>{const p=by(re);const n=keys('pm').filter(k=>pl[k].some(q=>q.id===p.id)).map(k=>k.split(':')[0]);assert.ok(n.every(d=>d>=p.activeFrom),p.genericName+' '+n[0]);});
+  const ret=RETURNING.concat([/AHA 30%/]).map(by).map(p=>p.id);
+  assert.ok(keys('pm').filter(home).some(k=>pl[k].some(p=>ret.includes(p.id))),'no returning acid by Dec 31');});
 t('the returning acids don\'t take over: the gentle exfoliants still get their turns',()=>{const ex=keys('pm').filter(home).filter(k=>pl[k].some(p=>rr(p)==='exfoliant'));
   const gentle=ex.filter(k=>pl[k].some(p=>rr(p)==='exfoliant'&&!p.activeFrom));assert.ok(gentle.length>=ex.length/4,`${gentle.length}/${ex.length}`);
   [/2% BHA/,/Microfoliant/,/Vinopure Blemish/].forEach(re=>{const p=by(re);assert.ok(ex.some(k=>pl[k].some(q=>q.id===p.id)),p.genericName);});});

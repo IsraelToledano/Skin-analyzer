@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-04.1";
+const APP_VERSION = "2026-11-10.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -502,7 +502,10 @@ const canonicalStepOrder = p => isWashOffMask(p) ? 16 : CATEGORY_STEP_ORDER[dete
 // the cap: it neither consumes a slot nor counts in the "too many steps"
 // warning. Expressed once here so every cap site (the scheduler's budget,
 // the add-step bump, the health check) stays consistent.
-const CAP_EXEMPT_TYPES = new Set(["lip"]);
+// Sunscreen is the last morning step and never optional, so it never takes
+// a skincare step's place under the cap either (2026-11-10: room for a
+// morning hydrating layer).
+const CAP_EXEMPT_TYPES = new Set(["lip", "spf"]);
 const countsTowardCap = p => !!p && !CAP_EXEMPT_TYPES.has(detectType(p));
 const capLoad = prods => (prods || []).filter(countsTowardCap).length;
 // Per-day, per-session manual order set by dragging a row in that day's
@@ -565,6 +568,11 @@ const PROCEDURE_TYPES = {
   // one. Tretinoin stays, at most twice in any 7 trip nights and never on
   // the nights in `noRetinoid` (around the dives). No button — Claude adds a
   // trip with a named migration when he mentions one.
+  // A trip can also list exactly what he packed (`kit`: [{ productId,
+  // session: "am" | "pm" | "both" }]) — 2026-11-10: PanOxyl wash,
+  // niacinamide, salicylic acid, moisturizer, sunscreen. Then the trip days
+  // are that kit, every day, in its sessions, and nothing else; the limits
+  // above apply only to a trip without a kit.
   trip: {
     label: "Trip",
     icon: "✈️",
@@ -1285,6 +1293,11 @@ const addStepIrritationRisks = (profile, product, ds, session) => {
   const out = [];
   const nextGroups = strongGroupsOf(product);
   if (!profile || !product || !nextGroups.length) return out;
+  // On a packed trip, the kit IS the routine he chose and it's working
+  // (2026-11-10: PanOxyl wash and salicylic acid daily) — its own steps in
+  // their own sessions don't warn.
+  const kitTrip = tripOn(profile.procedures, ds);
+  if (kitTrip && Array.isArray(kitTrip.kit) && kitTrip.kit.some(k => k && k.productId === product.id && (k.session === session || k.session === "both"))) return out;
   const today = todayStr();
   // Same rules the routine is built on (2026-10-29: the warning used to be
   // stricter than the routine, so steps it scheduled itself — and swap
@@ -3275,6 +3288,94 @@ const MIGRATIONS = [{
     if (!(profile.products || []).some(p => p && /vinohydra/i.test([p.genericName, p.brandName].join(" ")) && p.howTo === OLD)) return profile;
     return { ...profile, products: profile.products.map(p => p && /vinohydra/i.test([p.genericName, p.brandName].join(" ")) && p.howTo === OLD ? { ...p, howTo: NEW } : p) };
   }
+}, {
+  id: "trip_kit_2026_11_v1",
+  // Israel, 2026-11-10: what he actually took on the trip — PanOxyl Acne
+  // Foaming Wash (morning and evening), niacinamide, salicylic acid, Purito
+  // Seoul Mighty Bamboo Panthenol Cream and his sunscreen — and his skin
+  // feels great on it. The trip days become exactly that (PROCEDURE_TYPES.
+  // trip `kit`): niacinamide and sunscreen in the morning, salicylic acid in
+  // the evening, wash and cream both. PanOxyl joins the library, not the
+  // home routine; the bamboo cream becomes his evening moisturizer at home
+  // (more_salicylic_more_hydration_v1). Only while the trip is on.
+  apply: profile => {
+    const t = todayStr();
+    if (t < "2026-11-10" || t > "2026-11-24") return profile;
+    const procs = profile.procedures || [];
+    const tripIdx = procs.findIndex(x => x && x.type === "trip" && x.date === "2026-11-04");
+    if (tripIdx < 0 || Array.isArray(procs[tripIdx].kit)) return profile;
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    let products = profile.products || [];
+    let pan = products.find(p => p && /panoxyl|benzoyl peroxide/.test(hay(p)));
+    if (!pan) {
+      const used = products.concat(profile.removedProducts || []).map(p => p && p.id).filter(id => typeof id === "number");
+      pan = {
+        id: Math.max(41, ...used) + 1,
+        genericName: "Acne Foaming Wash (10% benzoyl peroxide)",
+        brandName: "PanOxyl Acne Foaming Wash",
+        howTo: "Wet your face, lather it on and leave it 1\u20132 minutes, then rinse thoroughly. It bleaches fabric \u2014 pat dry with a white towel and rinse well along the hairline.",
+        session: "am",
+        frequency: "daily",
+        nextDate: t,
+        isOneOff: false,
+        scheduled: false
+      };
+      products = [...products, pan];
+    }
+    let cream = products.find(p => p && /bamboo panthenol/.test(hay(p)));
+    if (!cream) {
+      const used = products.concat(profile.removedProducts || []).map(p => p && p.id).filter(id => typeof id === "number");
+      cream = {
+        id: Math.max(41, ...used) + 1,
+        genericName: "Panthenol Barrier Cream (moisturizer)",
+        brandName: "Purito Seoul Mighty Bamboo Panthenol Cream",
+        session: "pm",
+        frequency: "daily",
+        nextDate: t,
+        isOneOff: false,
+        scheduled: true
+      };
+      products = [...products, cream];
+    }
+    const find = re => products.find(p => p && re.test(hay(p)));
+    const kit = [
+      [pan, "both"],
+      [find(/niacinamide 10%/), "am"],
+      [find(/2% bha liquid/), "pm"],
+      [cream, "both"],
+      [products.find(p => p && p.scheduled && detectType(p) === "spf"), "am"]
+    ].filter(([p]) => p).map(([p, session]) => ({ productId: p.id, session }));
+    const next = procs.slice();
+    next[tripIdx] = { ...procs[tripIdx], kit };
+    return { ...profile, products, procedures: next };
+  }
+}, {
+  id: "more_salicylic_more_hydration_v1",
+  // Israel, 2026-11-10: for home, more salicylic acid and more hydrating
+  // products. Paula's 2% BHA may run twice a week (the full winter week now
+  // gives its exfoliant nights to salicylic first — ROTATION_PLANS.
+  // winterFull); the Ginseng Essence Water moves to the morning — a daily
+  // hydrating layer on damp skin (and more ginseng, as he asked in
+  // October) — while the snail essence and Marine Hyaluronics share the
+  // evenings; the VinoHydra mask goes to three times a week; with the
+  // richer bamboo panthenol cream as his evening moisturizer (added with the
+  // trip kit), the light Red Bean water gel stays for the morning, under
+  // sunscreen.
+  apply: profile => {
+    if (todayStr() < "2026-11-10") return profile;
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const nightCream = (profile.products || []).some(p => p && p.scheduled && /bamboo panthenol/.test(hay(p)) && (p.session === "pm" || p.session === "both"));
+    let changed = false;
+    const products = (profile.products || []).map(p => {
+      if (!p) return p;
+      if (/2% bha liquid/.test(hay(p)) && p.frequency === "weekly") { changed = true; return { ...p, frequency: "twice-weekly" }; }
+      if (/ginseng essence/.test(hay(p)) && p.session === "pm") { changed = true; return { ...p, session: "am" }; }
+      if (/vinohydra/.test(hay(p)) && p.frequency === "twice-weekly") { changed = true; return { ...p, frequency: "three-weekly" }; }
+      if (/red bean water gel/.test(hay(p)) && p.session === "both" && nightCream) { changed = true; return { ...p, session: "am" }; }
+      return p;
+    });
+    return changed ? { ...profile, products } : profile;
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -3905,7 +4006,12 @@ const ROTATION_PLANS = {
   // Full winter (Israel, 2026-11-01: winter is when acids and retinoids can
   // go UP — less sun): back to two exfoliant nights, three retinoid nights,
   // a mask night and one rest night. Starts when he's home from the trip.
-  winterFull: [{ role: "exfoliant", offsetDays: 0 }, { role: "tretinoin", offsetDays: 1 }, { role: "exfoliant", offsetDays: 2 }, { role: "retinol", offsetDays: 3, fallback: "tretinoin" }, { role: "mask", offsetDays: 4 }, { role: "tretinoin", offsetDays: 5 }]
+  // 2026-11-10: salicylic acid did his skin good on the trip and he asked for
+  // more of it at home, so both exfoliant nights go to a leave-on salicylic
+  // (BHA) first; the other acids (AHAs, the peels, Microfoliant) share one
+  // of those nights every two weeks (`othersEvery`), counted from the day
+  // this plan starts.
+  winterFull: [{ role: "exfoliant", offsetDays: 0, prefer: "salicylic", othersEvery: 14 }, { role: "tretinoin", offsetDays: 1 }, { role: "exfoliant", offsetDays: 2, prefer: "salicylic", othersEvery: 14 }, { role: "retinol", offsetDays: 3, fallback: "tretinoin" }, { role: "mask", offsetDays: 4 }, { role: "tretinoin", offsetDays: 5 }]
 };
 const ROTATION_SLOTS = ROTATION_PLANS.winter;
 // The plan in force on `ds`: the latest "rotation" entry on or before it
@@ -3913,6 +4019,17 @@ const ROTATION_SLOTS = ROTATION_PLANS.winter;
 const rotationSlotsOn = (procedures, ds) => {
   const c = (procedures || []).filter(x => x && x.type === "rotation" && isDs(x.date) && x.date <= ds && ROTATION_PLANS[x.plan]).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0).pop();
   return c ? ROTATION_PLANS[c.plan] : ROTATION_SLOTS;
+};
+// The date the plan in force on `ds` started (its "rotation" entry), or null.
+const rotationStartOn = (procedures, ds) => {
+  const c = (procedures || []).filter(x => x && x.type === "rotation" && isDs(x.date) && x.date <= ds && ROTATION_PLANS[x.plan]).map(x => x.date).sort().pop();
+  return c || null;
+};
+// A leave-on salicylic (BHA) exfoliant — not an AHA mix, not a peel.
+const isSalicylicLeaveOn = p => {
+  if (!p) return false;
+  const h = [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+  return /\bbha\b|salicylic/.test(h) && !/\baha\b|glycolic|lactic|mandelic|\bpha\b|peel/.test(h) && !isRinseOffProduct(p);
 };
 // What a trip day leaves out of the routine (see PROCEDURE_TYPES.trip):
 // masks, self-tan and every treatment active except tretinoin, which the
@@ -4052,6 +4169,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
   });
   let pendingCarry = new Set();
   const creditedReturn = new Set();
+  const lastOtherOn = {};
   const schedule = {};
   let cur = epoch;
   let guard = 0;
@@ -4163,7 +4281,26 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     // one); tretinoin keeps its rotation nights, at most `maxRetinoidNights`
     // in any 7 trip nights and none on the nights around the dives.
     const trip = tripOn(procedures, ds);
-    if (trip) {
+    const kit = trip && Array.isArray(trip.kit) ? trip.kit.filter(k => k && byId.has(k.productId)) : null;
+    if (kit) {
+      // A packed trip: what he took, every day, in its sessions — nothing
+      // else (later stages see everything else as excluded and add nothing).
+      (products || []).forEach(p => { if (!placedIds.has(p.id) && !kit.some(k => k.productId === p.id)) excludedToday.add(p.id); });
+      kit.forEach(k => {
+        if (!(k.session === session || k.session === "both")) return;
+        const p = byId.get(k.productId);
+        if (placedIds.has(p.id)) return;
+        dayList.push({ productId: p.id, carried: false });
+        lastServed[p.id] = ds;
+        servedCount[p.id] = (servedCount[p.id] || 0) + 1;
+        placedIds.add(p.id);
+        // like a step he added himself: the next rotation night of the same
+        // role doesn't follow it the very next evening (the BHA of the last
+        // trip night → no acid on the first night home)
+        const role = rotationRoleFor(p);
+        if (role) pinnedRoleOn[role] = ds;
+      });
+    } else if (trip) {
       if (session === "am") recoveryMorning = true;
       const gentleCleanserExists = (products || []).some(p => p.scheduled && detectType(p) === "cleanser" && classifyActiveGroups(p).length === 0);
       const from = trip.date > addDaysStr(ds, -6) ? trip.date : addDaysStr(ds, -6);
@@ -4260,6 +4397,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     // consulted below, so a lip balm never costs a cleanser its slot.
     const capUsed = () => dayList.filter(e => countsTowardCap(byId.get(e.productId))).length;
     ["cleanser", "moisturizer"].forEach(cat => {
+      if (kit) return; // a packed trip day is exactly the kit
       if (capUsed() >= cap) return;
       if (placedGroups.has(`layer:${cat}`)) return;
       const isCat = p => detectType(p) === cat || cat === "cleanser" && detectType(p) === "cleanser_oil";
@@ -4434,7 +4572,19 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
           const last = lastServed[c.p.id];
           return !last || daysBetween(last, ds) >= (FREQ_DAYS[c.p.frequency] || 1);
         });
-        const winner = (ready.length ? ready : candidates)[0].p;
+        let pickFrom = ready.length ? ready : candidates;
+        // A slot that prefers salicylic (winterFull): a salicylic member
+        // takes it, except one night every `othersEvery` days that goes to
+        // the other members in their own fair turn — counted from the last
+        // such night, or from the day the plan started.
+        if (slot.prefer === "salicylic") {
+          const since = lastOtherOn[slot.role] || rotationStartOn(procedures, ds);
+          const othersDue = !since || daysBetween(since, ds) >= (slot.othersEvery || 14);
+          const prefs = pickFrom.filter(c => isSalicylicLeaveOn(c.p)), others = pickFrom.filter(c => !isSalicylicLeaveOn(c.p));
+          if (othersDue && others.length) pickFrom = others;
+          else if (prefs.length) pickFrom = prefs;
+        }
+        const winner = pickFrom[0].p;
         if (conflictsWithToday(winner)) return;
         // A hand-added step of this same role today or last night takes
         // this slot's turn: the rotation night moves to its next slot
@@ -4466,6 +4616,7 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
         servedCount[winner.id] = (servedCount[winner.id] || 0) + 1;
         placedIds.add(winner.id);
         registerPlaced(winner);
+        if (slot.prefer === "salicylic" && !isSalicylicLeaveOn(winner)) lastOtherOn[slot.role] = ds;
       });
     }
     // 2e. Retinoid nights: the retinoid goes on clean, dry skin with nothing
@@ -6090,6 +6241,18 @@ const RoutineBlock = ({
 // ─── DAY SHEET ─────────────────────────────────────────────────────────────────
 // DayAgenda: inline (non-modal) single-day AM/PM routine view, used by the
 // calendar's "day" toggle.
+// The trip note for a packed trip: what he took, by session, and the
+// sunscreen reminder. Null for a trip without a kit.
+const tripKitText = (trip, products) => {
+  if (!trip || !Array.isArray(trip.kit) || !trip.kit.length) return null;
+  const name = id => {
+    const p = (products || []).find(x => x.id === id);
+    return p ? (p.brandName && !/^(the ordinary|beauty of joseon|caudalie|anua)$/i.test(p.brandName.trim()) ? p.brandName.split(/\s+/).slice(0, 3).join(" ") : p.genericName) : null;
+  };
+  const list = s => trip.kit.filter(k => k && (k.session === s || k.session === "both")).map(k => name(k.productId)).filter(Boolean).join(", ");
+  const am = list("am"), pm = list("pm");
+  return `What you packed, every day. Morning: ${am || "\u2014"}. Evening: ${pm || "\u2014"}. Reapply sunscreen every 2 hours outdoors and after swimming. Everything else waits until you're home.`;
+};
 // Israel, 2026-11-02: he skips clay-mask nights because he finds out at
 // bedtime, too tired to wait out the mask. So a day with a wash-off (clay)
 // mask on the evening plan says so from the morning on, until the mask is
@@ -6154,7 +6317,7 @@ const DayAgenda = ({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: { fontWeight: 700, marginBottom: 2 }
-  }, "\u2708\uFE0F Trip routine \u2014 until ", short(trip.until)), "Strong sun, so a light routine: cleanse, hydrate, moisturize, sunscreen. Reapply sunscreen every 2 hours outdoors and after swimming. Tretinoin twice a week at most", dives ? `, none ${short(dives[0])}\u2013${short(dives[dives.length - 1])} (dives)` : "", ". No acids, vitamin C, masks or self-tan until you're home."), /*#__PURE__*/React.createElement(RoutineBlock, {
+  }, "\u2708\uFE0F Trip routine \u2014 until ", short(trip.until)), tripKitText(trip, profile.products) || ["Strong sun, so a light routine: cleanse, hydrate, moisturize, sunscreen. Reapply sunscreen every 2 hours outdoors and after swimming. Tretinoin twice a week at most", dives ? `, none ${short(dives[0])}\u2013${short(dives[dives.length - 1])} (dives)` : "", ". No acids, vitamin C, masks or self-tan until you're home."].join("")), /*#__PURE__*/React.createElement(RoutineBlock, {
     prods: amProds,
     session: "am",
     accent: T.accent,
