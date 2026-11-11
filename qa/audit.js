@@ -69,7 +69,9 @@ function audit(get,profile,planObj,days){
     list.forEach(p=>{if(p.recovery)return;counts[p.id]=counts[p.id]||{am:0,pm:0};counts[p.id][session]++;});
     // fair-turn checks look at the scheduler's own picks: a step carried over
     // from a skip is the user's doing, not the rotation's
-    list.forEach(p=>{if(p.recovery||p.carried)return;fair[p.id]=fair[p.id]||{am:0,pm:0};fair[p.id][session]++;});
+    // (and a packed trip's days are what he packed, not the rotation's turns)
+    const kitOn=d=>(profile.procedures||[]).some(t=>t&&t.type==='trip'&&Array.isArray(t.kit)&&t.date<=d&&d<=t.until);
+    if(!kitOn(key.split(':')[0]))list.forEach(p=>{if(p.recovery||p.carried)return;fair[p.id]=fair[p.id]||{am:0,pm:0};fair[p.id][session]++;});
     checkDay(get,key,list,add);
   });
   // R9 frequency adherence

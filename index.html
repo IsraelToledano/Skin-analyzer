@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-10.1";
+const APP_VERSION = "2026-11-11.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -3375,6 +3375,62 @@ const MIGRATIONS = [{
       return p;
     });
     return changed ? { ...profile, products } : profile;
+  }
+}, {
+  id: "trip_kit_add_marine_v1",
+  // Israel, 2026-11-11: he packed The Ordinary Marine Hyaluronics too — a
+  // hydrating serum for the trip evenings, after the salicylic acid and
+  // before the cream (evenings only: no product runs in the evening and
+  // again the next morning).
+  apply: profile => {
+    const t = todayStr();
+    if (t < "2026-11-11" || t > "2026-11-24") return profile;
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const marine = (profile.products || []).find(p => p && /marine hyaluronics/.test(hay(p)));
+    const procs = profile.procedures || [];
+    const i = procs.findIndex(x => x && x.type === "trip" && x.date === "2026-11-04" && Array.isArray(x.kit));
+    if (!marine || i < 0 || procs[i].kit.some(k => k && k.productId === marine.id)) return profile;
+    const kit = procs[i].kit.slice();
+    kit.splice(3, 0, { productId: marine.id, session: "pm" });
+    const next = procs.slice();
+    next[i] = { ...procs[i], kit };
+    return { ...profile, procedures: next };
+  }
+}, {
+  id: "vitc_puradour_to_traderjoes_v1",
+  // Israel, 2026-11-11: the Pura d'or 20% vitamin C ran out. He kept it in
+  // the routine until then (2026-10-10) with the Trader Joe's Vitamin C
+  // Serum waiting — RANK_DATA's "Best" and the Pura d'or's "better" option:
+  // 15% L-ascorbic acid + 1% vitamin E + 0.5% ferulic, fragrance-free. The
+  // Pura d'or goes to Recently deleted (logs and pins keep its history);
+  // the Trader Joe's takes its slot: mornings, twice a week.
+  apply: profile => {
+    if (todayStr() < "2026-11-11") return profile;
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    const products = profile.products || [];
+    const old = products.find(p => p && /pura d.or/.test(hay(p)) && /vitamin c/.test(hay(p)));
+    const hasTj = products.some(p => p && /trader joe/.test(hay(p)) && /vitamin c/.test(hay(p)));
+    if (!old && hasTj) return profile;
+    let next = products;
+    let removed = profile.removedProducts || [];
+    if (old) {
+      next = next.filter(p => p !== old);
+      removed = [{ ...old, removedAt: todayStr(), notes: "Finished (ran out) 2026-11-11." }, ...removed.filter(p => p && p.id !== old.id)].slice(0, TRASH_LIMIT);
+    }
+    if (!hasTj) next = [...next, {
+      id: "traderjoes-vitamin-c-v1",
+      genericName: "Vitamin C Serum (15% L-ascorbic acid + vitamin E + ferulic)",
+      brandName: "Trader Joe's Vitamin C Serum",
+      notes: "15% L-ascorbic acid, 1% vitamin E, 0.5% ferulic acid, fragrance-free. Replaces the finished Pura d'or 20% in its slot. Keep it closed, cool and out of light.",
+      session: old ? old.session || "am" : "am",
+      frequency: old ? old.frequency || "twice-weekly" : "twice-weekly",
+      nextDate: todayStr(),
+      isOneOff: false,
+      scheduled: true,
+      waitInstruction: "Wait 1-2 minutes after the toner, until your skin isn't wet (on wet skin vitamin C stings more). Then give it about a minute to sink in before the moisturizer.",
+      howTo: "A few drops pressed into dry skin, away from the eye area."
+    }];
+    return { ...profile, products: next, removedProducts: removed };
   }
 }];
 const applyMigrations = profile => {
