@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-11.1";
+const APP_VERSION = "2026-11-11.2";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -7946,6 +7946,77 @@ const ReportButton = ({ profile, tabName }) => {
       style: { pointerEvents: "auto", background: T.text, color: "#fff", fontSize: 12, padding: "7px 11px", borderRadius: 10, maxWidth: 240, fontFamily: "'Inter',sans-serif" }
     }, msg));
 };
+// Israel, 2026-11-11: Claude's proposals (UX, UI, the monthly check-up)
+// live on their own page, where he accepts or rejects each one. The list is
+// code — Claude adds cards with a push; his decisions are data
+// (profile.suggestionDecisions: { [id]: { decision: "accept" | "reject",
+// at } }) and reach Claude with the next ✦ report. An id is never reused:
+// a built or withdrawn card is removed from the list, its decision stays.
+const IDEA_GROUPS = [["ux", "חוויית שימוש"], ["ui", "עיצוב"], ["mech", "בדיקה חודשית"]];
+const IDEAS = [
+  { id: "ux-week-glance", group: "ux", title: "מבט שבועי", body: "פס בראש היומן שמראה מה מחכה בכל ערב השבוע: טרטינואין, חומצה, מסכה או מנוחה. ככה לא מגלים מסכת חימר רק לפני השינה." },
+  { id: "ux-compact-rows", group: "ux", title: "שורות קצרות ברוטינה", body: "כל שלב בשורה אחת. Swap ו־Skip נפתחים בלחיצה על השלב במקום לתפוס מקום בכל שורה. היום חמישה שלבים לא נכנסים במסך אחד." },
+  { id: "ux-finished", group: "ux", title: "כפתור \"נגמר\" למוצר", body: "לחיצה אחת כשמוצר נגמר: הוא יוצא מהרוטינה, החלופה שמחכה על המדף נכנסת במקומו, ו־Claude רואה את זה בדוח הבא." },
+  { id: "ux-missed-quiet", group: "ux", title: "ימים שלא סומנו", body: "ברשימה, כל שלב שלא סומן מקבל \"Missed\" באדום, גם בימי טיול. במקום זה: אפור שקט, וכפתור \"סמן את כל היום כבוצע\" לימים שעברו." },
+  { id: "ux-brand-first", group: "ux", title: "שם המוצר קודם", body: "להציג \"Red Bean Water Gel\" במקום \"water gel moisturizer · Beauty of Joseon Red Bean Water Gel\". שמות קצרים שמזהים את הבקבוק מהר." },
+  { id: "ux-cleanup", group: "ux", title: "ניקוי שאריות", body: "להסיר את כפתור Auto-Schedule ואת ההערה על \"Claude.ai version\" בעמוד הפרופיל. שניהם מגרסה ישנה, והיום Claude קובע את הרוטינה." },
+  { id: "ui-night-badge", group: "ui", title: "סוג הלילה על כותרת הערב", body: "תג קטן ליד Evening Routine: ליל טרטינואין, ליל חומצה, ליל מסכה או ליל מנוחה. רואים מיד איזה ערב זה, גם כשהרשימה סגורה." },
+  { id: "ui-fewer-chips", group: "ui", title: "פחות תגיות בכל שורה", body: "הקטגוריה והדירוג (Best / Good) יופיעו רק כשפותחים שלב. בשורה עצמה יישאר רק מה שחריג, כמו דירוג Bad." },
+  { id: "ui-header", group: "ui", title: "כותרת רזה", body: "כפתור ✦ עובר לכותרת, כי היום הוא צף ומכסה טקסט. Sync ורענון נכנסים לתפריט ⋯, כי משתמשים בהם לעיתים רחוקות." },
+  { id: "ui-progress", group: "ui", title: "טבעת התקדמות", body: "טבעת קטנה ליד התאריך שמתמלאת כשמסמנים שלבים, ומספר הימים ברצף שבהם הרוטינה הושלמה." },
+  { id: "ui-dark", group: "ui", title: "מצב כהה בערב", body: "צבעים כהים אוטומטית אחרי השקיעה, או לפי הגדרת הטלפון. נעים יותר לעיניים ברוטינת הערב." },
+  { id: "ui-hebrew", group: "ui", title: "ממשק בעברית", body: "כל האפליקציה בעברית ומימין לשמאל. שמות המוצרים נשארים באנגלית. זה שינוי גדול יחסית." },
+  { id: "mech-monthly-ask", group: "mech", title: "בדיקה חודשית כשאתה פונה", body: "האפליקציה זוכרת מתי הייתה הבדיקה האחרונה. אחרי 30 יום מופיעה כאן תזכורת עם כפתור לשליחת דוח, וגם בלי הכפתור, בפנייה הראשונה שלך ל־Claude אחרי 30 יום (כל שאלה) הוא מריץ את הבדיקה: שהרוטינה תקינה, מה סימנת מול מה שתוכנן (דילוגים, החלפות, תוספות), ואם יצאו מוצרים טובים יותר מההמלצות. התוצאות מגיעות לעמוד הזה." },
+  { id: "mech-auto", group: "mech", title: "בדיקה עצמאית ב־1 בכל חודש", body: "משימה מתוזמנת שרצה לבד: מריצה את כל בדיקות האפליקציה, מחפשת מוצרים טובים יותר מההמלצות הקיימות, ומוסיפה הצעות לעמוד הזה. מגבלה: היא לא רואה מה סימנת, כי הנתונים נמצאים רק בטלפון. לכן היא משלימה את הבדיקה־בפנייה ולא מחליפה אותה." },
+  { id: "mech-backup", group: "mech", title: "גיבוי אוטומטי של הנתונים", body: "כדי שהבדיקה העצמאית תראה גם מה סימנת, האפליקציה תגבה את הנתונים לאחסון פרטי שלך. דורש הגדרה חד־פעמית מצדך, והנתונים יוצאים מהטלפון." },
+  { id: "mech-rules", group: "mech", title: "מה משתנה לבד ומה רק מוצע", body: "שינויים קטנים Claude עושה לבד ומדווח: תדירות של מוצר שדילגת עליו שוב ושוב, או ערב קבוע שנוח לך יותר. שינויים גדולים, כמו להוסיף, להוציא או להחליף מוצר, מופיעים כאן כהצעה ומחכים לאישור שלך." },
+  { id: "mech-checkin", group: "mech", title: "שאלה שבועית: איך העור?", body: "פעם בשבוע, שאלה אחת עם ארבע תשובות: טוב, יבש, מגורה או שמנוני. זה נותן לבדיקה החודשית מידע על העור עצמו ולא רק על מה שסומן. (זה לא כפתור הגירוי שדחית: זו שאלה קבועה, לא דיווח חריג.)" }
+];
+// { open, accepted, rejected } over the cards currently in the list.
+const suggestionSummary = profile => {
+  const d = profile && profile.suggestionDecisions || {};
+  const of = x => IDEAS.filter(s => (d[s.id] && d[s.id].decision) === x).length;
+  const accepted = of("accept"), rejected = of("reject");
+  return { open: IDEAS.length - accepted - rejected, accepted, rejected };
+};
+const decideSuggestion = (profile, id, decision) => {
+  const cur = { ...(profile && profile.suggestionDecisions || {}) };
+  if (decision === "accept" || decision === "reject") cur[id] = { decision, at: todayStr() };
+  else delete cur[id];
+  return { suggestionDecisions: cur };
+};
+const SuggestionsTab = ({ profile, onUpdate }) => {
+  const h = React.createElement;
+  const d = profile.suggestionDecisions || {};
+  const sum = suggestionSummary(profile);
+  const btn = (label, color, soft, onClick, testid) => h("button", {
+    onClick, "data-testid": testid,
+    style: { background: soft, color, border: `1.5px solid ${color}55`, borderRadius: 100, padding: "7px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "'Inter',sans-serif" }
+  }, label);
+  return h("div", { dir: "rtl", "data-testid": "suggestions", style: { display: "flex", flexDirection: "column", gap: 14, fontFamily: "'Inter',sans-serif", textAlign: "right" } },
+    h(Card, null,
+      h("div", { style: { fontSize: 20, fontWeight: 700, color: T.text, marginBottom: 4 } }, "הצעות לשיפור"),
+      h("div", { "data-testid": "suggestions-summary", style: { fontSize: 13, color: T.muted, lineHeight: 1.5 } }, `${sum.open} ממתינות · ${sum.accepted} אושרו · ${sum.rejected} נדחו`),
+      h("div", { style: { fontSize: 13, color: T.text, lineHeight: 1.5, marginTop: 8 } }, "אשר או דחה כל הצעה. כשתסיים, לחץ על ✦ ושלח ל־Claude: מה שאישרת ייבנה, ומה שדחית לא יחזור.")),
+    IDEA_GROUPS.map(([g, label]) => h("div", { key: g, style: { display: "flex", flexDirection: "column", gap: 10 } },
+      h("div", { style: { fontSize: 12, fontWeight: 700, color: T.muted, letterSpacing: "0.04em", padding: "4px 6px 0" } }, label),
+      IDEAS.filter(s => s.group === g).map(s => {
+        const dec = d[s.id] && d[s.id].decision;
+        return h("div", {
+          key: s.id, "data-testid": `suggestion-${s.id}`, "data-decision": dec || "open",
+          style: { background: T.card, border: `1px solid ${dec === "accept" ? T.green + "66" : T.border}`, borderRadius: 16, padding: "14px 16px", opacity: dec === "reject" ? 0.55 : 1 }
+        },
+          h("div", { style: { fontSize: 15, fontWeight: 700, color: T.text, marginBottom: 4 } }, s.title),
+          h("div", { style: { fontSize: 13.5, color: T.text, lineHeight: 1.55, marginBottom: 12 } }, s.body),
+          dec
+            ? h("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+                h("span", { style: { fontSize: 13, fontWeight: 700, color: dec === "accept" ? T.green : T.muted } }, dec === "accept" ? "✓ אושר" : "✕ נדחה"),
+                h("button", { onClick: () => onUpdate(decideSuggestion(profile, s.id, null)), "data-testid": `undo-${s.id}`, style: { background: "none", border: "none", color: T.muted, fontSize: 12.5, textDecoration: "underline", cursor: "pointer", fontFamily: "'Inter',sans-serif" } }, "בטל"))
+            : h("div", { style: { display: "flex", gap: 10 } },
+                btn("✓ אשר", T.green, T.greenSoft, () => onUpdate(decideSuggestion(profile, s.id, "accept")), `accept-${s.id}`),
+                btn("✕ דחה", T.muted, T.faint, () => onUpdate(decideSuggestion(profile, s.id, "reject")), `reject-${s.id}`)));
+      }))));
+};
 function App() {
   const [profile, setProfile] = useState(() => {
     const s = load();
@@ -7977,7 +8048,7 @@ function App() {
     prevProfile.current = profile;
   }, [profile]);
   const [activeTab, setActiveTab] = useState(0);
-  const TABS = ["📅 Calendar", "👤 Profile", "🧴 Products"];
+  const TABS = ["📅 Calendar", "👤 Profile", "🧴 Products", "💡 Ideas"];
   const [imgLoading, setImgLoading] = useState(false);
   const [imgError, setImgError] = useState("");
   // Meta cache-control tags are advisory — iOS's standalone home-screen
@@ -8319,6 +8390,11 @@ function App() {
           profile: profile,
           onUpdate: update
         });
+      case 3:
+        return /*#__PURE__*/React.createElement(SuggestionsTab, {
+          profile: profile,
+          onUpdate: update
+        });
       default:
         return null;
     }
@@ -8465,7 +8541,18 @@ function App() {
       fontFamily: "'Inter',sans-serif",
       transition: "all 0.15s"
     }
-  }, tab))), /*#__PURE__*/React.createElement("div", {
+  }, tab, i === 3 && suggestionSummary(profile).open > 0 && /*#__PURE__*/React.createElement("span", {
+    "data-testid": "ideas-badge",
+    style: {
+      marginLeft: 5,
+      background: T.accent,
+      color: "#fff",
+      borderRadius: 100,
+      padding: "1px 6px",
+      fontSize: 10,
+      fontWeight: 700
+    }
+  }, suggestionSummary(profile).open)))), /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 860,
       margin: "0 auto",

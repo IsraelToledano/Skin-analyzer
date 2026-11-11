@@ -1,0 +1,33 @@
+// Ideas tab: accept, reject, undo; the badge counts what's open; decisions
+// survive a reload (2026-11-11).
+const {chromium}=require('playwright-core');const serve=require('./server');
+const {profile,P}=require('./fixture');const {loadApp}=require('./harness');
+const MIG=loadApp().MIGRATIONS.map(m=>m.id);const IDEAS=require('./sim').load([2026,10,11])('IDEAS');const N=IDEAS.length,A=IDEAS[0].id,B=IDEAS[1].id;
+let fails=0;const ok=(c,m)=>{console.log(c?'  ok   ':'  FAIL ',m);if(!c)fails++};
+(async()=>{const server=await serve(8160);
+const b=await chromium.launch({executablePath:require('./chrome'),args:['--no-sandbox']});
+const ctx=await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2});
+await ctx.addInitScript(seed=>{if(!localStorage.getItem('skinritual_v4'))localStorage.setItem('skinritual_v4',JSON.stringify({v:4,profile:seed}));},profile({products:[P(1,'Gel Cleanser','both','daily')],migrations:MIG}));
+const page=await ctx.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.goto('http://localhost:8160/');await page.waitForSelector('[data-testid=usage-toggle]');
+const badge=page.locator('[data-testid=ideas-badge]');
+ok((await badge.innerText())===String(N),'the Ideas tab shows how many are waiting');
+const tabs=await page.locator('button',{hasText:'Ideas'}).first().boundingBox();ok(tabs&&tabs.x+tabs.width<=390,'the fourth tab fits the phone width');
+await page.locator('button',{hasText:'Ideas'}).first().click();await page.waitForSelector('[data-testid=suggestions]');
+ok((await page.locator('[data-testid=suggestions]').getAttribute('dir'))==='rtl','the page is right-to-left');
+ok((await page.locator('[data-testid^=suggestion-]').count())===N,'every card is shown');
+await page.screenshot({path:'ideas.png'});
+await page.locator(`[data-testid=accept-${A}]`).click();await page.locator(`[data-testid=reject-${B}]`).click();await page.waitForTimeout(200);
+ok((await page.locator(`[data-testid=suggestion-${A}]`).getAttribute('data-decision'))==='accept','accept marks the card');
+ok((await page.locator(`[data-testid=suggestion-${B}]`).getAttribute('data-decision'))==='reject','reject marks the card');
+ok((await page.locator('[data-testid=suggestions-summary]').innerText()).startsWith(`${N-2} `),'the summary counts down');
+ok((await badge.innerText())===String(N-2),'the badge counts down');
+await page.waitForTimeout(700);await page.reload();await page.waitForSelector('[data-testid=usage-toggle]');
+ok((await badge.innerText())===String(N-2),'decisions survive a reload');
+const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('skinritual_v4')).profile.suggestionDecisions);
+ok(stored&&stored[A]&&stored[A].decision==='accept'&&stored[B].decision==='reject','they are saved in the profile (and so in the report)');
+await page.locator('button',{hasText:'Ideas'}).first().click();await page.locator(`[data-testid=undo-${A}]`).click();await page.waitForTimeout(200);
+ok((await page.locator(`[data-testid=suggestion-${A}]`).getAttribute('data-decision'))==='open','undo reopens the card');
+await page.screenshot({path:'ideas-decided.png'});
+ok(errors.length===0,'no page errors '+(errors[0]||''));
+await b.close();server.close();console.log(fails?`\n${fails} failed`:'\nall passed');process.exit(fails?1:0);})();
