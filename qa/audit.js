@@ -96,7 +96,10 @@ function audit(get,profile,planObj,days){
   Object.entries(planObj).forEach(([key,list])=>{
     const d=key.split(':')[0];const t=tripOf(d);if(!t)return;
     if(Array.isArray(t.kit)){const sess=key.split(':')[1];
-      const want=t.kit.filter(k=>k.session===sess||k.session==='both').map(k=>k.productId).filter(id=>profile.products.some(p=>p.id===id));
+      // a step that takes turns ({every, turn}, counted from the trip's first day) is only wanted on its own days
+      const gap=Math.round((Date.UTC(...d.split('-').map((x,i)=>i===1?x-1:+x))-Date.UTC(...t.date.split('-').map((x,i)=>i===1?x-1:+x)))/864e5);
+      const myTurn=k=>!(Number.isInteger(k.every)&&k.every>1)||gap%k.every===(Number.isInteger(k.turn)?k.turn:0)%k.every;
+      const want=t.kit.filter(k=>(k.session===sess||k.session==='both')&&myTurn(k)).map(k=>k.productId).filter(id=>profile.products.some(p=>p.id===id));
       list.forEach(p=>{if(!p.pinned&&!want.includes(p.id))add('high',key,`"${nameOf(p)}" on a trip day, not in what he packed`)});
       want.forEach(id=>{if(!list.some(p=>p.id===id))add('high',key,`packed "${nameOf(profile.products.find(p=>p.id===id))}" missing`)});
       return;}

@@ -127,7 +127,7 @@ const T = {
 const STORAGE_KEY = "skinritual_v4"; // same key/version as the Claude.ai version's export format
 // Bump this on every push so it's obvious whether a device has the latest code.
 // Format: YYYY-MM-DD.N (N = push count that day, resets each day)
-const APP_VERSION = "2026-11-11.2";
+const APP_VERSION = "2026-11-16.1";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const SKIN_TYPES = ["Dry", "Oily", "Combination", "Normal", "Sensitive", "Acne-prone"];
@@ -205,7 +205,18 @@ const ACTIVE_CATEGORY_GROUP_NAMES = {
   exfoliant: "acid-exfoliant",
   benzoyl: "benzoyl"
 };
-const classifyActiveGroups = p => Array.from(productCategories(p)).map(cat => ACTIVE_CATEGORY_GROUP_NAMES[cat]).filter(Boolean);
+// A vitamin C DERIVATIVE at skin pH (3-O-ethyl ascorbic acid — the Beauty of
+// Joseon Light On Serum he packed, 2026-11-16) is not the "strong vitamin C"
+// this table is about. Those rules are for low-pH L-ascorbic acid: it stings
+// on skin an acid or retinoid has thinned, benzoyl peroxide oxidizes it, and
+// it is kept apart from niacinamide. An ethylated derivative is stable and
+// isn't acidic, so it carries no "vitamin-c" conflict group — it may share a
+// morning with niacinamide and follow a wash. It is still a vitamin C serum
+// for its category, its place in the order (detectType: "vitc") and the
+// one-vitamin-C-per-session rule (classifySingletonGroups). Named in the
+// product's name, never read from notes.
+const isVitaminCDerivative = p => !!p && /vitamin c derivative|ethyl ascorbic/i.test([p.genericName, p.brandName].filter(Boolean).join(" "));
+const classifyActiveGroups = p => Array.from(productCategories(p)).map(cat => ACTIVE_CATEGORY_GROUP_NAMES[cat]).filter(Boolean).filter(g => !(g === "vitamin-c" && isVitaminCDerivative(p)));
 // Adds the pseudo-group "selftan" (not a productCategories ingredient
 // category — self-tan is a product TYPE, from detectType, not an active
 // ingredient) so a single function can answer "what does this product need
@@ -267,6 +278,9 @@ const classifySingletonGroups = p => {
   // this exclusivity is for. Without this, a daily acid cleanser quietly
   // locked the real exfoliant rotation out of every night it ran.
   const groups = isRinseOffProduct(p) ? [] : classifyActiveGroups(p);
+  // a gentle vitamin C derivative conflicts with nothing, but two vitamin C
+  // serums in one session is still the same step twice
+  if (!isRinseOffProduct(p) && isVitaminCDerivative(p) && productCategories(p).has("vitaminc")) groups.push("vitamin-c");
   const type = detectType(p);
   if (LAYER_SINGLETON_TYPES.has(type)) {
     groups.push(`layer:${type}`);
@@ -471,7 +485,10 @@ const CATEGORY_STEP_ORDER = {
   toner: 20,
   mist: 20,
   essence: 30,
-  vitc: 35,
+  // Vitamin C goes on before niacinamide when the two share a morning (a
+  // gentle derivative can — see isVitaminCDerivative). They used to tie at
+  // 35, which left the order to whichever product id sorted first.
+  vitc: 34,
   niacinamide: 35,
   retinoid: 45,
   serum: 50,
@@ -573,6 +590,11 @@ const PROCEDURE_TYPES = {
   // niacinamide, salicylic acid, moisturizer, sunscreen. Then the trip days
   // are that kit, every day, in its sessions, and nothing else; the limits
   // above apply only to a trip without a kit.
+  // A kit entry can take turns with another: { every: 2, turn: 0 } runs on
+  // the trip days whose count from the trip's first day leaves remainder
+  // `turn` (kitEntryOn). 2026-11-16: the Light On vitamin C serum and The
+  // Ordinary GF 15% share the mornings that way — their makers rule out
+  // using the two together.
   trip: {
     label: "Trip",
     icon: "✈️",
@@ -594,6 +616,17 @@ const PROCEDURE_TYPES = {
 const isDs = v => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 // The trip covering `ds` (morning and evening), or null.
 const tripOn = (procedures, ds) => (procedures || []).find(x => x && x.type === "trip" && isDs(x.date) && isDs(x.until) && isDs(ds) && x.date <= ds && ds <= x.until) || null;
+// Does this kit entry run on `ds` in `session`? Every day in its session,
+// unless it takes turns (`every` days, on remainder `turn`, counted from the
+// trip's first day).
+const kitEntryOn = (trip, k, ds, session) => {
+  if (!trip || !k || !(k.session === session || k.session === "both")) return false;
+  const n = Number.isInteger(k.every) && k.every > 1 ? k.every : 1;
+  if (n === 1) return true;
+  if (!isDs(trip.date) || !isDs(ds)) return false;
+  const turn = Number.isInteger(k.turn) ? k.turn : 0;
+  return ((daysBetween(trip.date, ds) % n) + n) % n === ((turn % n) + n) % n;
+};
 // The skin break covering `ds` (morning and evening), or null.
 const skinBreakOn = (procedures, ds) => (procedures || []).find(x => {
   const def = x && PROCEDURE_TYPES[x.type];
@@ -902,6 +935,16 @@ const RANK_DATA = [
     cons: ["Its thickening-gum base (tamarindus, carrageenan, acacia, xanthan) can pill under some moisturizers or SPF — apply on fully dry skin and give it a minute before the next step"],
     general: "10% niacinamide with 1% zinc PCA in a fragrance-free gel base — one of the two most commonly cited OTC niacinamide benchmarks (the other being Yeouth's, which this replaces). Reduces oil, refines the look of pores, and calms redness.",
     alternatives: [] },
+  { id: 42, match: ["light on serum"], tag: "good",
+    pros: ["Its vitamin C is 3-O-ethyl ascorbic acid, a stable derivative — it doesn't oxidize in the tube the way L-ascorbic acid does, so heat and travel don't spoil it", "Centella extract base, fragrance-free; gentle enough to wear with niacinamide", "Light and non-sticky under sunscreen"],
+    cons: ["A derivative has to be converted in the skin, and the evidence that it fades marks and limits sun damage is thinner than for L-ascorbic acid with vitamin E and ferulic acid", "Beauty of Joseon advises against layering it with AHA, BHA or PHA products"],
+    general: "A brightening serum built on a stable vitamin C derivative (3-O-ethyl ascorbic acid) in centella extract. Gentler and longer-lasting in the tube than pure vitamin C, with less proof behind it.",
+    alternatives: [{"name": "Trader Joe's Vitamin C Serum", "relation": "better", "price": "You own it", "where": "Your shelf, at home", "compare": {"this": ["Stable: no browning, fine in a hot bag", "No sting, fine with niacinamide"], "other": ["15% L-ascorbic acid + vitamin E + ferulic acid — the best-evidenced vitamin C combination for post-acne marks", "Proven to add protection against sun damage under sunscreen"]}, "note": "For results on marks and scarring the L-ascorbic acid serum is the stronger one. This one is the better traveller and the gentler of the two."}] },
+  { id: 43, match: ["gf 15%"], tag: "good",
+    pros: ["Three plant-made growth-factor peptides (EGF, IGF and TGF types) — the only product on your shelf aimed purely at firmness and fine lines", "Free of fragrance, alcohol, oil and silicone, at a skin-neutral pH of 5.5–6.5: very little irritation risk", "A small fraction of the price of other growth-factor serums"],
+    cons: ["The evidence for growth factors applied to the skin is early — mostly small or maker-run studies, far behind tretinoin", "The Ordinary says not to combine it with direct acids, salicylic acid or direct vitamin C, which is most of an acne routine"],
+    general: "A water-light serum with a 15% solution of plant-made growth-factor peptides, meant to signal repair in ageing skin. Low risk, with a modest and still uncertain benefit: a complement to a retinoid, not a substitute for one.",
+    alternatives: [{"name": "SkinMedica TNS Advanced+ Serum", "relation": "no-better-option", "compare": {"this": ["Same idea: growth-factor signalling for firmness and lines", "A small fraction of the price"], "other": ["The growth-factor serum with the most published testing"]}, "note": "The better-studied serums of this kind cost many times more than 2x this one, and none has evidence close to tretinoin's."}] },
   { id: 38, match: ["trader joe", "dewy"], tag: "good",
     pros: ["Niacinamide sits third on the ingredient list — a real, meaningful dose, not a trace amount", "Fragrance-free, and its several hyaluronic-acid forms add genuine surface hydration"],
     cons: ["Duplicates the niacinamide in The Ordinary serum, at a dose the label doesn't state", "Also overlaps the existing hydrating-essence step (Snail 96 / Marine Hyaluronics) on the hyaluronic-acid side", "Contains titanium dioxide, mica and tin oxide — cosmetic shimmer pigments for a 'dewy glow' finish, not treatment ingredients; it's formulated closer to a tinted glow serum than a plain niacinamide treatment"],
@@ -1297,7 +1340,7 @@ const addStepIrritationRisks = (profile, product, ds, session) => {
   // (2026-11-10: PanOxyl wash and salicylic acid daily) — its own steps in
   // their own sessions don't warn.
   const kitTrip = tripOn(profile.procedures, ds);
-  if (kitTrip && Array.isArray(kitTrip.kit) && kitTrip.kit.some(k => k && k.productId === product.id && (k.session === session || k.session === "both"))) return out;
+  if (kitTrip && Array.isArray(kitTrip.kit) && kitTrip.kit.some(k => k && k.productId === product.id && kitEntryOn(kitTrip, k, ds, session))) return out;
   const today = todayStr();
   // Same rules the routine is built on (2026-10-29: the warning used to be
   // stricter than the routine, so steps it scheduled itself — and swap
@@ -3432,6 +3475,75 @@ const MIGRATIONS = [{
     }];
     return { ...profile, products: next, removedProducts: removed };
   }
+}, {
+  id: "trip_kit_add_lighton_gf_v1",
+  // Israel, 2026-11-16 (from the trip, with photos): he also has the Beauty
+  // of Joseon Light On Serum (Centella + Vita C) and The Ordinary GF 15%
+  // Solution with him — "add them to the trip routine". (The Marine
+  // Hyaluronics in the third photo is already in the kit.)
+  // Both go in the MORNING, because the evening has the salicylic acid:
+  // Beauty of Joseon advises against layering the Light On with AHA/BHA,
+  // and The Ordinary lists direct acids and salicylic acid as not to be
+  // used with the GF 15%. And they take TURNS, one each morning, because
+  // The Ordinary also rules out the GF 15% with direct vitamin C (its own
+  // range counts ethylated ascorbic acid, the Light On's vitamin C, there).
+  // That also keeps the morning at five steps under the sunscreen.
+  // Even trip days (Nov 16, 18 … 24): Light On, then niacinamide. Odd days:
+  // niacinamide, then GF 15%. Both join the library, not the home routine.
+  // Only while the trip is on.
+  apply: profile => {
+    const t = todayStr();
+    if (t < "2026-11-16" || t > "2026-11-24") return profile;
+    const procs = profile.procedures || [];
+    const i = procs.findIndex(x => x && x.type === "trip" && x.date === "2026-11-04" && Array.isArray(x.kit));
+    if (i < 0) return profile;
+    const hay = p => [p.genericName, p.brandName].filter(Boolean).join(" ").toLowerCase();
+    let products = profile.products || [];
+    const taken = id => products.concat(profile.removedProducts || []).some(p => p && p.id === id);
+    const freeId = base => { let id = base, n = 2; while (taken(id)) id = `${base}-${n++}`; return id; };
+    let light = products.find(p => p && /light on serum/.test(hay(p)));
+    if (!light) {
+      light = {
+        id: freeId("boj-light-on-serum-v1"),
+        genericName: "Vitamin C Derivative Serum (ethyl ascorbic acid)",
+        brandName: "Light On Serum (Beauty of Joseon)",
+        notes: "Centella + Vita C, 30 ml. A stable vitamin C derivative (3-O-ethyl ascorbic acid) in centella extract, fragrance-free. Gentler than the Trader Joe's L-ascorbic acid serum, so it can share a morning with niacinamide. Beauty of Joseon advises against layering it with AHA/BHA/PHA \u2014 mornings only while salicylic acid runs in the evening. On the trip it takes turns with the GF 15% Solution. Not in the home routine yet.",
+        howTo: "A thin layer over face and neck right after washing, before the niacinamide. Give it a minute to sink in.",
+        session: "am",
+        frequency: "daily",
+        nextDate: t,
+        isOneOff: false,
+        scheduled: false
+      };
+      products = [...products, light];
+    }
+    let gf = products.find(p => p && /gf 15%/.test(hay(p)));
+    if (!gf) {
+      gf = {
+        id: freeId("ordinary-gf-15-v1"),
+        genericName: "Growth Factor Peptide Serum",
+        brandName: "GF 15% Solution (The Ordinary)",
+        notes: "30 ml. A 15% solution of plant-made growth-factor peptides (EGF, IGF, TGF types), water-light, pH 5.5\u20136.5, fragrance-free. The Ordinary says not to use it with direct acids, salicylic acid or direct vitamin C \u2014 so mornings only while salicylic acid runs in the evening, and not on the same morning as a vitamin C serum. On the trip it takes turns with the Light On Serum. Not in the home routine yet.",
+        howTo: "A few drops over face and neck, after the niacinamide and before the cream.",
+        session: "am",
+        frequency: "daily",
+        nextDate: t,
+        isOneOff: false,
+        scheduled: false
+      };
+      products = [...products, gf];
+    }
+    const has = p => procs[i].kit.some(k => k && k.productId === p.id);
+    if (has(light) && has(gf) && products === (profile.products || [])) return profile;
+    const kit = procs[i].kit.slice();
+    // listed where they sit in the morning: after the wash
+    const at = () => { const w = kit.findIndex(k => k && k.session === "both"); return w < 0 ? 0 : w + 1; };
+    if (!has(light)) kit.splice(at(), 0, { productId: light.id, session: "am", every: 2, turn: 0 });
+    if (!has(gf)) kit.splice(kit.findIndex(k => k && k.productId === light.id) + 1, 0, { productId: gf.id, session: "am", every: 2, turn: 1 });
+    const next = procs.slice();
+    next[i] = { ...procs[i], kit };
+    return { ...profile, products, procedures: next };
+  }
 }];
 const applyMigrations = profile => {
   if (!profile) return profile;
@@ -4341,9 +4453,11 @@ const buildSessionSchedule = (products, logs, session, epoch, toDate, cap = SESS
     if (kit) {
       // A packed trip: what he took, every day, in its sessions — nothing
       // else (later stages see everything else as excluded and add nothing).
-      (products || []).forEach(p => { if (!placedIds.has(p.id) && !kit.some(k => k.productId === p.id)) excludedToday.add(p.id); });
+      // A packed step whose turn (or session) this isn't is out too, so a
+      // skipped one can't carry onto the other's morning.
+      (products || []).forEach(p => { if (!placedIds.has(p.id) && !kit.some(k => k.productId === p.id && kitEntryOn(trip, k, ds, session))) excludedToday.add(p.id); });
       kit.forEach(k => {
-        if (!(k.session === session || k.session === "both")) return;
+        if (!kitEntryOn(trip, k, ds, session)) return;
         const p = byId.get(k.productId);
         if (placedIds.has(p.id)) return;
         dayList.push({ productId: p.id, carried: false });
@@ -6305,7 +6419,24 @@ const tripKitText = (trip, products) => {
     const p = (products || []).find(x => x.id === id);
     return p ? (p.brandName && !/^(the ordinary|beauty of joseon|caudalie|anua)$/i.test(p.brandName.trim()) ? p.brandName.split(/\s+/).slice(0, 3).join(" ") : p.genericName) : null;
   };
-  const list = s => trip.kit.filter(k => k && (k.session === s || k.session === "both")).map(k => name(k.productId)).filter(Boolean).join(", ");
+  // Steps that take turns are listed once, together: "A or B (alternate
+  // mornings)".
+  const list = s => {
+    const on = trip.kit.filter(k => k && (k.session === s || k.session === "both") && name(k.productId));
+    const turnsOf = k => Number.isInteger(k.every) && k.every > 1 ? k.every : 1;
+    const seen = new Set();
+    const parts = [];
+    on.forEach(k => {
+      const n = turnsOf(k);
+      if (n === 1) { parts.push(name(k.productId)); return; }
+      if (seen.has(n)) return;
+      seen.add(n);
+      const names = on.filter(x => turnsOf(x) === n).map(x => name(x.productId));
+      const when = s === "am" ? "mornings" : "evenings";
+      parts.push(names.length > 1 ? `${names.join(" or ")} (alternate ${when})` : `${names[0]} (every ${n === 2 ? "other day" : n + " days"})`);
+    });
+    return parts.join(", ");
+  };
   const am = list("am"), pm = list("pm");
   return `What you packed, every day. Morning: ${am || "\u2014"}. Evening: ${pm || "\u2014"}. Reapply sunscreen every 2 hours outdoors and after swimming. Everything else waits until you're home.`;
 };

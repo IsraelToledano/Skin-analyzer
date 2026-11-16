@@ -30,8 +30,9 @@ t('no-op when the product is not in the library; empty/malformed input',()=>{
   const p={products:[{id:1,genericName:'Gel Cleanser',brandName:''}]};assert.strictEqual(M().apply(p),p);
   const e={};assert.strictEqual(M().apply(e),e);
 });
-t('his real export: scheduled after migrations, other products untouched',()=>{
-  const raw=JSON.parse(Buffer.from(fs.readFileSync('/mnt/user-data/uploads/attachment.txt','utf8').trim(),'base64').toString()).profile;
+const EXPORT='/mnt/user-data/uploads/attachment.txt';
+if(!fs.existsSync(EXPORT))console.log('  (his export file is not here \u2014 real-export case skipped)');else t('his real export: scheduled after migrations, other products untouched',()=>{
+  const raw=JSON.parse(Buffer.from(fs.readFileSync(EXPORT,'utf8').trim(),'base64').toString()).profile;
   const before=get('applyMigrations')({...raw,migrations:raw.migrations.concat(['schedule_cosrx_aha_bha_toner_v1'])});
   const after=get('applyMigrations')(raw);
   const c=after.products.find(x=>x.id===26);assert.ok(c.scheduled||c.winterPaused);
